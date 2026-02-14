@@ -1,20 +1,27 @@
 import { auth } from '@/firebaseConfig';
 import { Stack, useRouter, useSegments } from 'expo-router';
 import { onAuthStateChanged, User } from 'firebase/auth';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, StyleSheet, View } from 'react-native';
 
 export default function RootLayout() {
   const [initializing, setInitializing] = useState(true);
   const [user, setUser] = useState<User | null>(null);
+  const hasInitialized = useRef(false);
   const router = useRouter();
   const segments = useSegments();
 
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (authUser) => {
+    const unsubscribe = onAuthStateChanged(auth, (authUser: User | null) => {
+      console.log('Auth state changed:', authUser);
       setUser(authUser);
-      if (initializing) setInitializing(false);
+      if (!hasInitialized.current) {
+        console.log('Initializing complete');
+        hasInitialized.current = true;
+        setInitializing(false);
+      }
     });
+    console.log('Setting up auth listener');
     return unsubscribe;
   }, []);
 
@@ -32,7 +39,7 @@ export default function RootLayout() {
         if (segments[1] !== 'verify') {
           router.replace('/(auth)/verify');
         }
-      } else if (inAuthGroup || !firstSegment || firstSegment === 'index') {
+      } else if (inAuthGroup || !firstSegment) {
         router.replace('/(tabs)');
       }
     }
@@ -46,10 +53,9 @@ export default function RootLayout() {
     );
   }
 
+  // Render only the index screen first to isolate routing issues on web
   return (
     <Stack screenOptions={{ headerShown: false }}>
-      <Stack.Screen name="(auth)" options={{ headerShown: false }} />
-      <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
       <Stack.Screen name="index" options={{ headerShown: false }} />
     </Stack>
   );
@@ -61,5 +67,12 @@ const styles = StyleSheet.create({
     justifyContent: 'center', 
     alignItems: 'center', 
     backgroundColor: '#000000' 
+  }
+  ,
+  testContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#000000',
   }
 });

@@ -1,11 +1,11 @@
-import React, { useState, useRef } from 'react';
-import { View, StyleSheet, TextInput, TouchableOpacity, Text, ScrollView, Pressable, Animated, Alert } from 'react-native';
 import { useColorScheme } from '@/hooks/use-color-scheme';
-import { MaterialIcons, FontAwesome } from '@expo/vector-icons';
+import { MaterialIcons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
+import React, { useRef, useState } from 'react';
+import { Alert, Animated, Pressable, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 // 1. Added sendEmailVerification to the imports
-import { createUserWithEmailAndPassword, sendEmailVerification } from 'firebase/auth'; 
-import { auth, db } from '@/firebaseConfig'; 
+import { auth, db } from '@/firebaseConfig';
+import { createUserWithEmailAndPassword, sendEmailVerification } from 'firebase/auth';
 import { doc, setDoc } from "firebase/firestore";
 
 export default function SignUpScreen() {
@@ -16,6 +16,7 @@ export default function SignUpScreen() {
   const [pwStrength, setPwStrength] = useState({ score: 0, label: 'Very Weak', color: '#D9534F' });
   const strengthOpacity = useRef(new Animated.Value(0)).current;
   const strengthTimer = useRef<any>(null);
+  const AnimatedAny: any = Animated;
   const [isTyping, setIsTyping] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [errors, setErrors] = useState<{ email?: string; password?: string; confirm?: string }>({});
@@ -59,7 +60,7 @@ export default function SignUpScreen() {
   // --- CORE SIGNUP LOGIC ---
   const handleSignUp = async () => {
     const nextErrors: any = {};
-    
+
     if (!email.trim()) {
       nextErrors.email = 'Email is required';
     } else if (!validateEmailFormat(email)) {
@@ -71,24 +72,9 @@ export default function SignUpScreen() {
     } else if (password.length < 6) {
       nextErrors.password = 'Password must be at least 6 characters';
     }
-    
+
     if (password !== confirm) {
       nextErrors.confirm = 'Passwords do not match';
-
-    try {
-  const userCredential = await createUserWithEmailAndPassword(auth, email.trim(), password);
-  
-  // TRIGGER THE EMAIL IMMEDIATELY
-  await sendEmailVerification(userCredential.user);
-  
-  Alert.alert(
-    "Check your Inbox",
-    "A verification link has been sent to your Gmail. Please click it to activate your account."
-  );
-  router.replace('/login');
-} catch (error: any) {
-  // Handle existing email errors here
-}
     }
 
     if (Object.keys(nextErrors).length > 0) {
@@ -97,38 +83,34 @@ export default function SignUpScreen() {
     }
 
     setIsSubmitting(true);
-    
+
     try {
-      // 1. Create Account
       const userCredential = await createUserWithEmailAndPassword(auth, email.trim(), password);
       const user = userCredential.user;
 
-      // 2. SEND VERIFICATION EMAIL (Proves the Gmail exists)
       await sendEmailVerification(user);
 
-      // 3. Save to Firestore
-      await setDoc(doc(db, "users", user.uid), {
+      await setDoc(doc(db, 'users', user.uid), {
         email: user.email,
-        username: email.split('@')[0], 
+        username: email.split('@')[0],
         createdAt: new Date().toISOString(),
         rating: 5.0,
         tradeCount: 0,
-        emailVerified: false // Track verification status
+        emailVerified: false,
       });
-      
+
       Alert.alert(
-        "Verify Your Gmail", 
+        'Verify Your Gmail',
         "Account created! We've sent a verification link to your Gmail. Please click it before logging in."
       );
-      router.replace('/login'); 
-
+      router.replace('/login');
     } catch (error: any) {
-      if (error.code === 'auth/email-already-in-use') {
+      if (error?.code === 'auth/email-already-in-use') {
         setErrors({ email: 'This Gmail is already registered.' });
-      } else if (error.code === 'auth/invalid-email') {
+      } else if (error?.code === 'auth/invalid-email') {
         setErrors({ email: 'This email is not valid or does not exist.' });
       } else {
-        Alert.alert("Signup Error", error.message);
+        Alert.alert('Signup Error', error?.message || String(error));
       }
     } finally {
       setIsSubmitting(false);
@@ -153,7 +135,7 @@ export default function SignUpScreen() {
             keyboardType="email-address"
             placeholderTextColor="#999999"
             value={email}
-            onChangeText={(text) => {
+            onChangeText={(text: string) => {
               setEmail(text);
               setErrors(e => ({...e, email: undefined}));
             }}
@@ -179,14 +161,14 @@ export default function SignUpScreen() {
         {errors.password ? <Text style={styles.errorText}>{errors.password}</Text> : null}
 
         {/* Password Strength UI */}
-        {isTyping && (
-           <Animated.View style={[styles.strengthRow, { opacity: strengthOpacity }] as any}>
+          {isTyping && (
+            <AnimatedAny.View style={[styles.strengthRow, { opacity: strengthOpacity }] as any}>
               <View style={styles.strengthBar}>
-                <View style={[styles.strengthFill, { width: `${(pwStrength.score / 4) * 100}%`, backgroundColor: pwStrength.color }]} />
+               <View style={[styles.strengthFill, { width: `${(pwStrength.score / 4) * 100}%`, backgroundColor: pwStrength.color }]} />
               </View>
               <Text style={[styles.strengthLabel, { color: pwStrength.color }]}>{pwStrength.label}</Text>
-           </Animated.View>
-        )}
+            </AnimatedAny.View>
+          )}
 
         {/* Confirm Password */}
         <View style={[styles.inputContainer, { backgroundColor: inputBgColor }]}> 
@@ -197,7 +179,7 @@ export default function SignUpScreen() {
             placeholderTextColor="#999999"
             secureTextEntry={!showPassword}
             value={confirm}
-            onChangeText={(text) => {
+            onChangeText={(text: string) => {
               setConfirm(text);
               setErrors(e => ({...e, confirm: undefined}));
             }}
