@@ -4,16 +4,9 @@
     "strict": true,
     "baseUrl": ".",
     "jsx": "react-native",
-    "types": [
-      "react",
-      "react-native"
-    ],
+    "types": ["react", "react-native"],
     "skipLibCheck": true,
-    "paths": {
-      "@/*": [
-        "./*"
-      ]
-    }
+    "paths": {"@/*": ["./*"]}
   },
   "include": [
     "**/*.ts",

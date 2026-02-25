@@ -1,14 +1,33 @@
 import { auth } from '@/firebaseConfig';
-import { Redirect } from 'expo-router';
+import { useRouter } from 'expo-router';
+import React, { useEffect } from 'react';
+import { StyleSheet, Text, View } from 'react-native';
 
 export default function Index() {
-  const user = auth.currentUser;
+  const router = useRouter();
 
-  // If there is no user, send them to login
-  if (!user) {
-    return <Redirect href="/(auth)/login" />;
-  }
+  useEffect(() => {
+    const t = setTimeout(() => {
+      try {
+        const user = auth.currentUser;
+        if (!user) router.replace('/(auth)/login');
+      } catch (e) {
+        console.warn('Deferred navigation error in tabs/index:', e);
+      }
+    }, 50);
 
-  // If there is a user, send them to the main app
-  return <Redirect href="/(tabs)" />;
+    return () => clearTimeout(t);
+  }, [router]);
+
+  // Render a simple home placeholder for the tabs index to avoid redirect loops
+  return (
+    <View style={styles.container}>
+      <Text style={styles.text}>Home</Text>
+    </View>
+  );
 }
+
+const styles = StyleSheet.create({
+  container: { flex: 1, justifyContent: 'center', alignItems: 'center' },
+  text: { fontSize: 20, fontWeight: '600' }
+});

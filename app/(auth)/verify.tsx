@@ -28,9 +28,9 @@ export default function VerifyEmailScreen() {
       await user.reload();
 
       const freshUser = auth.currentUser;
-      if (freshUser?.emailVerified) {
-        Alert.alert('Verified!', 'Your email is confirmed. Welcome!');
-        router.replace('/(tabs)');
+          if (freshUser?.emailVerified) {
+            Alert.alert('Verified!', 'Your email is confirmed. Welcome!');
+            router.replace('/(tabs)');
       } else {
         Alert.alert('Not Verified', 'We could not detect the verification yet. Please make sure you clicked the link and then return to the app.');
       }
@@ -52,8 +52,8 @@ export default function VerifyEmailScreen() {
             const user = auth.currentUser;
             if (!user) return;
             await user.reload();
-            if (auth.currentUser?.emailVerified) {
-              router.replace('/(tabs)');
+              if (auth.currentUser?.emailVerified) {
+                router.replace('/(tabs)');
             }
           } catch (err) {
             console.error('AppState verification check failed', err);
@@ -89,7 +89,7 @@ export default function VerifyEmailScreen() {
       </View>
 
       <TextAny style={styles.title}>Check your Gmail!</TextAny>
-      <TextAny style={styles.text}>
+      <TextAny style={styles.text}>``
         We sent a verification link to:<TextAny>{"\n"}</TextAny>
         <TextAny style={styles.emailText}>{auth.currentUser?.email}</TextAny>
       </TextAny>

@@ -103,7 +103,7 @@ export default function SignUpScreen() {
         'Verify Your Gmail',
         "Account created! We've sent a verification link to your Gmail. Please click it before logging in."
       );
-      router.replace('/login');
+      router.replace('/(auth)/verify');
     } catch (error: any) {
       if (error?.code === 'auth/email-already-in-use') {
         setErrors({ email: 'This Gmail is already registered.' });
@@ -135,10 +135,7 @@ export default function SignUpScreen() {
             keyboardType="email-address"
             placeholderTextColor="#999999"
             value={email}
-            onChangeText={(text: string) => {
-              setEmail(text);
-              setErrors(e => ({...e, email: undefined}));
-            }}
+            onChangeText={setEmail}
           />
         </View>
         {errors.email ? <Text style={styles.errorText}>{errors.email}</Text> : null}
@@ -194,7 +191,7 @@ export default function SignUpScreen() {
           </Animated.View>
         </Pressable>
 
-        <TouchableOpacity onPress={() => router.push('/login')}>
+        <TouchableOpacity onPress={() => router.push('/(auth)/login')}>
           <Text style={[styles.backlogin, { color: '#2F2F6F' }]}>Back to Login</Text>
         </TouchableOpacity>
       </View>

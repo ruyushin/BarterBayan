@@ -1,9 +1,9 @@
-import React, { useEffect, useState } from 'react';
-import { View, Text, StyleSheet, ActivityIndicator, TouchableOpacity } from 'react-native';
 import { auth, db } from '@/firebaseConfig';
-import { doc, getDoc } from 'firebase/firestore';
-import { signOut } from 'firebase/auth';
 import { useRouter } from 'expo-router';
+import { signOut } from 'firebase/auth';
+import { doc, getDoc } from 'firebase/firestore';
+import React, { useEffect, useState } from 'react';
+import { ActivityIndicator, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 
 export default function ProfileScreen() {
   const [userData, setUserData] = useState<any>(null);
@@ -33,7 +33,7 @@ export default function ProfileScreen() {
 
   const handleLogout = async () => {
     await signOut(auth);
-    router.replace('/login');
+    router.replace('/(auth)/login');
   };
 
   if (loading) return <ActivityIndicator style={{ flex: 1 }} />;

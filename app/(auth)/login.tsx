@@ -1,12 +1,19 @@
-import React, { useState, useRef } from 'react';
-import { 
-  View, StyleSheet, TextInput, TouchableOpacity, Text, 
-  ScrollView, Pressable, Animated, Alert, ActivityIndicator 
-} from 'react-native';
-import { MaterialIcons, FontAwesome } from '@expo/vector-icons';
-import { useRouter } from 'expo-router';
-import { signInWithEmailAndPassword, sendEmailVerification, signOut } from 'firebase/auth';
 import { auth } from '@/firebaseConfig';
+import { FontAwesome, MaterialIcons } from '@expo/vector-icons';
+import { useRouter } from 'expo-router';
+import { sendEmailVerification, signInWithEmailAndPassword, signOut } from 'firebase/auth';
+import React, { useRef, useState } from 'react';
+import {
+  ActivityIndicator,
+  Alert,
+  Animated,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput, TouchableOpacity,
+  View
+} from 'react-native';
 
 export default function LoginScreen() {
   const router = useRouter();

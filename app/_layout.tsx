@@ -1,63 +1,35 @@
 import { auth } from '@/firebaseConfig';
-import { Stack, useRouter, useSegments } from 'expo-router';
+import { Stack } from 'expo-router';
 import { onAuthStateChanged, User } from 'firebase/auth';
 import { useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, StyleSheet, View } from 'react-native';
+import { StyleSheet } from 'react-native';
 
 export default function RootLayout() {
   const [initializing, setInitializing] = useState(true);
-  const [user, setUser] = useState<User | null>(null);
   const hasInitialized = useRef(false);
-  const router = useRouter();
-  const segments = useSegments();
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (authUser: User | null) => {
-      console.log('Auth state changed:', authUser);
-      setUser(authUser);
       if (!hasInitialized.current) {
-        console.log('Initializing complete');
         hasInitialized.current = true;
         setInitializing(false);
       }
     });
-    console.log('Setting up auth listener');
     return unsubscribe;
   }, []);
 
-  useEffect(() => {
-    if (initializing) return;
-
-    // We check the first segment to see if we are in the auth group
-    const firstSegment = segments[0];
-    const inAuthGroup = firstSegment === '(auth)';
-
-    if (!user && !inAuthGroup) {
-      router.replace('/(auth)/login');
-    } else if (user) {
-      if (!user.emailVerified) {
-        if (segments[1] !== 'verify') {
-          router.replace('/(auth)/verify');
-        }
-      } else if (inAuthGroup || !firstSegment) {
-        router.replace('/(tabs)');
-      }
-    }
-  }, [user, segments, initializing]);
-
-  if (initializing) {
-    return (
-      <View style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color="#2F2F6F" />
-      </View>
-    );
-  }
-
-  // Render only the index screen first to isolate routing issues on web
+  // Always render the navigator immediately so the Root Layout mounts
+  // (avoids "Attempted to navigate before mounting the Root Layout" errors).
+  // We keep the `initializing` state so you can show a loading UI inside
+  // your screens if needed, but do not block rendering the navigator.
+  const StackAny: any = Stack;
   return (
-    <Stack screenOptions={{ headerShown: false }}>
-      <Stack.Screen name="index" options={{ headerShown: false }} />
-    </Stack>
+    <StackAny screenOptions={{ headerShown: false }} initialRouteName="index">
+      <StackAny.Screen name="index" />
+      <StackAny.Screen name="(auth)" options={{ headerShown: false }} />
+      <StackAny.Screen name="(tabs)" options={{ headerShown: false }} />
+      <StackAny.Screen name="modal" options={{ presentation: 'modal' }} />
+    </StackAny>
   );
 }
 
@@ -67,12 +39,5 @@ const styles = StyleSheet.create({
     justifyContent: 'center', 
     alignItems: 'center', 
     backgroundColor: '#000000' 
-  }
-  ,
-  testContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: '#000000',
   }
 });

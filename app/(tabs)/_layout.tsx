@@ -1,56 +1,55 @@
-import { useEffect, useState } from 'react';
-import { Stack, useRouter, useSegments } from 'expo-router';
-import { onAuthStateChanged } from 'firebase/auth';
-import { auth } from '@/firebaseConfig'; 
-import { ActivityIndicator, View } from 'react-native';
+import { Link, Tabs } from 'expo-router';
+import { Pressable } from 'react-native';
 
-export default function RootLayout() {
-  const [initializing, setInitializing] = useState(true);
-  const [user, setUser] = useState<any>(null);
-  const router = useRouter();
-  const segments = useSegments();
+import { HapticTab } from '@/components/haptic-tab';
+import { IconSymbol } from '@/components/ui/icon-symbol';
+import { Colors } from '@/constants/theme';
+import { useColorScheme } from '@/hooks/use-color-scheme';
 
-  useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (authUser) => {
-      setUser(authUser);
-      if (initializing) setInitializing(false);
-    });
-    return unsubscribe;
-  }, []);
+export default function TabLayout() {
+  const colorScheme = useColorScheme();
+  const TabsAny: any = Tabs;
 
-  useEffect(() => {
-    if (initializing) return;
-
-    const inAuthGroup = segments[0] === '(auth)'; // If you put login/signup in an (auth) folder
-
-    if (!user || !user.emailVerified) {
-      // If not logged in or not verified, force them to login
-      // Check to prevent infinite redirect loops
-      if (segments[0] !== 'login' && segments[0] !== 'signup') {
-        router.replace('/login');
-      }
-    } else if (user && user.emailVerified) {
-      // If logged in and verified, don't let them stay on login/signup
-      if (segments[0] === 'login' || segments[0] === 'signup') {
-        router.replace('/');
-      }
-    }
-  }, [user, segments, initializing]);
-
-  if (initializing) {
-    return (
-      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
-        <ActivityIndicator size="large" color="#2F2F6F" />
-      </View>
-    );
-  }
-
-  // Use Stack instead of Tabs for the Root if you want to hide the bottom bar everywhere
   return (
-    <Stack screenOptions={{ headerShown: false }}>
-      <Stack.Screen name="index" />
-      <Stack.Screen name="login" />
-      <Stack.Screen name="signup" />
-    </Stack>
+    <TabsAny
+      screenOptions={{
+        tabBarActiveTintColor: Colors[colorScheme ?? 'light'].tint,
+        headerShown: false,
+        tabBarButton: HapticTab,
+        tabBarStyle: {
+          borderTopColor: Colors[colorScheme ?? 'light'].tabIconDefault,
+          backgroundColor: Colors[colorScheme ?? 'light'].background,
+        },
+      }}
+    >
+      <TabsAny.Screen
+        name="index"
+        options={{
+          title: 'Home',
+          tabBarIcon: ({ color }) => <IconSymbol size={28} name="house.fill" color={color} />,
+          headerRight: () => (
+            <Link href="/modal" asChild>
+              <Pressable>
+                {({ pressed }) => (
+                  <IconSymbol
+                    size={25}
+                    name="gear"
+                    color={Colors[colorScheme ?? 'light'].text}
+                    style={{ marginRight: 15, opacity: pressed ? 0.5 : 1 }}
+                  />
+                )}
+              </Pressable>
+            </Link>
+          ),
+        }}
+      />
+      <TabsAny.Screen
+        name="profile"
+        options={{
+          title: 'Profile',
+          tabBarIcon: ({ color }) => <IconSymbol size={28} name="person.fill" color={color} />,
+        }}
+      />
+    </TabsAny>
   );
 }
