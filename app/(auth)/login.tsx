@@ -24,6 +24,7 @@ export default function LoginScreen() {
   const [showPassword, setShowPassword] = useState(false);
   const [keepLoggedIn, setKeepLoggedIn] = useState(false); 
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null); // display login errors
   
   // --- Animation Refs ---
   const loginAnim = useRef(new Animated.Value(0)).current;
@@ -47,8 +48,10 @@ export default function LoginScreen() {
 
   // --- Handlers ---
   const handleLogin = async () => {
+    setError(null);
     const trimmed = email.trim();
     if (!trimmed || !password) {
+      setError('Please enter your Gmail and Password.');
       Alert.alert('Incomplete Form', 'Please enter your Gmail and Password.');
       return;
     }
@@ -73,7 +76,18 @@ export default function LoginScreen() {
       }
       router.replace('/(tabs)'); 
     } catch (err: any) {
-      Alert.alert("Login Failed", "The Gmail or Password you entered is incorrect.");
+      // inspect the Firebase error code and show a specific message
+      let message = 'The Gmail or Password you entered is incorrect.';
+      if (err.code === 'auth/user-not-found') {
+        message = 'No account exists with that Gmail address.';
+      } else if (err.code === 'auth/wrong-password') {
+        message = 'The password you entered is wrong.';
+      } else if (err.code === 'auth/invalid-email') {
+        message = 'Please enter a valid Gmail address.';
+      }
+      // additional codes could be handled here
+      setError(message);
+      Alert.alert('Login Failed', message);
     } finally {
       setIsSubmitting(false);
     }
@@ -115,7 +129,7 @@ export default function LoginScreen() {
               placeholderTextColor="#999999"
               secureTextEntry={!showPassword}
               value={password}
-              onChangeText={setPassword}
+              onChangeText={text => { setPassword(text); setError(null); }}
             />
             <TouchableOpacity onPress={() => setShowPassword(!showPassword)}>
               <MaterialIcons
@@ -125,6 +139,9 @@ export default function LoginScreen() {
               />
             </TouchableOpacity>
           </View>
+
+          {/* inline error message placed directly below password */}
+          {error && <Text style={styles.errorText}>{error}</Text>}
 
           <View style={styles.optionsRow}>
             <TouchableOpacity 
@@ -242,6 +259,7 @@ const styles = StyleSheet.create({
   signupContainer: { flexDirection: 'row', justifyContent: 'center', paddingBottom: 20 },
   signupText: { fontSize: 15 },
   signupLink: { color: '#2F2F6F', fontSize: 15, fontWeight: 'bold' },
+  errorText: { color: '#ff3333', textAlign: 'center', marginBottom: 12 },
   overlay: {
     ...StyleSheet.absoluteFillObject,
     backgroundColor: 'rgba(0,0,0,0.8)',

@@ -1,12 +1,16 @@
+import { auth } from '@/firebaseConfig';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { MaterialIcons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
+import { sendPasswordResetEmail } from 'firebase/auth';
 import React, { useState } from 'react';
 import { Alert, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 
 export default function ForgotPasswordScreen() {
   const router = useRouter();
   const [email, setEmail] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [sent, setSent] = useState(false);
   const colorScheme = useColorScheme();
 
   const isDark = colorScheme === 'dark';
@@ -14,7 +18,7 @@ export default function ForgotPasswordScreen() {
   const textColor = '#000000';
   const inputBgColor = '#f0f0f0';
 
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
     const trimmed = email.trim();
     if (!trimmed) {
       Alert.alert('Enter your email', 'Please provide the email associated with your account.');
@@ -25,12 +29,26 @@ export default function ForgotPasswordScreen() {
       return;
     }
 
-    // Placeholder - will call Firebase's sendPasswordResetEmail once backend is added
-    Alert.alert(
-      'Reset link sent',
-      'If an account exists for that email, you will receive instructions to reset your password.'
-    );
-    router.back();
+    setIsSubmitting(true);
+    try {
+      await sendPasswordResetEmail(auth, trimmed);
+      setSent(true);
+      Alert.alert(
+        'Reset link sent',
+        'If an account exists for that email, you will receive instructions to reset your password.'
+      );
+      // do not navigate away; keep user on screen until they update
+    } catch (err: any) {
+      let msg = 'Unable to send reset email. Please try again later.';
+      if (err.code === 'auth/invalid-email') {
+        msg = 'Please enter a valid email address.';
+      } else if (err.code === 'auth/user-not-found') {
+        msg = 'No account found with that email.';
+      }
+      Alert.alert('Error', msg);
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   return (
@@ -52,9 +70,22 @@ export default function ForgotPasswordScreen() {
           />
         </View>
 
-        <TouchableOpacity style={styles.resetButton} onPress={handleSubmit}>
-          <Text style={styles.resetButtonText}>Send Reset Link</Text>
+        <TouchableOpacity
+          style={[styles.resetButton, sent && styles.disabledButton]}
+          onPress={handleSubmit}
+          disabled={isSubmitting || sent}
+        >
+          <Text style={styles.resetButtonText}>
+            {isSubmitting ? 'Sending...' : sent ? 'Link Sent' : 'Send Reset Link'}
+          </Text>
         </TouchableOpacity>
+
+        {sent && (
+          <Text style={styles.sentText}>
+            Check your email for the reset instructions. After you change the password
+            you can return to the login screen.
+          </Text>
+        )}
 
         <TouchableOpacity onPress={() => router.back()}>
           <Text style={styles.backLink}>Back to Log-in</Text>
@@ -113,5 +144,13 @@ const styles = StyleSheet.create({
   backLink: {
     color: '#2F2F6F',
     textAlign: 'center',
+  },
+  sentText: {
+    textAlign: 'center',
+    marginVertical: 15,
+    color: '#333',
+  },
+  disabledButton: {
+    opacity: 0.6,
   },
 });

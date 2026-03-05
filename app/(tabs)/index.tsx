@@ -99,14 +99,7 @@ export default function HomeScreen() {
         </ScrollView>
       </ScrollView>
 
-      {/* Bottom Navigation */}
-      <View style={styles.bottomNav}>
-        <NavIcon icon="home" label="Home" active />
-        <NavIcon icon="search" label="Explore" />
-        <NavIcon icon="swap-horizontal" label="Trade" />
-        <NavIcon icon="mail" label="Inbox" />
-        <NavIcon icon="person" label="Account" />
-      </View>
+
     </View>
   );
 }
@@ -122,10 +115,11 @@ const Category = ({ icon, label }) => (
 
 const Item = ({ image, name }) => (
   <View style={styles.itemCard}>
-    <Image source={image} style={styles.itemImage} />
+    <Image source={image} style={styles.itemImage} resizeMode="contain" />
     <Text style={styles.itemText}>{name}</Text>
   </View>
 );
+
 
 const Section = ({ title }) => (
   <View style={styles.sectionHeader}>
@@ -134,14 +128,6 @@ const Section = ({ title }) => (
   </View>
 );
 
-const NavIcon = ({ icon, label, active }) => (
-  <View style={styles.navItem}>
-    <Ionicons name={icon} size={24} color={active ? "#4B4BAA" : "#999"} />
-    <Text style={{ color: active ? "#4B4BAA" : "#999", fontSize: 12 }}>
-      {label}
-    </Text>
-  </View>
-);
 
 /* STYLES */
 
@@ -223,21 +209,10 @@ const styles = StyleSheet.create({
   itemImage: {
     width: "100%",
     height: 80,
-    resizeMode: "contain",
   },
   itemText: {
     textAlign: "center",
     marginTop: 5,
     fontSize: 12,
-  },
-  bottomNav: {
-    flexDirection: "row",
-    justifyContent: "space-around",
-    paddingVertical: 10,
-    borderTopWidth: 1,
-    borderColor: "#eee",
-  },
-  navItem: {
-    alignItems: "center",
   },
 });
