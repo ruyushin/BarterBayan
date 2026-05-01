@@ -1,7 +1,7 @@
 {
   "expo": {
     "name": "BarterBayan_V1.0",
-    "slug": "BarterBayan_V1.0",
+    "slug": "barterbayan",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
@@ -10,6 +10,7 @@
     "newArchEnabled": true,
     "ios": {
       "supportsTablet": true
+      
     },
     "android": {
       "adaptiveIcon": {
