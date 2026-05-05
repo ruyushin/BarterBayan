@@ -1,4 +1,4 @@
-import { DarkTheme, DefaultTheme, ThemeProvider } from '@react-navigation/native';
+import { DefaultTheme, ThemeProvider } from '@react-navigation/native';
 import { Stack, useRouter, useSegments } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { onAuthStateChanged } from 'firebase/auth';
@@ -7,15 +7,13 @@ import { ActivityIndicator, View } from 'react-native';
 import 'react-native-reanimated';
 import { auth } from '../firebaseConfig';
 
-import { useColorScheme } from '@/hooks/use-color-scheme';
-
 export default function RootLayout() {
-  const colorScheme = useColorScheme();
   const [isLoading, setIsLoading] = useState(true);
   const [user, setUser] = useState<any>(null);
   const segments = useSegments();
   const router = useRouter();
 
+  // Listen for Auth changes
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
       setUser(currentUser);
@@ -25,6 +23,7 @@ export default function RootLayout() {
     return () => unsubscribe();
   }, []);
 
+  // Handle Protected Routes
   useEffect(() => {
     if (isLoading) return;
 
@@ -32,11 +31,8 @@ export default function RootLayout() {
     const authScreen = segments[1] || '';
 
     if (!user && !inAuthGroup) {
-      // If the user is not logged in and not in the auth screens, redirect to login
       router.replace('/login');
     } else if (user && inAuthGroup && user.emailVerified) {
-      // If the user is logged in and verified, and trying to access auth screens, redirect to home
-      // but allow sign-up flow to show its success modal first, then user can explicitly go to login.
       if (authScreen !== 'signup') {
         router.replace('/');
       }
@@ -45,22 +41,24 @@ export default function RootLayout() {
 
   if (isLoading) {
     return (
-      <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
-        <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
-          <ActivityIndicator size="large" />
+      <ThemeProvider value={DefaultTheme}>
+        <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#FFFFFF' }}>
+          <ActivityIndicator size="large" color="#5D5FEF" />
         </View>
       </ThemeProvider>
     );
   }
 
   return (
-    <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
+    /* We use DefaultTheme here to force the white background layout */
+    <ThemeProvider value={DefaultTheme}>
       <Stack screenOptions={{ headerShown: false }}>
         <Stack.Screen name="(auth)" />
         <Stack.Screen name="(tabs)" />
-        <Stack.Screen name="modal" options={{ presentation: 'modal', title: 'Modal' }} />
+        <Stack.Screen name="modal" options={{ presentation: 'modal', title: 'Guide' }} />
       </Stack>
-      <StatusBar style="auto" />
+      {/* "dark" ensures the clock/battery text is black on your white theme */}
+      <StatusBar style="dark" />
     </ThemeProvider>
   );
 }

@@ -1,14 +1,10 @@
-﻿import React, { useEffect, useState } from 'react';
+﻿import React from 'react';
 import {
   ActivityIndicator,
-  Alert,
   FlatList,
-  Image,
   ScrollView,
   StyleSheet,
   Text,
-  TextInput,
-  TouchableOpacity,
   View,
 } from 'react-native';
 
@@ -16,7 +12,6 @@ import { ThemedView } from '@/components/themed-view';
 import { Ionicons } from '@expo/vector-icons';
 import { Link } from 'expo-router';
 
-import * as ImagePicker from 'expo-image-picker';
 import ItemCard from '../../components/ItemCard';
 import { useItems } from '../../hooks/useItems';
 
@@ -29,91 +24,6 @@ const CATEGORIES = [
 
 export default function HomeScreen() {
   const { items, loading } = useItems('trending');
-  const [searchQuery, setSearchQuery] = useState('');
-  const [selectedImage, setSelectedImage] = useState<string | null>(null);
-  const [cameraPermissionGranted, setCameraPermissionGranted] = useState<boolean>(false);
-
-  useEffect(() => {
-    (async () => {
-      const { status } = await ImagePicker.requestCameraPermissionsAsync();
-      setCameraPermissionGranted(status === 'granted');
-    })();
-  }, []);
-
-  const handleCameraPress = () => {
-    Alert.alert(
-      'Find similar products',
-      'Use the camera or upload a file to search for matching products.',
-      [
-        {
-          text: 'Take photo',
-          onPress: async () => {
-            const { status } = await ImagePicker.requestCameraPermissionsAsync();
-            if (status !== 'granted') {
-              Alert.alert(
-                'Camera access needed',
-                'Please allow camera access in your device settings to take a photo.'
-              );
-              return;
-            }
-
-            const result = await ImagePicker.launchCameraAsync({
-              mediaTypes: ImagePicker.MediaTypeOptions.Images,
-              quality: 0.7,
-              allowsEditing: true,
-            });
-
-            if (!result.canceled && result.assets.length > 0) {
-              setSelectedImage(result.assets[0].uri);
-              Alert.alert('Photo captured', 'Your photo was captured successfully.');
-            }
-          },
-        },
-        {
-          text: 'Upload file',
-          onPress: async () => {
-            const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-            if (status !== 'granted') {
-              Alert.alert(
-                'Gallery access needed',
-                'Please allow photo library access in your device settings to upload an image.'
-              );
-              return;
-            }
-
-            const result = await ImagePicker.launchImageLibraryAsync({
-              mediaTypes: ImagePicker.MediaTypeOptions.Images,
-              quality: 0.7,
-              allowsEditing: true,
-            });
-
-            if (!result.canceled && result.assets.length > 0) {
-              setSelectedImage(result.assets[0].uri);
-              Alert.alert('Photo selected', 'Your image has been uploaded for matching.');
-            }
-          },
-        },
-        {
-          text: 'Cancel',
-          style: 'cancel',
-        },
-      ],
-      { cancelable: true }
-    );
-  };
-
-  const filteredItems = items.filter((item) => {
-    const query = searchQuery.toLowerCase().trim();
-    if (!query) {
-      return true;
-    }
-    return (
-      item.title.toLowerCase().includes(query) ||
-      item.category.toLowerCase().includes(query)
-    );
-  });
-
-  const displayItems = filteredItems;
 
   return (
     <ScrollView
@@ -124,20 +34,9 @@ export default function HomeScreen() {
       <ThemedView style={styles.container}>
         <View style={styles.searchContainer}>
           <Ionicons name="search-outline" size={20} color="#5B5B7B" style={styles.searchIcon} />
-          <TextInput
-            style={styles.searchInput}
-            placeholder="Search for items..."
-            placeholderTextColor="#888"
-            value={searchQuery}
-            onChangeText={setSearchQuery}
-          />
-          <TouchableOpacity onPress={handleCameraPress} style={styles.cameraButton}>
-            <Ionicons name="camera-outline" size={20} color="#5B5B7B" />
-          </TouchableOpacity>
+          <Text style={styles.searchPlaceholder}>Search for items...</Text>
+          <Ionicons name="camera-outline" size={20} color="#5B5B7B" style={styles.searchIcon} />
         </View>
-        {selectedImage ? (
-          <Image source={{ uri: selectedImage }} style={styles.selectedImagePreview} />
-        ) : null}
 
         <View style={styles.headerRow}>
           <Text style={styles.titleText}>BarterBayan</Text>
@@ -191,7 +90,7 @@ export default function HomeScreen() {
           </View>
         ) : (
           <FlatList
-            data={displayItems}
+            data={items}
             horizontal
             showsHorizontalScrollIndicator={false}
             keyExtractor={(item) => item.id}
@@ -200,7 +99,7 @@ export default function HomeScreen() {
             contentContainerStyle={styles.horizontalList}
             ListEmptyComponent={
               <Text style={styles.emptyText}>
-                No items found. Check your Firestore collection or try another search.
+                No items found. Check your Firestore collection.
               </Text>
             }
           />
@@ -214,7 +113,7 @@ export default function HomeScreen() {
         </View>
 
         <FlatList
-          data={displayItems}
+          data={items}
           horizontal
           showsHorizontalScrollIndicator={false}
           keyExtractor={(item) => `suggested-${item.id}`}
@@ -259,12 +158,6 @@ const styles = StyleSheet.create({
   searchIcon: {
     marginHorizontal: 14,
   },
-  searchInput: {
-    flex: 1,
-    color: '#242424',
-    fontSize: 15,
-    paddingVertical: 8,
-  },
   searchPlaceholder: {
     flex: 1,
     color: '#888',
@@ -290,17 +183,6 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: '700',
     color: '#1F2937',
-  },
-  cameraButton: {
-    padding: 10,
-  },
-  selectedImagePreview: {
-    width: '92%',
-    height: 180,
-    borderRadius: 16,
-    marginHorizontal: 16,
-    marginBottom: 16,
-    backgroundColor: '#F5F7FF',
   },
   categoryList: {
     paddingHorizontal: 16,

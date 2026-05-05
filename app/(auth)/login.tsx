@@ -7,30 +7,30 @@ import Constants from 'expo-constants';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import * as WebBrowser from 'expo-web-browser';
 import {
-    FacebookAuthProvider,
-    GoogleAuthProvider,
-    browserLocalPersistence,
-    browserSessionPersistence,
-    sendEmailVerification,
-    setPersistence,
-    signInWithCredential,
-    signInWithEmailAndPassword
+  FacebookAuthProvider,
+  GoogleAuthProvider,
+  browserLocalPersistence,
+  browserSessionPersistence,
+  sendEmailVerification,
+  setPersistence,
+  signInWithCredential,
+  signInWithEmailAndPassword
 } from 'firebase/auth';
 import { doc, getDoc, setDoc } from 'firebase/firestore';
 import React, { useEffect, useRef, useState } from 'react';
 import {
-    ActivityIndicator,
-    Alert,
-    Animated,
-    Modal,
-    Platform,
-    Pressable,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TextInput,
-    TouchableOpacity,
-    View
+  ActivityIndicator,
+  Alert,
+  Animated,
+  Modal,
+  Platform,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View
 } from 'react-native';
 import { auth, db } from '../../firebaseConfig';
 

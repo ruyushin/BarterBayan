@@ -1,17 +1,17 @@
 import { Tabs, useRouter } from 'expo-router';
 import { onAuthStateChanged } from 'firebase/auth';
 import React, { useEffect } from 'react';
+import { Platform } from 'react-native';
 
 import { HapticTab } from '@/components/haptic-tab';
 import { IconSymbol } from '@/components/ui/icon-symbol';
 import { Colors } from '@/constants/theme';
-import { useColorScheme } from '@/hooks/use-color-scheme';
 import { auth } from '../../firebaseConfig';
 
 export default function TabLayout() {
-  const colorScheme = useColorScheme();
   const router = useRouter();
 
+  // Keep internal tab-level auth check to ensure users don't "glitch" into the home screen
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (user) => {
       if (!user) {
@@ -27,9 +27,20 @@ export default function TabLayout() {
   return (
     <Tabs
       screenOptions={{
-        tabBarActiveTintColor: Colors[colorScheme ?? 'light'].tint,
+        // Force 'light' tint for the white theme
+        tabBarActiveTintColor: Colors['light'].tint,
         headerShown: false,
         tabBarButton: HapticTab,
+        // Match the white background from your reference design
+        tabBarStyle: {
+          backgroundColor: '#FFFFFF',
+          borderTopWidth: 1,
+          borderTopColor: '#EEEEEE',
+          ...Platform.select({
+            ios: { position: 'absolute' },
+            default: {},
+          }),
+        },
       }}>
       <Tabs.Screen
         name="index"
