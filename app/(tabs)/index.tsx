@@ -1,119 +1,44 @@
-﻿import React, { useEffect, useState } from 'react';
+﻿import React, { useState } from 'react';
 import {
   ActivityIndicator,
-  Alert,
   FlatList,
-  Image,
   ScrollView,
   StyleSheet,
   Text,
   TextInput,
-  TouchableOpacity,
-  View,
+  View
 } from 'react-native';
 
 import { ThemedView } from '@/components/themed-view';
 import { Ionicons } from '@expo/vector-icons';
 import { Link } from 'expo-router';
 
-import * as ImagePicker from 'expo-image-picker';
 import ItemCard from '../../components/ItemCard';
 import { useItems } from '../../hooks/useItems';
 
 const CATEGORIES = [
-  { id: '1', name: 'Technology', icon: 'phone-portrait' },
+  { id: '1', name: 'Electronics', icon: 'phone-portrait' },
   { id: '2', name: 'Fashion', icon: 'shirt' },
   { id: '3', name: 'Living', icon: 'bulb' },
-  { id: '4', name: 'Books', icon: 'book' },
+  { id: '4', name: 'School/Office', icon: 'school' },
+  { id: '5', name: 'Household', icon: 'home' },
 ];
 
 export default function HomeScreen() {
   const { items, loading } = useItems('trending');
   const [searchQuery, setSearchQuery] = useState('');
-  const [selectedImage, setSelectedImage] = useState<string | null>(null);
-  const [cameraPermissionGranted, setCameraPermissionGranted] = useState<boolean>(false);
 
-  useEffect(() => {
-    (async () => {
-      const { status } = await ImagePicker.requestCameraPermissionsAsync();
-      setCameraPermissionGranted(status === 'granted');
-    })();
-  }, []);
+  const query = searchQuery.toLowerCase().trim();
+  const filteredResults = query
+    ? items.filter((item) =>
+        item.title.toLowerCase().includes(query) ||
+        item.category.toLowerCase().includes(query)
+      )
+    : [];
+  const searchResults = filteredResults.slice(0, 5);
+  const totalResults = filteredResults.length;
 
-  const handleCameraPress = () => {
-    Alert.alert(
-      'Find similar products',
-      'Use the camera or upload a file to search for matching products.',
-      [
-        {
-          text: 'Take photo',
-          onPress: async () => {
-            const { status } = await ImagePicker.requestCameraPermissionsAsync();
-            if (status !== 'granted') {
-              Alert.alert(
-                'Camera access needed',
-                'Please allow camera access in your device settings to take a photo.'
-              );
-              return;
-            }
-
-            const result = await ImagePicker.launchCameraAsync({
-              mediaTypes: ImagePicker.MediaTypeOptions.Images,
-              quality: 0.7,
-              allowsEditing: true,
-            });
-
-            if (!result.canceled && result.assets.length > 0) {
-              setSelectedImage(result.assets[0].uri);
-              Alert.alert('Photo captured', 'Your photo was captured successfully.');
-            }
-          },
-        },
-        {
-          text: 'Upload file',
-          onPress: async () => {
-            const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-            if (status !== 'granted') {
-              Alert.alert(
-                'Gallery access needed',
-                'Please allow photo library access in your device settings to upload an image.'
-              );
-              return;
-            }
-
-            const result = await ImagePicker.launchImageLibraryAsync({
-              mediaTypes: ImagePicker.MediaTypeOptions.Images,
-              quality: 0.7,
-              allowsEditing: true,
-            });
-
-            if (!result.canceled && result.assets.length > 0) {
-              setSelectedImage(result.assets[0].uri);
-              Alert.alert('Photo selected', 'Your image has been uploaded for matching.');
-            }
-          },
-        },
-        {
-          text: 'Cancel',
-          style: 'cancel',
-        },
-      ],
-      { cancelable: true }
-    );
-  };
-
-  const filteredItems = items.filter((item) => {
-    const query = searchQuery.toLowerCase().trim();
-    if (!query) {
-      return true;
-    }
-    return (
-      item.title.toLowerCase().includes(query) ||
-      item.category.toLowerCase().includes(query)
-    );
-  });
-
-  const displayItems = filteredItems;
+  const displayItems = items;
 
   return (
     <ScrollView
@@ -122,25 +47,49 @@ export default function HomeScreen() {
       showsVerticalScrollIndicator={false}
     >
       <ThemedView style={styles.container}>
-        <View style={styles.searchContainer}>
-          <Ionicons name="search-outline" size={20} color="#5B5B7B" style={styles.searchIcon} />
-          <TextInput
-            style={styles.searchInput}
-            placeholder="Search for items..."
-            placeholderTextColor="#888"
-            value={searchQuery}
-            onChangeText={setSearchQuery}
-          />
-          <TouchableOpacity onPress={handleCameraPress} style={styles.cameraButton}>
-            <Ionicons name="camera-outline" size={20} color="#5B5B7B" />
-          </TouchableOpacity>
-        </View>
-        {selectedImage ? (
-          <Image source={{ uri: selectedImage }} style={styles.selectedImagePreview} />
-        ) : null}
+        <View style={styles.searchWrapper}>
+          <View style={styles.searchContainer}>
+            <Ionicons name="search-outline" size={20} color="#5B5B7B" style={styles.searchIcon} />
+            <TextInput
+              style={styles.searchInput}
+              placeholder="Search for items..."
+              placeholderTextColor="#888"
+              value={searchQuery}
+              onChangeText={setSearchQuery}
+            />
+          </View>
 
-        <View style={styles.headerRow}>
-          <Text style={styles.titleText}>BarterBayan</Text>
+          {query.length > 0 && (
+            <View style={styles.searchPopup}>
+              <Text style={styles.popupTitle}>
+                {totalResults > 0
+                  ? `Found ${totalResults} related posts`
+                  : 'No related posts found'}
+              </Text>
+              {searchResults.length > 0 ? (
+                <FlatList
+                  data={searchResults}
+                  showsVerticalScrollIndicator={false}
+                  keyExtractor={(item) => item.id}
+                  renderItem={({ item }) => (
+                    <Link
+                      href={`/explore?search=${encodeURIComponent(item.title)}&filter=${encodeURIComponent(item.category)}`}
+                      style={styles.searchResultLink}
+                    >
+                      <View style={styles.searchResultItem}>
+                        <Text style={styles.searchResultText}>{item.title}</Text>
+                        <Text style={styles.searchResultCategory}>{item.category}</Text>
+                      </View>
+                    </Link>
+                  )}
+                  ItemSeparatorComponent={() => <View style={{ height: 4 }} />}
+                  contentContainerStyle={styles.searchResultList}
+                />
+              ) : (
+                <Text style={styles.noResultsText}>Try a different keyword or category.</Text>
+              )}
+            </View>
+          )}
         </View>
 
         <View style={styles.sectionHeaderSmall}>
@@ -154,12 +103,14 @@ export default function HomeScreen() {
           keyExtractor={(item) => item.id}
           contentContainerStyle={styles.categoryList}
           renderItem={({ item }) => (
-            <View style={styles.categoryItem}>
-              <View style={styles.categoryCircle}>
-                <Ionicons name={item.icon as any} size={22} color="#323A5B" />
+            <Link href={`/explore?filter=${encodeURIComponent(item.name)}`} style={styles.categoryLink}>
+              <View style={styles.categoryItem}>
+                <View style={styles.categoryCircle}>
+                  <Ionicons name={item.icon as any} size={22} color="#2f2f6f" />
+                </View>
+                <Text style={styles.categoryText}>{item.name}</Text>
               </View>
-              <Text style={styles.categoryText}>{item.name}</Text>
-            </View>
+            </Link>
           )}
         />
 
@@ -245,19 +196,26 @@ const styles = StyleSheet.create({
     paddingTop: 16,
     paddingBottom: 24,
   },
+  searchWrapper: {
+    marginHorizontal: 16,
+    marginTop: 14,
+    marginBottom: 4,
+    position: 'relative',
+    overflow: 'visible',
+    zIndex: 9999,
+  },
   searchContainer: {
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: '#F5F5F5',
     borderRadius: 14,
     height: 48,
-    marginHorizontal: 16,
-    marginVertical: 14,
     borderWidth: 1,
     borderColor: '#E9E9E9',
+    paddingHorizontal: 14,
   },
   searchIcon: {
-    marginHorizontal: 14,
+    marginRight: 10,
   },
   searchInput: {
     flex: 1,
@@ -287,28 +245,20 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   sectionTitleSmall: {
-    fontSize: 15,
+    fontSize: 20,
     fontWeight: '700',
     color: '#1F2937',
-  },
-  cameraButton: {
-    padding: 10,
-  },
-  selectedImagePreview: {
-    width: '92%',
-    height: 180,
-    borderRadius: 16,
-    marginHorizontal: 16,
-    marginBottom: 16,
-    backgroundColor: '#F5F7FF',
   },
   categoryList: {
     paddingHorizontal: 16,
     paddingVertical: 6,
   },
+  categoryLink: {
+    marginRight: 18,
+  },
   categoryItem: {
     alignItems: 'center',
-    marginRight: 18,
+    flexDirection: 'column',
   },
   categoryCircle: {
     width: 62,
@@ -325,6 +275,55 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '600',
     color: '#1F2937',
+  },
+  searchPopup: {
+    position: 'absolute',
+    top: 52,
+    left: 0,
+    right: 0,
+    borderRadius: 16,
+    backgroundColor: '#FFFFFF',
+    borderColor: '#E5E7EB',
+    borderWidth: 1,
+    padding: 14,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.12,
+    shadowRadius: 18,
+    elevation: 30,
+    zIndex: 10000,
+  },
+  popupTitle: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#111827',
+    marginBottom: 10,
+  },
+  searchResultList: {
+    paddingBottom: 6,
+  },
+  searchResultLink: {
+    width: '100%',
+  },
+  searchResultItem: {
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: '#E5E7EB',
+  },
+  searchResultText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#111827',
+  },
+  searchResultCategory: {
+    fontSize: 12,
+    color: '#6B7280',
+    marginTop: 2,
+  },
+  noResultsText: {
+    color: '#6B7280',
+    fontSize: 13,
+    lineHeight: 20,
   },
   bannerCard: {
     backgroundColor: '#3F51F4',
