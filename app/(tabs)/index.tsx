@@ -11,7 +11,7 @@ import {
 
 import { ThemedView } from '@/components/themed-view';
 import { Ionicons } from '@expo/vector-icons';
-import { Link } from 'expo-router';
+import { Link, useRouter } from 'expo-router';
 
 import ItemCard from '../../components/ItemCard';
 import { useItems } from '../../hooks/useItems';
@@ -27,6 +27,7 @@ const CATEGORIES = [
 export default function HomeScreen() {
   const { items, loading } = useItems('trending');
   const [searchQuery, setSearchQuery] = useState('');
+  const router = useRouter();
 
   const query = searchQuery.toLowerCase().trim();
   const filteredResults = query
@@ -39,6 +40,10 @@ export default function HomeScreen() {
   const totalResults = filteredResults.length;
 
   const displayItems = items;
+
+  const handleSearchResultPress = (itemTitle: string) => {
+    router.push(`/explore?search=${encodeURIComponent(itemTitle)}`);
+  };
 
   return (
     <ScrollView
@@ -72,15 +77,15 @@ export default function HomeScreen() {
                   showsVerticalScrollIndicator={false}
                   keyExtractor={(item) => item.id}
                   renderItem={({ item }) => (
-                    <Link
-                      href={`/explore?search=${encodeURIComponent(item.title)}&filter=${encodeURIComponent(item.category)}`}
+                    <View
                       style={styles.searchResultLink}
+                      onTouchEnd={() => handleSearchResultPress(item.title)}
                     >
                       <View style={styles.searchResultItem}>
                         <Text style={styles.searchResultText}>{item.title}</Text>
                         <Text style={styles.searchResultCategory}>{item.category}</Text>
                       </View>
-                    </Link>
+                    </View>
                   )}
                   ItemSeparatorComponent={() => <View style={{ height: 4 }} />}
                   contentContainerStyle={styles.searchResultList}
