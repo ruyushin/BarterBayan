@@ -2,18 +2,17 @@ import * as ImagePicker from "expo-image-picker";
 import { useRouter } from "expo-router";
 import { useState } from "react";
 import {
-    Alert,
-    Image,
-    SafeAreaView,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TextInput,
-    TouchableOpacity,
-    View
-} from "react-native";
+  Alert,
+  Image,
+  SafeAreaView,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput, TextStyle, TouchableOpacity,
+  View, ViewStyle
+} from 'react-native';
 
-const NAVY = "#2e2d7c";
+const NAVY = "#2f2f6f";
 
 const CATEGORIES = [
   { id: "1", label: "Technology", emoji: "📱" },
@@ -138,26 +137,26 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: "#fff",
     paddingHorizontal: 16,
-  },
+  } as ViewStyle,
   header: {
     flexDirection: "row",
     alignItems: "center",
     paddingVertical: 16,
-  },
+  } as ViewStyle,
   backButton: {
     marginRight: 12,
     marginHorizontal: 15,
-  },
+  } as ViewStyle,
   backArrow: {
     fontSize: 22,
-    fontWeight: "1000",
+    fontWeight: "900",
     color: "#222",
-  },
+  } as TextStyle,
   headerTitle: {
     fontSize: 20,
     fontWeight: "700",
     color: "#111",
-  },
+  } as TextStyle,
   sectionLabel: {
     fontSize: 15,
     fontWeight: "600",
@@ -165,13 +164,13 @@ const styles = StyleSheet.create({
     marginBottom: 10,
     marginTop: 8,
     marginHorizontal: 15,
-  },
+  } as TextStyle,
   photoRow: {
     flexDirection: "row",
     gap: 12,
     marginBottom: 20,
     marginHorizontal: 15,
-  },
+  } as ViewStyle,
   photoBox: {
     width: 120,
     height: 120,
@@ -179,10 +178,10 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     justifyContent: "center",
     alignItems: "center",
-  },
+  } as ViewStyle,
   photoIcon: {
     fontSize: 32,
-  },
+  } as TextStyle,
   addPhotoBox: {
     width: 120,
     height: 120,
@@ -190,19 +189,19 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     justifyContent: "center",
     alignItems: "center",
-  },
+  } as ViewStyle,
   plusIcon: {
     fontSize: 36,
     color: "#aaa",
-  },
+  } as TextStyle,
   categoryRow: {
     marginBottom: 20,
     marginHorizontal: 15,
-  },
+  } as ViewStyle,
   categoryItem: {
     alignItems: "center",
     marginRight: 16,
-  },
+  } as ViewStyle,
   categoryCircle: {
     width: 70,
     height: 70,
@@ -213,17 +212,17 @@ const styles = StyleSheet.create({
     marginBottom: 6,
     borderWidth: 2,
     borderColor: "transparent",
-  },
+  } as ViewStyle,
   categoryCircleActive: {
     borderColor: NAVY,
-  },
+  } as ViewStyle,
   categoryEmoji: {
     fontSize: 28,
-  },
+  } as TextStyle,
   categoryLabel: {
     fontSize: 12,
     color: "#333",
-  },
+  } as TextStyle,
   descriptionInput: {
     backgroundColor: "#f0f0f5",
     borderRadius: 12,
@@ -233,7 +232,7 @@ const styles = StyleSheet.create({
     fontSize: 14,
     marginBottom: 24,
     marginHorizontal: 15,
-  },
+  } as TextStyle,
   submitButton: {
     backgroundColor: NAVY,
     paddingVertical: 14,
@@ -243,10 +242,10 @@ const styles = StyleSheet.create({
     alignSelf: "flex-end",
     marginHorizontal: 15,
     paddingHorizontal: 30,
-  },
+  } as ViewStyle,
   submitText: {
     color: "white",
     fontWeight: "700",
     fontSize: 15,
-  },
+  } as TextStyle,
 });

@@ -7,17 +7,22 @@ interface ItemProps {
   item: {
     id: string;
     title: string;
-    image: string;
+    image?: string;
+    images?: string[];
     category: string;
   };
+  onPress?: () => void;
 }
 
-export default function ItemCard({ item }: ItemProps) {
+export default function ItemCard({ item, onPress }: ItemProps) {
+  // Get image from either single image or images array
+  const displayImage = item.image || (item.images && item.images[0]) || 'https://picsum.photos/200';
+
   return (
-    <Pressable style={styles.card}>
+    <Pressable style={styles.card} onPress={onPress}>
       <ThemedView style={styles.container}>
         <Image 
-          source={{ uri: item.image || 'https://picsum.photos/200' }} 
+          source={{ uri: displayImage }} 
           style={styles.image} 
         />
         <View style={styles.info}>

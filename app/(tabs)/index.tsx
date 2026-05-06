@@ -14,6 +14,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { Link, useRouter } from 'expo-router';
 
 import ItemCard from '../../components/ItemCard';
+import { ProductDetailModal } from '../../components/ProductDetailModal';
 import { useItems } from '../../hooks/useItems';
 
 const CATEGORIES = [
@@ -27,6 +28,8 @@ const CATEGORIES = [
 export default function HomeScreen() {
   const { items, loading } = useItems('trending');
   const [searchQuery, setSearchQuery] = useState('');
+  const [selectedItem, setSelectedItem] = useState(null);
+  const [modalVisible, setModalVisible] = useState(false);
   const router = useRouter();
 
   const query = searchQuery.toLowerCase().trim();
@@ -43,6 +46,11 @@ export default function HomeScreen() {
 
   const handleSearchResultPress = (itemTitle: string) => {
     router.push(`/explore?search=${encodeURIComponent(itemTitle)}`);
+  };
+
+  const handleItemPress = (item: any) => {
+    setSelectedItem(item);
+    setModalVisible(true);
   };
 
   return (
@@ -151,7 +159,9 @@ export default function HomeScreen() {
             horizontal
             showsHorizontalScrollIndicator={false}
             keyExtractor={(item) => item.id}
-            renderItem={({ item }) => <ItemCard item={item} />}
+            renderItem={({ item }) => (
+              <ItemCard item={item} onPress={() => handleItemPress(item)} />
+            )}
             ItemSeparatorComponent={() => <View style={{ width: 12 }} />}
             contentContainerStyle={styles.horizontalList}
             ListEmptyComponent={
@@ -174,7 +184,9 @@ export default function HomeScreen() {
           horizontal
           showsHorizontalScrollIndicator={false}
           keyExtractor={(item) => `suggested-${item.id}`}
-          renderItem={({ item }) => <ItemCard item={item} />}
+          renderItem={({ item }) => (
+            <ItemCard item={item} onPress={() => handleItemPress(item)} />
+          )}
           ItemSeparatorComponent={() => <View style={{ width: 12 }} />}
           contentContainerStyle={styles.horizontalList}
           ListEmptyComponent={
@@ -183,6 +195,14 @@ export default function HomeScreen() {
             </Text>
           }
         />
+
+        {selectedItem && (
+          <ProductDetailModal
+            visible={modalVisible}
+            item={selectedItem}
+            onClose={() => setModalVisible(false)}
+          />
+        )}
       </ThemedView>
     </ScrollView>
   );

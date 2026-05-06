@@ -1,27 +1,21 @@
-import { useRouter } from "expo-router";
-import { useState } from "react";
+import { useFocusEffect, useRouter } from "expo-router";
+import { useCallback, useState } from "react";
 import {
-  FlatList,
-  Image, SafeAreaView,
-  StyleSheet,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  View
+    ActivityIndicator,
+    FlatList,
+    Image,
+    SafeAreaView,
+    StyleSheet,
+    Text,
+    TextInput,
+    TouchableOpacity,
+    View,
 } from "react-native";
+import { auth } from "../../firebaseConfig";
+import { getUserInfo } from "../../services/itemService";
+import { getOtherUserInConversation, getUserConversations } from "../../services/messagingService";
 
 const NAVY = "#2e2d7c";
-
-const MESSAGES = [
-  { id: "1", name: "Neymar Cruz", last: "Sent 2 photos", time: "18m", avatar: "https://i.imgur.com/8Km9tLL.png", status: "yellow" },
-  { id: "2", name: "Ronaldo Suarez", last: "Hello! Sent you an offer...", time: "1 hr", avatar: "https://i.imgur.com/j0J7K9M.png", status: "gray" },
-  { id: "3", name: "Sasha Banks", last: "Any items you're interested?", time: "2 hrs", avatar: "https://i.imgur.com/xZ9YF6G.png", status: "gray" },
-  { id: "4", name: "Jelo Mercado", last: "I'll be at Greenfield Marker...", time: "3 hrs", avatar: "https://i.imgur.com/2nCt3Sbl.png", status: "blue" },
-  { id: "5", name: "Kaye Villanueva", last: "I'll send the booking detail...", time: "5 hrs", avatar: "https://i.imgur.com/6oK4B8M.png", status: "gray" },
-  { id: "6", name: "Renzo Dela Cruz", last: "Got the sneakers in size 10", time: "1 day", avatar: "https://i.imgur.com/8Km9tLL.png", status: "gray" },
-  { id: "7", name: "Bea Santiago", last: "Lamp's packed safely. Ca...", time: "5 mins", avatar: "https://i.imgur.com/j0J7K9M.png", status: "yellow" },
-  { id: "8", name: "Anton Reyes", last: "I'll be at Robinsons Galleria...", time: "2 hrs", avatar: "https://i.imgur.com/xZ9YF6G.png", status: "yellow" },
-];
 
 const NOTIFICATIONS = [
   { id: "1", name: "Neymar Cruz", text: "offered a trade!", avatar: "https://i.imgur.com/8Km9tLL.png", status: "yellow" },
@@ -31,22 +25,102 @@ const NOTIFICATIONS = [
 
 export default function InboxScreen() {
   const [activeTab, setActiveTab] = useState("messages");
+  const [conversations, setConversations] = useState<any[]>([]);
+  const [loading, setLoading] = useState(false);
   const router = useRouter();
+  const currentUserId = auth.currentUser?.uid;
+
+  useFocusEffect(
+    useCallback(() => {
+      if (currentUserId) {
+        loadConversations();
+      }
+    }, [currentUserId])
+  );
+
+  const loadConversations = async () => {
+    try {
+      setLoading(true);
+      const convs = await getUserConversations(currentUserId!);
+      
+      // Enrich conversations with user info
+      const enrichedConvs = await Promise.all(
+        convs.map(async (conv: any) => {
+          try {
+            const otherUserId = getOtherUserInConversation(conv.id, currentUserId!);
+            const userInfo: any = await getUserInfo(otherUserId);
+            return {
+              ...conv,
+              otherUserId,
+              userName: userInfo?.username || "User",
+              userAvatar: userInfo?.avatarUrl || "https://picsum.photos/50",
+            };
+          } catch (error) {
+            console.error('Error loading user info:', error);
+            return conv;
+          }
+        })
+      );
+      
+      setConversations(enrichedConvs);
+    } catch (error) {
+      console.error("Error loading conversations:", error);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const statusColor = (s: string) =>
     s === "yellow" ? "#f5c518" : s === "blue" ? "#3b82f6" : "#aaa";
 
+  const formatTime = (timestamp: any) => {
+    if (!timestamp) return "";
+    
+    const date = timestamp.toDate ? timestamp.toDate() : new Date(timestamp);
+    const now = new Date();
+    const diffMs = now.getTime() - date.getTime();
+    const diffMins = Math.floor(diffMs / 60000);
+    const diffHours = Math.floor(diffMs / 3600000);
+    const diffDays = Math.floor(diffMs / 86400000);
+
+    if (diffMins < 1) return "now";
+    if (diffMins < 60) return `${diffMins}m`;
+    if (diffHours < 24) return `${diffHours}h`;
+    if (diffDays < 7) return `${diffDays}d`;
+    return date.toLocaleDateString();
+  };
+
+  const handleConversationPress = (conversation: any) => {
+    router.push({
+      pathname: "/chat",
+      params: {
+        ownerUserId: conversation.otherUserId,
+      },
+    });
+  };
+
   const renderMessage = ({ item }: any) => (
     <TouchableOpacity
       style={styles.messageRow}
-onPress={() => router.push({ pathname: "/chat" as any, params: { name: item.name, avatar: item.avatar } })}    >
+      onPress={() => handleConversationPress(item)}
+    >
       <View style={styles.avatarWrap}>
-        <Image source={{ uri: item.avatar }} style={styles.avatar} />
-        <View style={[styles.statusDot, { backgroundColor: statusColor(item.status) }]} />
+        <Image
+          source={{ uri: item.userAvatar || "https://picsum.photos/50" }}
+          style={styles.avatar}
+        />
+        <View
+          style={[
+            styles.statusDot,
+            { backgroundColor: "#aaa" }, // You can update this based on online status
+          ]}
+        />
       </View>
       <View style={styles.messageInfo}>
-        <Text style={styles.messageName}>{item.name}</Text>
-        <Text style={styles.messageLast}>{item.last} • {item.time}</Text>
+        <Text style={styles.messageName}>{item.userName || "User"}</Text>
+        <Text style={styles.messageLast} numberOfLines={1}>
+          {item.lastMessage || "No messages"} • {formatTime(item.lastMessageTime)}
+        </Text>
       </View>
       <Text style={styles.dots}>···</Text>
     </TouchableOpacity>
@@ -56,7 +130,9 @@ onPress={() => router.push({ pathname: "/chat" as any, params: { name: item.name
     <View style={styles.messageRow}>
       <View style={styles.avatarWrap}>
         <Image source={{ uri: item.avatar }} style={styles.avatar} />
-        <View style={[styles.statusDot, { backgroundColor: statusColor(item.status) }]} />
+        <View
+          style={[styles.statusDot, { backgroundColor: statusColor(item.status) }]}
+        />
       </View>
       <View style={styles.messageInfo}>
         <Text style={styles.messageName}>
@@ -71,17 +147,22 @@ onPress={() => router.push({ pathname: "/chat" as any, params: { name: item.name
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.inner}>
-
         {/* Left sidebar icons */}
         <View style={styles.sidebar}>
           <TouchableOpacity
-            style={[styles.sideIcon, activeTab === "messages" && styles.sideIconActive]}
+            style={[
+              styles.sideIcon,
+              activeTab === "messages" && styles.sideIconActive,
+            ]}
             onPress={() => setActiveTab("messages")}
           >
             <Text style={styles.sideIconText}>💬</Text>
           </TouchableOpacity>
           <TouchableOpacity
-            style={[styles.sideIcon, activeTab === "notifications" && styles.sideIconActive]}
+            style={[
+              styles.sideIcon,
+              activeTab === "notifications" && styles.sideIconActive,
+            ]}
             onPress={() => setActiveTab("notifications")}
           >
             <Text style={styles.sideIconText}>🔔</Text>
@@ -101,12 +182,24 @@ onPress={() => router.push({ pathname: "/chat" as any, params: { name: item.name
                   style={styles.searchInput}
                 />
               </View>
-              <FlatList
-                data={MESSAGES}
-                renderItem={renderMessage}
-                keyExtractor={(item) => item.id}
-                showsVerticalScrollIndicator={false}
-              />
+              {loading ? (
+                <View style={{ flex: 1, justifyContent: "center", alignItems: "center" }}>
+                  <ActivityIndicator size="large" color={NAVY} />
+                </View>
+              ) : conversations.length === 0 ? (
+                <View style={{ flex: 1, justifyContent: "center", alignItems: "center" }}>
+                  <Text style={styles.emptyText}>No conversations yet</Text>
+                </View>
+              ) : (
+                <FlatList
+                  data={conversations}
+                  renderItem={renderMessage}
+                  keyExtractor={(item) => item.id}
+                  showsVerticalScrollIndicator={false}
+                  onRefresh={loadConversations}
+                  refreshing={loading}
+                />
+              )}
             </>
           ) : (
             <>
@@ -199,6 +292,7 @@ const styles = StyleSheet.create({
   dots: { fontSize: 18, color: "#aaa", paddingLeft: 8 },
   markAllRow: { marginBottom: 16 },
   markAllText: { fontSize: 14, fontWeight: "500", color: "#333" },
+  emptyText: { fontSize: 14, color: "#999" },
   trashButton: {
     position: "absolute",
     bottom: 16,

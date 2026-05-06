@@ -7,9 +7,13 @@ export interface Item {
   id: string;
   title: string;
   category: string;
-  image: string;
+  image?: string; // Single image (for backward compatibility)
+  images?: string[]; // Multiple images
   isTrending?: boolean;
   ownerId: string;
+  likes?: number;
+  likedBy?: string[]; // Array of user IDs who liked this item
+  description?: string;
 }
 
 export const useItems = (type: 'trending' | 'all' = 'all') => {
@@ -32,10 +36,21 @@ export const useItems = (type: 'trending' | 'all' = 'all') => {
         console.warn("⚠️ Connected, but the 'items' collection is empty.");
       }
 
-      const fetchedItems = snapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data()
-      })) as Item[];
+      const fetchedItems = snapshot.docs.map(doc => {
+        const data = doc.data();
+        return {
+          id: doc.id,
+          title: data.title,
+          category: data.category,
+          image: data.image, // Keep for backward compatibility
+          images: data.images || (data.image ? [data.image] : []), // Convert single to array
+          isTrending: data.isTrending,
+          ownerId: data.ownerId,
+          likes: data.likes || 0,
+          likedBy: data.likedBy || [],
+          description: data.description,
+        } as Item;
+      });
 
       setItems(fetchedItems);
     } catch (error) {
