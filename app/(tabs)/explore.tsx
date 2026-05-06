@@ -2,17 +2,19 @@ import { FontAwesome, Ionicons } from "@expo/vector-icons";
 import { useLocalSearchParams } from "expo-router";
 import React, { useEffect, useState } from "react";
 import {
-  ActivityIndicator,
-  FlatList,
-  Image,
-  Pressable,
-  SafeAreaView,
-  StyleSheet,
-  Text,
-  TextInput,
-  View,
+    ActivityIndicator,
+    Alert,
+    FlatList,
+    Image,
+    Pressable,
+    SafeAreaView,
+    StyleSheet,
+    Text,
+    TextInput,
+    View,
 } from "react-native";
-import { getAllItems } from "../../services/itemService";
+import { auth } from "../../firebaseConfig";
+import { getAllItems, updateItemLikes } from "../../services/itemService";
 
 /* ---------------- DATA ---------------- */
 
@@ -183,6 +185,41 @@ export default function Screen() {
 /* ---------------- CARD ---------------- */
 
 function ItemCard({ item }: any) {
+  const [isLiked, setIsLiked] = useState(false);
+  const [likes, setLikes] = useState(item.likes || 0);
+  const [loading, setLoading] = useState(false);
+  const currentUser = auth.currentUser?.uid;
+
+  // Get first image from images array or use single image
+  const imageUrl = Array.isArray(item?.images) && item.images.length > 0 
+    ? item.images[0] 
+    : item?.image || "https://via.placeholder.com/400x200";
+
+  useEffect(() => {
+    if (currentUser && item?.likedBy?.includes(currentUser)) {
+      setIsLiked(true);
+    }
+  }, [item, currentUser]);
+
+  const handleLike = async () => {
+    if (!currentUser) {
+      Alert.alert('Please log in', 'You must be logged in to like items');
+      return;
+    }
+
+    try {
+      setLoading(true);
+      await updateItemLikes(item.id, currentUser, !isLiked);
+      setIsLiked(!isLiked);
+      setLikes(isLiked ? likes - 1 : likes + 1);
+    } catch (error) {
+      Alert.alert('Error', 'Failed to update like status');
+      console.error('Error:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   return (
     <View style={styles.card}>
       <View style={styles.header}>
@@ -200,7 +237,7 @@ function ItemCard({ item }: any) {
       </View>
 
       <Image 
-        source={{ uri: item.image || "https://via.placeholder.com/400x200" }} 
+        source={{ uri: imageUrl }} 
         style={styles.image} 
       />
 
@@ -210,8 +247,10 @@ function ItemCard({ item }: any) {
       <Text style={styles.message}>Send Owner a Message.</Text>
 
       <View style={styles.footer}>
-        <Ionicons name="heart-outline" size={16} />
-        <Text style={{ marginHorizontal: 5 }}>{item.likes || 0}</Text>
+        <Pressable onPress={handleLike} disabled={loading}>
+          <Ionicons name={isLiked ? "heart" : "heart-outline"} size={16} color={isLiked ? "#FF4444" : "#333"} />
+        </Pressable>
+        <Text style={{ marginHorizontal: 5 }}>{likes}</Text>
         <Ionicons name="chatbubble-outline" size={16} />
         <FontAwesome name="bookmark-o" size={16} />
       </View>

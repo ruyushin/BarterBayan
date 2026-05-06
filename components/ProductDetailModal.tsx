@@ -4,21 +4,26 @@ import * as MediaLibrary from 'expo-media-library';
 import { useRouter } from 'expo-router';
 import React, { useEffect, useState } from 'react';
 import {
-    ActivityIndicator,
-    Alert,
-    FlatList,
-    Image,
-    Modal,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TouchableOpacity,
-    View,
-    ViewStyle,
+  ActivityIndicator,
+  Alert,
+  Dimensions,
+  FlatList,
+  Image,
+  ImageStyle,
+  Modal,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextStyle,
+  TouchableOpacity,
+  View,
+  ViewStyle,
 } from 'react-native';
 import { LongPressGestureHandler, State } from 'react-native-gesture-handler';
 import { auth } from '../firebaseConfig';
 import { getUserInfo, updateItemLikes } from '../services/itemService';
+
+const SCREEN_WIDTH = Dimensions.get('window').width;
 
 interface ProductDetailModalProps {
   visible: boolean;
@@ -36,14 +41,19 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
   const [ownerInfo, setOwnerInfo] = useState<any>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [isLiked, setIsLiked] = useState(false);
+  const [likeCount, setLikeCount] = useState<number>(0);
   const [loading, setLoading] = useState(false);
   const [currentUser] = useState(auth.currentUser?.uid);
 
-  // Get images array - support both single image and multiple images
-  const images = Array.isArray(item?.images) ? item.images : item?.image ? [item.image] : [];
+  const images = Array.isArray(item?.images)
+    ? item.images
+    : item?.image
+    ? [item.image]
+    : [];
 
   useEffect(() => {
-    if (visible && item?.ownerId) {
+    if (visible && item) {
+      setLikeCount(item.likes || 0);
       loadOwnerInfo();
       checkIfLiked();
     }
@@ -51,6 +61,7 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
 
   const loadOwnerInfo = async () => {
     try {
+      if (!item?.ownerId) return;
       const info = await getUserInfo(item.ownerId);
       setOwnerInfo(info);
     } catch (error) {
@@ -71,11 +82,12 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
       Alert.alert('Please log in', 'You must be logged in to like items');
       return;
     }
-
     try {
       setLoading(true);
-      await updateItemLikes(item.id, currentUser, !isLiked);
-      setIsLiked(!isLiked);
+      const nowLiked = !isLiked;
+      await updateItemLikes(item.id, currentUser, nowLiked);
+      setIsLiked(nowLiked);
+      setLikeCount((prev) => (nowLiked ? prev + 1 : Math.max(0, prev - 1)));
     } catch (error) {
       Alert.alert('Error', 'Failed to update like status');
       console.error('Error:', error);
@@ -131,9 +143,6 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
   const renderImageCarousel = () => (
     <View style={styles.carouselContainer}>
       <FlatList
-        ref={(ref) => {
-          // Auto-scroll to current image if needed
-        }}
         horizontal
         pagingEnabled
         scrollEnabled={images.length > 1}
@@ -142,7 +151,9 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
         keyExtractor={(_, index) => `image-${index}`}
         renderItem={({ item: imageUrl }) => (
           <LongPressGestureHandler
-            onHandlerStateChange={({ nativeEvent }) => handleImageLongPress(nativeEvent)}
+            onHandlerStateChange={({ nativeEvent }) =>
+              handleImageLongPress(nativeEvent)
+            }
             minDurationMs={500}
           >
             <TouchableOpacity
@@ -160,7 +171,8 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
         )}
         onMomentumScrollEnd={(event) => {
           const index = Math.round(
-            event.nativeEvent.contentOffset.x / event.nativeEvent.layoutMeasurement.width
+            event.nativeEvent.contentOffset.x /
+              event.nativeEvent.layoutMeasurement.width
           );
           setCurrentImageIndex(index);
         }}
@@ -181,13 +193,15 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
           </Text>
         </View>
       )}
-      <Text style={styles.holdToSave}>Hold image to save</Text>
+      <View style={styles.holdToSaveContainer}>
+        <Text style={styles.holdToSaveText}>Hold image to save</Text>
+      </View>
     </View>
   );
 
   const modalContent = (
     <View style={styles.container}>
-      {/* Header with close button */}
+      {/* Header */}
       <View style={styles.header}>
         <TouchableOpacity onPress={onClose} style={styles.closeButton}>
           <Ionicons name="close" size={28} color="#2e2d7c" />
@@ -217,7 +231,6 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
         <View style={styles.productInfo}>
           <Text style={styles.title}>{item?.title}</Text>
           <Text style={styles.category}>{item?.category}</Text>
-
           {item?.description && (
             <Text style={styles.description}>{item.description}</Text>
           )}
@@ -235,14 +248,18 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
                 <Text style={styles.ownerName}>{ownerInfo.username}</Text>
                 <View style={styles.ratingContainer}>
                   <Ionicons name="star" size={14} color="#FFB800" />
-                  <Text style={styles.rating}>{ownerInfo.rating?.toFixed(1) || 'N/A'}</Text>
+                  <Text style={styles.rating}>
+                    {ownerInfo.rating?.toFixed(1) || 'N/A'}
+                  </Text>
                   <Text style={styles.tradeCount}>
                     ({ownerInfo.tradeCount || 0} trades)
                   </Text>
                 </View>
               </View>
             </View>
-            {ownerInfo.bio && <Text style={styles.bio}>{ownerInfo.bio}</Text>}
+            {ownerInfo.bio && (
+              <Text style={styles.bio}>{ownerInfo.bio}</Text>
+            )}
           </View>
         )}
 
@@ -253,7 +270,7 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
           disabled={loading}
         >
           {loading ? (
-            <ActivityIndicator color="#fff" />
+            <ActivityIndicator color={isLiked ? '#fff' : '#2e2d7c'} />
           ) : (
             <>
               <Ionicons
@@ -267,7 +284,7 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
                   isLiked && styles.likeButtonTextActive,
                 ]}
               >
-                {item?.likes || 0} Likes
+                {likeCount} {likeCount === 1 ? 'Like' : 'Likes'}
               </Text>
             </>
           )}
@@ -363,13 +380,14 @@ const styles = StyleSheet.create({
     backgroundColor: '#F3F4F6',
     position: 'relative',
   } as ViewStyle,
+  // FIX: explicit pixel width so images render inside horizontal FlatList
   imageWrapper: {
-    width: '100%',
-    height: '100%',
+    width: SCREEN_WIDTH,
+    height: 300,
   } as ViewStyle,
   carouselImage: {
-    width: '100%',
-    height: '100%',
+    width: SCREEN_WIDTH,
+    height: 300,
   } as ImageStyle,
   pagination: {
     position: 'absolute',
@@ -397,15 +415,18 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     marginLeft: 8,
   } as TextStyle,
-  holdToSave: {
+  // FIX: split into a View container + Text child to avoid text-node-in-View error
+  holdToSaveContainer: {
     position: 'absolute',
     top: 12,
     right: 12,
     backgroundColor: 'rgba(0,0,0,0.6)',
-    color: '#fff',
     paddingHorizontal: 10,
     paddingVertical: 6,
     borderRadius: 8,
+  } as ViewStyle,
+  holdToSaveText: {
+    color: '#fff',
     fontSize: 12,
     fontWeight: '600',
   } as TextStyle,

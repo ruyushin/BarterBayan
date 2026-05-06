@@ -1,4 +1,5 @@
 import {
+    addDoc,
     arrayRemove,
     arrayUnion,
     collection,
@@ -150,6 +151,35 @@ export const initializeLikedBy = async (itemId: string) => {
     }
   } catch (error) {
     console.error('Error initializing likedBy:', error);
+    throw error;
+  }
+};
+
+/**
+ * Add a new item to Firebase
+ * @param itemData - The item data to add
+ */
+export const addItem = async (itemData: {
+  title: string;
+  description: string;
+  category: string;
+  condition: string;
+  images: string[]; // Array of image URLs from Cloudinary
+  ownerId: string;
+  likes?: number;
+  likedBy?: string[];
+  createdAt?: any;
+}) => {
+  try {
+    const docRef = await addDoc(collection(db, 'items'), {
+      ...itemData,
+      likes: itemData.likes || 0,
+      likedBy: itemData.likedBy || [],
+      createdAt: itemData.createdAt || new Date(),
+    });
+    return { id: docRef.id, ...itemData };
+  } catch (error) {
+    console.error('Error adding item:', error);
     throw error;
   }
 };
