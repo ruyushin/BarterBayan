@@ -9,13 +9,21 @@ import {
   Text,
   TextInput,
   TouchableOpacity,
-  View
+  View,
 } from "react-native";
 
 const DATA = [
-  { id: "1", name: "Ralph Lauren Polo", image: "https://i.imgur.com/8Km9tLL.png" },
+  {
+    id: "1",
+    name: "Ralph Lauren Polo",
+    image: "https://i.imgur.com/8Km9tLL.png",
+  },
   { id: "2", name: "Bench Perfume", image: "https://i.imgur.com/j0J7K9M.png" },
-  { id: "3", name: "Thanos Gauntlet", image: "https://i.imgur.com/xZ9YF6G.png" },
+  {
+    id: "3",
+    name: "Thanos Gauntlet",
+    image: "https://i.imgur.com/xZ9YF6G.png",
+  },
   { id: "4", name: "Fila Bag", image: "https://i.imgur.com/2nCt3Sbl.png" },
   { id: "5", name: "Adidas Cap", image: "https://i.imgur.com/6oK4B8M.png" },
 ];
@@ -23,7 +31,11 @@ const DATA = [
 const OFFERS_DATA = [
   { id: "1", name: "Fila Bag", image: "https://i.imgur.com/2nCt3Sbl.png" },
   { id: "2", name: "Adidas Cap", image: "https://i.imgur.com/6oK4B8M.png" },
-  { id: "3", name: "Freedom Graphic Tee", image: "https://via.placeholder.com/60" },
+  {
+    id: "3",
+    name: "Freedom Graphic Tee",
+    image: "https://via.placeholder.com/60",
+  },
 ];
 
 const NAVY = "#2e2d7c";
@@ -90,14 +102,17 @@ export default function TradeScreen() {
 
   return (
     <SafeAreaView style={styles.container}>
-
       {/* Tabs */}
       <View style={styles.tabs}>
         <TouchableOpacity
           style={activeTab === "trades" ? styles.activeTab : styles.inactiveTab}
           onPress={() => switchTab("trades")}
         >
-          <Text style={activeTab === "trades" ? styles.activeText : styles.inactiveText}>
+          <Text
+            style={
+              activeTab === "trades" ? styles.activeText : styles.inactiveText
+            }
+          >
             Your Trades
           </Text>
         </TouchableOpacity>
@@ -106,7 +121,11 @@ export default function TradeScreen() {
           style={activeTab === "offers" ? styles.activeTab : styles.inactiveTab}
           onPress={() => switchTab("offers")}
         >
-          <Text style={activeTab === "offers" ? styles.activeText : styles.inactiveText}>
+          <Text
+            style={
+              activeTab === "offers" ? styles.activeText : styles.inactiveText
+            }
+          >
             Your Offers
           </Text>
         </TouchableOpacity>
@@ -136,7 +155,9 @@ export default function TradeScreen() {
       <Animated.View style={{ flex: 1, opacity: fadeAnim }}>
         <FlatList
           data={activeTab === "trades" ? DATA : OFFERS_DATA}
-          renderItem={activeTab === "trades" ? renderTradeItem : renderOfferItem}
+          renderItem={
+            activeTab === "trades" ? renderTradeItem : renderOfferItem
+          }
           keyExtractor={(item) => item.id}
           showsVerticalScrollIndicator={false}
           contentContainerStyle={{ paddingBottom: 80 }}
@@ -146,10 +167,9 @@ export default function TradeScreen() {
       {/* Add Item */}
       <Animated.View style={{ transform: [{ scale: addButtonScale }] }}>
         <TouchableOpacity style={styles.addButton} onPress={handleAddItemPress}>
-          <Text style={styles.addText}>Add Item  +</Text>
+          <Text style={styles.addText}>Add Item +</Text>
         </TouchableOpacity>
       </Animated.View>
-
     </SafeAreaView>
   );
 }
@@ -158,9 +178,10 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: "#efeff4",
-    padding: 14
+    padding: 14,
   },
   tabs: {
+    marginTop: 10,
     flexDirection: "row",
     marginBottom: 12,
     marginHorizontal: 15,
@@ -170,21 +191,21 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     paddingHorizontal: 18,
     borderRadius: 10,
-    marginRight: 8
+    marginRight: 8,
   },
   inactiveTab: {
     backgroundColor: "#bfbfbf",
     paddingVertical: 10,
     paddingHorizontal: 18,
     borderRadius: 10,
-    marginRight: 8
+    marginRight: 8,
   },
   activeText: {
     color: "white",
-    fontWeight: "600"
+    fontWeight: "600",
   },
   inactiveText: {
-    color: "#555"
+    color: "#555",
   },
   searchBar: {
     flexDirection: "row",
@@ -198,10 +219,10 @@ const styles = StyleSheet.create({
   },
   searchIcon: {
     fontSize: 16,
-    marginRight: 8
+    marginRight: 8,
   },
   searchInput: {
-    flex: 1
+    flex: 1,
   },
   row: {
     flexDirection: "row",
@@ -213,11 +234,11 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     paddingVertical: 7,
     borderRadius: 8,
-    marginRight: 8
+    marginRight: 8,
   },
   smallText: {
     fontSize: 13,
-    color: "#444"
+    color: "#444",
   },
   card: {
     flexDirection: "row",
@@ -232,28 +253,28 @@ const styles = StyleSheet.create({
     width: 55,
     height: 55,
     borderRadius: 8,
-    marginRight: 10
+    marginRight: 10,
   },
   itemName: {
     flex: 1,
     fontWeight: "600",
-    color: "#222"
+    color: "#222",
   },
   offerButton: {
     backgroundColor: "#bfbfbf",
     paddingHorizontal: 12,
     paddingVertical: 6,
-    borderRadius: 7
+    borderRadius: 7,
   },
   statusButton: {
     backgroundColor: "#bfbfbf",
     paddingHorizontal: 12,
     paddingVertical: 6,
-    borderRadius: 7
+    borderRadius: 7,
   },
   offerText: {
     fontSize: 12,
-    color: "#333"
+    color: "#333",
   },
   addButton: {
     position: "absolute",
@@ -262,10 +283,10 @@ const styles = StyleSheet.create({
     backgroundColor: NAVY,
     paddingHorizontal: 18,
     paddingVertical: 12,
-    borderRadius: 10
+    borderRadius: 10,
   },
   addText: {
     color: "white",
-    fontWeight: "700"
-  }
+    fontWeight: "700",
+  },
 });

@@ -1,8 +1,10 @@
 import { FontAwesome, Ionicons } from "@expo/vector-icons";
 import { useLocalSearchParams } from "expo-router";
+import { onAuthStateChanged } from "firebase/auth";
 import React, { useEffect, useState } from "react";
 import {
   ActivityIndicator,
+  Alert,
   FlatList,
   Image,
   Pressable,
@@ -10,9 +12,15 @@ import {
   StyleSheet,
   Text,
   TextInput,
+  TouchableOpacity,
   View,
 } from "react-native";
-import { getAllItems } from "../../services/itemService";
+import { auth } from "../../firebaseConfig";
+import {
+  getAllItems,
+  isItemSaved,
+  updateItemSaves,
+} from "../../services/itemService";
 
 /* ---------------- DATA ---------------- */
 
@@ -35,6 +43,18 @@ export default function Screen() {
   const [isFilterOpen, setIsFilterOpen] = useState(false);
   const [allItems, setAllItems] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [userId, setUserId] = useState<string | null>(null);
+  const [savedItems, setSavedItems] = useState<Set<string>>(new Set());
+
+  // Setup auth listener
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, (user) => {
+      if (user) {
+        setUserId(user.uid);
+      }
+    });
+    return () => unsubscribe();
+  }, []);
 
   // Fetch items from Firebase on component mount
   useEffect(() => {
@@ -43,6 +63,18 @@ export default function Screen() {
         setLoading(true);
         const items = await getAllItems();
         setAllItems(items);
+
+        // Check which items are saved by current user
+        if (userId) {
+          const savedSet = new Set<string>();
+          for (const item of items) {
+            const isSaved = await isItemSaved(item.id, userId);
+            if (isSaved) {
+              savedSet.add(item.id);
+            }
+          }
+          setSavedItems(savedSet);
+        }
       } catch (error) {
         console.error("Error fetching items:", error);
       } finally {
@@ -51,11 +83,14 @@ export default function Screen() {
     };
 
     fetchItems();
-  }, []);
+  }, [userId]);
 
   // Handle search from params (passed from home screen)
   useEffect(() => {
-    if (typeof params.filter === "string" && FILTER_CATEGORIES.includes(params.filter)) {
+    if (
+      typeof params.filter === "string" &&
+      FILTER_CATEGORIES.includes(params.filter)
+    ) {
       setFilter(params.filter);
     } else {
       setFilter("All");
@@ -66,23 +101,49 @@ export default function Screen() {
     }
   }, [params.filter, params.search]);
 
+  const handleSaveItem = async (itemId: string) => {
+    if (!userId) {
+      Alert.alert("Login required", "Please log in to save items.");
+      return;
+    }
+
+    try {
+      const isSaved = savedItems.has(itemId);
+      await updateItemSaves(itemId, userId, !isSaved);
+
+      // Update local state
+      const newSavedItems = new Set(savedItems);
+      if (isSaved) {
+        newSavedItems.delete(itemId);
+      } else {
+        newSavedItems.add(itemId);
+      }
+      setSavedItems(newSavedItems);
+    } catch (error) {
+      console.error("Error saving item:", error);
+      Alert.alert("Error", "Failed to save item. Please try again.");
+    }
+  };
+
   /* ---------- LOGIC ---------- */
 
   const filteredItems = allItems
     .filter((item) => {
-      const matchSearch = search.length === 0 || (
-        (item.title && item.title.toLowerCase().includes(search.toLowerCase())) ||
-        (item.description && item.description.toLowerCase().includes(search.toLowerCase()))
-      );
+      const matchSearch =
+        search.length === 0 ||
+        (item.title &&
+          item.title.toLowerCase().includes(search.toLowerCase())) ||
+        (item.description &&
+          item.description.toLowerCase().includes(search.toLowerCase()));
 
-      const matchFilter =
-        filter === "All" || (item.category === filter);
+      const matchFilter = filter === "All" || item.category === filter;
 
       return matchSearch && matchFilter;
     })
     .sort((a, b) => {
       if (sortType === "likes") return (b.likes || 0) - (a.likes || 0);
-      if (sortType === "name") return (a.title || "").localeCompare(b.title || "");
+      if (sortType === "name")
+        return (a.title || "").localeCompare(b.title || "");
       return 0;
     });
 
@@ -90,7 +151,7 @@ export default function Screen() {
 
   const handleSort = () => {
     setSortType((prev) =>
-      prev === "none" ? "likes" : prev === "likes" ? "name" : "none"
+      prev === "none" ? "likes" : prev === "likes" ? "name" : "none",
     );
   };
 
@@ -121,7 +182,13 @@ export default function Screen() {
       <FlatList
         data={filteredItems}
         keyExtractor={(item) => item.id}
-        renderItem={({ item }) => <ItemCard item={item} />}
+        renderItem={({ item }) => (
+          <ItemCard
+            item={item}
+            isSaved={savedItems.has(item.id)}
+            onSavePress={() => handleSaveItem(item.id)}
+          />
+        )}
         ListHeaderComponent={
           <>
             {/* SEARCH */}
@@ -144,7 +211,10 @@ export default function Screen() {
 
               <Pressable style={styles.filterBtn} onPress={handleFilterToggle}>
                 <Text style={styles.filterText}>Filter ({filter})</Text>
-                <Ionicons name={isFilterOpen ? "chevron-up" : "chevron-down"} size={14} />
+                <Ionicons
+                  name={isFilterOpen ? "chevron-up" : "chevron-down"}
+                  size={14}
+                />
               </Pressable>
             </View>
             {isFilterOpen && (
@@ -171,7 +241,9 @@ export default function Screen() {
         }
         ListEmptyComponent={
           <View style={styles.emptyContainer}>
-            <Text style={styles.emptyText}>No items found. Try adjusting your search or filters.</Text>
+            <Text style={styles.emptyText}>
+              No items found. Try adjusting your search or filters.
+            </Text>
           </View>
         }
         showsVerticalScrollIndicator={false}
@@ -182,26 +254,28 @@ export default function Screen() {
 
 /* ---------------- CARD ---------------- */
 
-function ItemCard({ item }: any) {
+function ItemCard({ item, isSaved, onSavePress }: any) {
   return (
     <View style={styles.card}>
       <View style={styles.header}>
-        <Image 
-          source={{ uri: item.avatar || "https://i.pravatar.cc/150?img=1" }} 
-          style={styles.avatar} 
+        <Image
+          source={{ uri: item.avatar || "https://i.pravatar.cc/150?img=1" }}
+          style={styles.avatar}
         />
 
         <View style={{ flex: 1 }}>
           <Text style={styles.username}>{item.userName || "Unknown User"}</Text>
-          <Text style={styles.date}>{item.date || new Date().toLocaleDateString()}</Text>
+          <Text style={styles.date}>
+            {item.date || new Date().toLocaleDateString()}
+          </Text>
         </View>
 
         <Ionicons name="ribbon" size={18} color="#FFC107" />
       </View>
 
-      <Image 
-        source={{ uri: item.image || "https://via.placeholder.com/400x200" }} 
-        style={styles.image} 
+      <Image
+        source={{ uri: item.image || "https://via.placeholder.com/400x200" }}
+        style={styles.image}
       />
 
       <Text style={styles.title}>{item.title}</Text>
@@ -213,12 +287,17 @@ function ItemCard({ item }: any) {
         <Ionicons name="heart-outline" size={16} />
         <Text style={{ marginHorizontal: 5 }}>{item.likes || 0}</Text>
         <Ionicons name="chatbubble-outline" size={16} />
-        <FontAwesome name="bookmark-o" size={16} />
+        <TouchableOpacity onPress={onSavePress}>
+          <FontAwesome
+            name={isSaved ? "bookmark" : "bookmark-o"}
+            size={16}
+            color={isSaved ? "#C0392B" : "#000"}
+          />
+        </TouchableOpacity>
       </View>
     </View>
   );
 }
-
 
 /* ---------------- STYLES ---------------- */
 
@@ -362,5 +441,3 @@ const styles = StyleSheet.create({
   navItem: { flex: 1, alignItems: "center" },
   navText: { fontSize: 10, color: "#777" },
 });
-
-

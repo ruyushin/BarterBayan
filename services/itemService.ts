@@ -1,17 +1,17 @@
 import {
-    arrayRemove,
-    arrayUnion,
-    collection,
-    doc,
-    getDoc,
-    getDocs,
-    updateDoc,
-} from 'firebase/firestore';
-import { db } from '../firebaseConfig';
+  arrayRemove,
+  arrayUnion,
+  collection,
+  doc,
+  getDoc,
+  getDocs,
+  updateDoc,
+} from "firebase/firestore";
+import { db } from "../firebaseConfig";
 
 // TEST FUNCTION: Fetch the specific item from image_9b1520.png
 export const getItemsByCategory = async (category: string) => {
-  const docRef = doc(db, 'items', 'LTJvXhFNMHkuVON8VNKX'); // Verbatim ID from image
+  const docRef = doc(db, "items", "LTJvXhFNMHkuVON8VNKX"); // Verbatim ID from image
   const docSnap = await getDoc(docRef);
 
   if (docSnap.exists()) {
@@ -23,10 +23,10 @@ export const getItemsByCategory = async (category: string) => {
 
 // FETCH ALL: For your index.tsx feed
 export const getAllItems = async () => {
-  const querySnapshot = await getDocs(collection(db, 'items'));
-  return querySnapshot.docs.map(doc => ({
+  const querySnapshot = await getDocs(collection(db, "items"));
+  return querySnapshot.docs.map((doc) => ({
     id: doc.id,
-    ...doc.data()
+    ...doc.data(),
   }));
 };
 
@@ -36,17 +36,19 @@ export const searchItems = async (searchQuery: string) => {
     return getAllItems();
   }
 
-  const querySnapshot = await getDocs(collection(db, 'items'));
+  const querySnapshot = await getDocs(collection(db, "items"));
   const searchLower = searchQuery.toLowerCase();
-  
+
   return querySnapshot.docs
-    .map(doc => ({
+    .map((doc) => ({
       id: doc.id,
-      ...doc.data()
+      ...doc.data(),
     }))
-    .filter((item: any) => 
-      (item.title && item.title.toLowerCase().includes(searchLower)) ||
-      (item.description && item.description.toLowerCase().includes(searchLower))
+    .filter(
+      (item: any) =>
+        (item.title && item.title.toLowerCase().includes(searchLower)) ||
+        (item.description &&
+          item.description.toLowerCase().includes(searchLower)),
     );
 };
 
@@ -55,7 +57,7 @@ export const searchItems = async (searchQuery: string) => {
  */
 export const getUserInfo = async (userId: string) => {
   try {
-    const userRef = doc(db, 'users', userId);
+    const userRef = doc(db, "users", userId);
     const userSnap = await getDoc(userRef);
 
     if (userSnap.exists()) {
@@ -64,10 +66,10 @@ export const getUserInfo = async (userId: string) => {
         ...userSnap.data(),
       };
     } else {
-      throw new Error('User not found');
+      throw new Error("User not found");
     }
   } catch (error) {
-    console.error('Error getting user info:', error);
+    console.error("Error getting user info:", error);
     throw error;
   }
 };
@@ -77,7 +79,7 @@ export const getUserInfo = async (userId: string) => {
  */
 export const getItemDetails = async (itemId: string) => {
   try {
-    const itemRef = doc(db, 'items', itemId);
+    const itemRef = doc(db, "items", itemId);
     const itemSnap = await getDoc(itemRef);
 
     if (itemSnap.exists()) {
@@ -90,10 +92,10 @@ export const getItemDetails = async (itemId: string) => {
         owner: ownerInfo,
       };
     } else {
-      throw new Error('Item not found');
+      throw new Error("Item not found");
     }
   } catch (error) {
-    console.error('Error getting item details:', error);
+    console.error("Error getting item details:", error);
     throw error;
   }
 };
@@ -107,10 +109,10 @@ export const getItemDetails = async (itemId: string) => {
 export const updateItemLikes = async (
   itemId: string,
   userId: string,
-  isLiking: boolean
+  isLiking: boolean,
 ) => {
   try {
-    const itemRef = doc(db, 'items', itemId);
+    const itemRef = doc(db, "items", itemId);
 
     if (isLiking) {
       // Add user to likedBy array and increment likes count
@@ -129,7 +131,7 @@ export const updateItemLikes = async (
       });
     }
   } catch (error) {
-    console.error('Error updating likes:', error);
+    console.error("Error updating likes:", error);
     throw error;
   }
 };
@@ -140,7 +142,7 @@ export const updateItemLikes = async (
  */
 export const initializeLikedBy = async (itemId: string) => {
   try {
-    const itemRef = doc(db, 'items', itemId);
+    const itemRef = doc(db, "items", itemId);
     const itemSnap = await getDoc(itemRef);
 
     if (itemSnap.exists() && !itemSnap.data()?.likedBy) {
@@ -149,7 +151,104 @@ export const initializeLikedBy = async (itemId: string) => {
       });
     }
   } catch (error) {
-    console.error('Error initializing likedBy:', error);
+    console.error("Error initializing likedBy:", error);
     throw error;
+  }
+};
+
+/**
+ * Save/bookmark an item for the user
+ * @param itemId - Item document ID
+ * @param userId - User ID who is saving the item
+ * @param isSaving - true to save, false to unsave
+ */
+export const updateItemSaves = async (
+  itemId: string,
+  userId: string,
+  isSaving: boolean,
+) => {
+  try {
+    const itemRef = doc(db, "items", itemId);
+    const userRef = doc(db, "users", userId);
+
+    if (isSaving) {
+      // Add to savedBy array on item and add to savedItems array on user
+      await updateDoc(itemRef, {
+        savedBy: arrayUnion(userId),
+      });
+      await updateDoc(userRef, {
+        savedItems: arrayUnion(itemId),
+        savedCount: (await getDoc(userRef)).data()?.savedCount + 1 || 1,
+      });
+    } else {
+      // Remove from savedBy array on item and remove from savedItems array on user
+      const userSnap = await getDoc(userRef);
+      const currentSaved = userSnap.data()?.savedCount || 0;
+
+      await updateDoc(itemRef, {
+        savedBy: arrayRemove(userId),
+      });
+      await updateDoc(userRef, {
+        savedItems: arrayRemove(itemId),
+        savedCount: Math.max(currentSaved - 1, 0),
+      });
+    }
+  } catch (error) {
+    console.error("Error updating saves:", error);
+    throw error;
+  }
+};
+
+/**
+ * Get all saved items for a user
+ * @param userId - User ID to fetch saved items for
+ */
+export const getSavedItems = async (userId: string) => {
+  try {
+    const userRef = doc(db, "users", userId);
+    const userSnap = await getDoc(userRef);
+
+    if (!userSnap.exists()) {
+      throw new Error("User not found");
+    }
+
+    const savedItemIds = userSnap.data()?.savedItems || [];
+
+    if (savedItemIds.length === 0) {
+      return [];
+    }
+
+    // Fetch all saved items
+    const itemsPromises = savedItemIds.map((itemId: string) =>
+      getItemDetails(itemId).catch(() => null),
+    );
+
+    const items = await Promise.all(itemsPromises);
+    return items.filter((item): item is any => item !== null);
+  } catch (error) {
+    console.error("Error fetching saved items:", error);
+    throw error;
+  }
+};
+
+/**
+ * Check if an item is saved by the user
+ * @param itemId - Item document ID
+ * @param userId - User ID to check
+ */
+export const isItemSaved = async (itemId: string, userId: string) => {
+  try {
+    const itemRef = doc(db, "items", itemId);
+    const itemSnap = await getDoc(itemRef);
+
+    if (!itemSnap.exists()) {
+      return false;
+    }
+
+    const savedBy = itemSnap.data()?.savedBy || [];
+    return savedBy.includes(userId);
+  } catch (error) {
+    console.error("Error checking if item is saved:", error);
+    return false;
   }
 };

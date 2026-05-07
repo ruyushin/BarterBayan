@@ -1,5 +1,5 @@
-import { useRouter } from 'expo-router';
-import { onAuthStateChanged, User } from 'firebase/auth';
+import { useRouter } from "expo-router";
+import { onAuthStateChanged, User } from "firebase/auth";
 import {
   collection,
   limit,
@@ -7,8 +7,8 @@ import {
   orderBy,
   query,
   where,
-} from 'firebase/firestore';
-import React, { useEffect, useRef, useState } from 'react';
+} from "firebase/firestore";
+import React, { useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Animated,
@@ -18,18 +18,18 @@ import {
   Text,
   TouchableOpacity,
   View,
-} from 'react-native';
-import { auth, db } from '../firebaseConfig.ts';
+} from "react-native";
+import { auth, db } from "../firebaseConfig.ts";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
-const DARK_BLUE = '#2D2D7A';
-const HEADER_BG = '#2f2f6f';
-const LIGHT_BG = '#F4F5F9';
-const ACCENT_RED = '#C0392B';
-const GOLD = '#C9A227';
+const DARK_BLUE = "#2D2D7A";
+const HEADER_BG = "#2f2f6f";
+const LIGHT_BG = "#F4F5F9";
+const ACCENT_RED = "#C0392B";
+const GOLD = "#C9A227";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
-export type TradeStatus = 'pending' | 'completed' | 'cancelled' | 'declined';
+export type TradeStatus = "pending" | "completed" | "cancelled" | "declined";
 
 export interface TradeRecord {
   id: string;
@@ -49,14 +49,14 @@ export interface TradeRecord {
   note?: string;
 }
 
-type FilterTab = 'all' | TradeStatus;
+type FilterTab = "all" | TradeStatus;
 
 const FILTER_TABS: { key: FilterTab; label: string }[] = [
-  { key: 'all', label: 'All' },
-  { key: 'pending', label: 'Pending' },
-  { key: 'completed', label: 'Completed' },
-  { key: 'cancelled', label: 'Cancelled' },
-  { key: 'declined', label: 'Declined' },
+  { key: "all", label: "All" },
+  { key: "pending", label: "Pending" },
+  { key: "completed", label: "Completed" },
+  { key: "cancelled", label: "Cancelled" },
+  { key: "declined", label: "Declined" },
 ];
 
 // ─── Status config ────────────────────────────────────────────────────────────
@@ -64,10 +64,25 @@ const STATUS_CONFIG: Record<
   TradeStatus,
   { label: string; color: string; bg: string; emoji: string }
 > = {
-  pending: { label: 'Pending', color: '#B45309', bg: '#FEF3C7', emoji: '⏳' },
-  completed: { label: 'Completed', color: '#065F46', bg: '#D1FAE5', emoji: '✅' },
-  cancelled: { label: 'Cancelled', color: '#6B7280', bg: '#F3F4F6', emoji: '🚫' },
-  declined: { label: 'Declined', color: ACCENT_RED, bg: '#FEE2E2', emoji: '❌' },
+  pending: { label: "Pending", color: "#B45309", bg: "#FEF3C7", emoji: "⏳" },
+  completed: {
+    label: "Completed",
+    color: "#065F46",
+    bg: "#D1FAE5",
+    emoji: "✅",
+  },
+  cancelled: {
+    label: "Cancelled",
+    color: "#6B7280",
+    bg: "#F3F4F6",
+    emoji: "🚫",
+  },
+  declined: {
+    label: "Declined",
+    color: ACCENT_RED,
+    bg: "#FEE2E2",
+    emoji: "❌",
+  },
 };
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -76,14 +91,18 @@ function formatDate(date: Date): string {
   const diffMs = now.getTime() - date.getTime();
   const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
 
-  if (diffDays === 0) return 'Today';
-  if (diffDays === 1) return 'Yesterday';
+  if (diffDays === 0) return "Today";
+  if (diffDays === 1) return "Yesterday";
   if (diffDays < 7) return `${diffDays} days ago`;
-  return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+  return date.toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  });
 }
 
 function avatarInitial(name: string): string {
-  return (name ?? 'U')[0].toUpperCase();
+  return (name ?? "U")[0].toUpperCase();
 }
 
 // ─── Trade Card ───────────────────────────────────────────────────────────────
@@ -121,7 +140,7 @@ function TradeCard({ trade }: { trade: TradeRecord }) {
             ]}
           >
             <Text style={cardStyles.directionText}>
-              {trade.initiatedByMe ? '↑' : '↓'}
+              {trade.initiatedByMe ? "↑" : "↓"}
             </Text>
           </View>
         </View>
@@ -132,7 +151,9 @@ function TradeCard({ trade }: { trade: TradeRecord }) {
             <Text style={cardStyles.counterpart} numberOfLines={1}>
               {trade.counterpartUsername}
             </Text>
-            <Text style={cardStyles.dateText}>{formatDate(trade.createdAt)}</Text>
+            <Text style={cardStyles.dateText}>
+              {formatDate(trade.createdAt)}
+            </Text>
           </View>
 
           {/* Items exchange row */}
@@ -167,32 +188,35 @@ function TradeCard({ trade }: { trade: TradeRecord }) {
 
 // ─── Empty State ──────────────────────────────────────────────────────────────
 function EmptyState({ filter }: { filter: FilterTab }) {
-  const messages: Record<FilterTab, { emoji: string; title: string; subtitle: string }> = {
+  const messages: Record<
+    FilterTab,
+    { emoji: string; title: string; subtitle: string }
+  > = {
     all: {
-      emoji: '🤝',
-      title: 'No trades yet',
+      emoji: "🤝",
+      title: "No trades yet",
       subtitle:
-        'Your trade history will appear here once you start proposing or receiving trades.',
+        "Your trade history will appear here once you start proposing or receiving trades.",
     },
     pending: {
-      emoji: '⏳',
-      title: 'No pending trades',
-      subtitle: 'Trades waiting for a response will show up here.',
+      emoji: "⏳",
+      title: "No pending trades",
+      subtitle: "Trades waiting for a response will show up here.",
     },
     completed: {
-      emoji: '✅',
-      title: 'No completed trades',
-      subtitle: 'Successfully exchanged trades will be recorded here.',
+      emoji: "✅",
+      title: "No completed trades",
+      subtitle: "Successfully exchanged trades will be recorded here.",
     },
     cancelled: {
-      emoji: '🚫',
-      title: 'No cancelled trades',
-      subtitle: 'Trades you or your counterpart cancelled will appear here.',
+      emoji: "🚫",
+      title: "No cancelled trades",
+      subtitle: "Trades you or your counterpart cancelled will appear here.",
     },
     declined: {
-      emoji: '❌',
-      title: 'No declined trades',
-      subtitle: 'Trades that were declined will show up here.',
+      emoji: "❌",
+      title: "No declined trades",
+      subtitle: "Trades that were declined will show up here.",
     },
   };
 
@@ -209,10 +233,12 @@ function EmptyState({ filter }: { filter: FilterTab }) {
       {/* Coming soon callout */}
       <View style={emptyStyles.comingSoonBox}>
         <Text style={emptyStyles.comingSoonIcon}>🔧</Text>
-        <Text style={emptyStyles.comingSoonTitle}>Trade module coming soon</Text>
+        <Text style={emptyStyles.comingSoonTitle}>
+          Trade module coming soon
+        </Text>
         <Text style={emptyStyles.comingSoonText}>
-          We're still building out the trade engine. Once it's live, all your trade
-          activity will be tracked and displayed right here.
+          We're still building out the trade engine. Once it's live, all your
+          trade activity will be tracked and displayed right here.
         </Text>
       </View>
     </View>
@@ -221,8 +247,8 @@ function EmptyState({ filter }: { filter: FilterTab }) {
 
 // ─── Summary Bar ─────────────────────────────────────────────────────────────
 function SummaryBar({ trades }: { trades: TradeRecord[] }) {
-  const completed = trades.filter((t) => t.status === 'completed').length;
-  const pending = trades.filter((t) => t.status === 'pending').length;
+  const completed = trades.filter((t) => t.status === "completed").length;
+  const pending = trades.filter((t) => t.status === "pending").length;
   const total = trades.length;
 
   return (
@@ -233,12 +259,16 @@ function SummaryBar({ trades }: { trades: TradeRecord[] }) {
       </View>
       <View style={summaryStyles.divider} />
       <View style={summaryStyles.stat}>
-        <Text style={[summaryStyles.statNum, { color: '#065F46' }]}>{completed}</Text>
+        <Text style={[summaryStyles.statNum, { color: "#065F46" }]}>
+          {completed}
+        </Text>
         <Text style={summaryStyles.statLabel}>Completed</Text>
       </View>
       <View style={summaryStyles.divider} />
       <View style={summaryStyles.stat}>
-        <Text style={[summaryStyles.statNum, { color: '#B45309' }]}>{pending}</Text>
+        <Text style={[summaryStyles.statNum, { color: "#B45309" }]}>
+          {pending}
+        </Text>
         <Text style={summaryStyles.statLabel}>Pending</Text>
       </View>
     </View>
@@ -252,7 +282,7 @@ export default function TradeHistoryScreen() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [activeFilter, setActiveFilter] = useState<FilterTab>('all');
+  const [activeFilter, setActiveFilter] = useState<FilterTab>("all");
   const [currentUser, setCurrentUser] = useState<User | null>(null);
 
   const fadeAnim = useRef(new Animated.Value(0)).current;
@@ -260,8 +290,16 @@ export default function TradeHistoryScreen() {
 
   const animateIn = () => {
     Animated.parallel([
-      Animated.timing(fadeAnim, { toValue: 1, duration: 350, useNativeDriver: true }),
-      Animated.spring(slideAnim, { toValue: 0, useNativeDriver: true, tension: 80 }),
+      Animated.timing(fadeAnim, {
+        toValue: 1,
+        duration: 350,
+        useNativeDriver: true,
+      }),
+      Animated.spring(slideAnim, {
+        toValue: 0,
+        useNativeDriver: true,
+        tension: 80,
+      }),
     ]).start();
   };
 
@@ -269,7 +307,7 @@ export default function TradeHistoryScreen() {
   useEffect(() => {
     const unsubscribeAuth = onAuthStateChanged(auth, (user) => {
       if (!user) {
-        router.replace('/login');
+        router.replace("/login");
         return;
       }
       setCurrentUser(user);
@@ -287,12 +325,12 @@ export default function TradeHistoryScreen() {
     // Trades where the current user is either the initiator or the receiver.
     // NOTE: This requires a composite index on (participants, createdAt desc).
     // Adjust the collection name / field paths to match your schema.
-    const tradesRef = collection(db, 'trades');
+    const tradesRef = collection(db, "trades");
     const q = query(
       tradesRef,
-      where('participants', 'array-contains', currentUser.uid),
-      orderBy('createdAt', 'desc'),
-      limit(100)
+      where("participants", "array-contains", currentUser.uid),
+      orderBy("createdAt", "desc"),
+      limit(100),
     );
 
     const unsubscribeTrades = onSnapshot(
@@ -302,12 +340,12 @@ export default function TradeHistoryScreen() {
           const d = docSnap.data();
           return {
             id: docSnap.id,
-            counterpartUid: d.counterpartUid ?? '',
-            counterpartUsername: d.counterpartUsername ?? 'Unknown',
+            counterpartUid: d.counterpartUid ?? "",
+            counterpartUsername: d.counterpartUsername ?? "Unknown",
             counterpartAvatarUrl: d.counterpartAvatarUrl,
-            offeredItemTitle: d.offeredItemTitle ?? 'Unknown item',
-            requestedItemTitle: d.requestedItemTitle ?? 'Unknown item',
-            status: d.status ?? 'pending',
+            offeredItemTitle: d.offeredItemTitle ?? "Unknown item",
+            requestedItemTitle: d.requestedItemTitle ?? "Unknown item",
+            status: d.status ?? "pending",
             initiatedByMe: d.initiatorUid === currentUser.uid,
             createdAt: d.createdAt?.toDate?.() ?? new Date(),
             updatedAt: d.updatedAt?.toDate?.() ?? new Date(),
@@ -322,18 +360,18 @@ export default function TradeHistoryScreen() {
         animateIn();
       },
       (err) => {
-        console.error('Trade history error:', err);
+        console.error("Trade history error:", err);
         const isOffline =
-          err?.code === 'unavailable' || /offline/i.test(err?.message ?? '');
+          err?.code === "unavailable" || /offline/i.test(err?.message ?? "");
         setError(
           isOffline
-            ? 'You appear to be offline. Showing cached data.'
-            : 'Failed to load trade history.'
+            ? "You appear to be offline. Showing cached data."
+            : "Failed to load trade history.",
         );
         setLoading(false);
         setRefreshing(false);
         animateIn();
-      }
+      },
     );
 
     return () => unsubscribeTrades();
@@ -341,7 +379,7 @@ export default function TradeHistoryScreen() {
 
   // ── Filtered list ──
   const filteredTrades =
-    activeFilter === 'all'
+    activeFilter === "all"
       ? trades
       : trades.filter((t) => t.status === activeFilter);
 
@@ -404,8 +442,9 @@ export default function TradeHistoryScreen() {
           />
         }
       >
-        <Animated.View style={{ opacity: fadeAnim, transform: [{ translateY: slideAnim }] }}>
-
+        <Animated.View
+          style={{ opacity: fadeAnim, transform: [{ translateY: slideAnim }] }}
+        >
           {/* ── Error Banner ── */}
           {error && (
             <View style={styles.errorBanner}>
@@ -426,7 +465,7 @@ export default function TradeHistoryScreen() {
             {FILTER_TABS.map((tab) => {
               const isActive = activeFilter === tab.key;
               const count =
-                tab.key === 'all'
+                tab.key === "all"
                   ? trades.length
                   : trades.filter((t) => t.status === tab.key).length;
               return (
@@ -436,12 +475,24 @@ export default function TradeHistoryScreen() {
                   onPress={() => setActiveFilter(tab.key)}
                   activeOpacity={0.7}
                 >
-                  <Text style={[styles.tabLabel, isActive && styles.tabLabelActive]}>
+                  <Text
+                    style={[styles.tabLabel, isActive && styles.tabLabelActive]}
+                  >
                     {tab.label}
                   </Text>
                   {count > 0 && (
-                    <View style={[styles.tabBadge, isActive && styles.tabBadgeActive]}>
-                      <Text style={[styles.tabBadgeText, isActive && styles.tabBadgeTextActive]}>
+                    <View
+                      style={[
+                        styles.tabBadge,
+                        isActive && styles.tabBadgeActive,
+                      ]}
+                    >
+                      <Text
+                        style={[
+                          styles.tabBadgeText,
+                          isActive && styles.tabBadgeTextActive,
+                        ]}
+                      >
                         {count}
                       </Text>
                     </View>
@@ -459,7 +510,9 @@ export default function TradeHistoryScreen() {
               {/* Direction legend */}
               <View style={styles.legend}>
                 <View style={styles.legendItem}>
-                  <View style={[styles.legendDot, { backgroundColor: DARK_BLUE }]}>
+                  <View
+                    style={[styles.legendDot, { backgroundColor: DARK_BLUE }]}
+                  >
                     <Text style={styles.legendDotText}>↑</Text>
                   </View>
                   <Text style={styles.legendLabel}>You initiated</Text>
@@ -493,9 +546,9 @@ const styles = StyleSheet.create({
   // Header
   header: {
     backgroundColor: HEADER_BG,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
     paddingHorizontal: 16,
     paddingTop: 15,
     paddingBottom: 15,
@@ -504,21 +557,21 @@ const styles = StyleSheet.create({
     width: 36,
     height: 36,
     borderRadius: 18,
-    backgroundColor: 'rgba(255,255,255,0.15)',
-    justifyContent: 'center',
-    alignItems: 'center',
+    backgroundColor: "rgba(255,255,255,0.15)",
+    justifyContent: "center",
+    alignItems: "center",
   },
   backIcon: {
-    color: '#fff',
+    color: "#fff",
     fontSize: 28,
-    fontWeight: '300',
+    fontWeight: "300",
     lineHeight: 32,
     marginTop: -2,
   },
   headerTitle: {
-    color: '#fff',
+    color: "#fff",
     fontSize: 22,
-    fontWeight: '800',
+    fontWeight: "800",
     letterSpacing: 0.4,
   },
   headerSpacer: { width: 36 },
@@ -526,29 +579,29 @@ const styles = StyleSheet.create({
   // Loading
   loadingContainer: {
     flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
+    justifyContent: "center",
+    alignItems: "center",
   },
   loadingText: {
     marginTop: 12,
     fontSize: 14,
-    color: '#888',
+    color: "#888",
   },
 
   // Error banner
   errorBanner: {
-    backgroundColor: '#FFF3CD',
+    backgroundColor: "#FFF3CD",
     padding: 12,
     marginHorizontal: 16,
     marginTop: 14,
     borderRadius: 10,
     borderLeftWidth: 4,
-    borderLeftColor: '#F5A623',
+    borderLeftColor: "#F5A623",
   },
   errorBannerText: {
-    color: '#856404',
+    color: "#856404",
     fontSize: 13,
-    fontWeight: '500',
+    fontWeight: "500",
   },
 
   // Scroll
@@ -565,14 +618,14 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   tab: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: "row",
+    alignItems: "center",
     paddingVertical: 7,
     paddingHorizontal: 14,
     borderRadius: 20,
-    backgroundColor: '#fff',
+    backgroundColor: "#fff",
     borderWidth: 1.5,
-    borderColor: '#E5E5E5',
+    borderColor: "#E5E5E5",
     gap: 6,
   },
   tabActive: {
@@ -581,31 +634,31 @@ const styles = StyleSheet.create({
   },
   tabLabel: {
     fontSize: 13,
-    fontWeight: '600',
-    color: '#555',
+    fontWeight: "600",
+    color: "#555",
   },
   tabLabelActive: {
-    color: '#fff',
+    color: "#fff",
   },
   tabBadge: {
     minWidth: 18,
     height: 18,
     borderRadius: 9,
-    backgroundColor: '#ECECEC',
-    justifyContent: 'center',
-    alignItems: 'center',
+    backgroundColor: "#ECECEC",
+    justifyContent: "center",
+    alignItems: "center",
     paddingHorizontal: 4,
   },
   tabBadgeActive: {
-    backgroundColor: 'rgba(255,255,255,0.25)',
+    backgroundColor: "rgba(255,255,255,0.25)",
   },
   tabBadgeText: {
     fontSize: 11,
-    fontWeight: '700',
-    color: '#666',
+    fontWeight: "700",
+    color: "#666",
   },
   tabBadgeTextActive: {
-    color: '#fff',
+    color: "#fff",
   },
 
   // List
@@ -617,45 +670,45 @@ const styles = StyleSheet.create({
 
   // Legend
   legend: {
-    flexDirection: 'row',
+    flexDirection: "row",
     gap: 16,
     marginBottom: 4,
   },
   legendItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: "row",
+    alignItems: "center",
     gap: 6,
   },
   legendDot: {
     width: 18,
     height: 18,
     borderRadius: 9,
-    justifyContent: 'center',
-    alignItems: 'center',
+    justifyContent: "center",
+    alignItems: "center",
   },
   legendDotText: {
-    color: '#fff',
+    color: "#fff",
     fontSize: 10,
-    fontWeight: '800',
+    fontWeight: "800",
   },
   legendLabel: {
     fontSize: 12,
-    color: '#888',
-    fontWeight: '500',
+    color: "#888",
+    fontWeight: "500",
   },
 });
 
 // ─── Card Styles ──────────────────────────────────────────────────────────────
 const cardStyles = StyleSheet.create({
   card: {
-    backgroundColor: '#fff',
+    backgroundColor: "#fff",
     borderRadius: 14,
     padding: 16,
-    flexDirection: 'row',
-    alignItems: 'flex-start',
+    flexDirection: "row",
+    alignItems: "flex-start",
     gap: 14,
     elevation: 1,
-    shadowColor: '#000',
+    shadowColor: "#000",
     shadowOffset: { width: 0, height: 1 },
     shadowOpacity: 0.06,
     shadowRadius: 4,
@@ -663,7 +716,7 @@ const cardStyles = StyleSheet.create({
 
   // Avatar
   avatarWrapper: {
-    position: 'relative',
+    position: "relative",
     width: 48,
     height: 48,
   },
@@ -672,30 +725,30 @@ const cardStyles = StyleSheet.create({
     height: 48,
     borderRadius: 24,
     backgroundColor: DARK_BLUE,
-    justifyContent: 'center',
-    alignItems: 'center',
+    justifyContent: "center",
+    alignItems: "center",
   },
   avatarText: {
-    color: '#fff',
+    color: "#fff",
     fontSize: 20,
-    fontWeight: '800',
+    fontWeight: "800",
   },
   directionBadge: {
-    position: 'absolute',
+    position: "absolute",
     bottom: -2,
     right: -2,
     width: 18,
     height: 18,
     borderRadius: 9,
-    justifyContent: 'center',
-    alignItems: 'center',
+    justifyContent: "center",
+    alignItems: "center",
     borderWidth: 2,
-    borderColor: '#fff',
+    borderColor: "#fff",
   },
   directionText: {
-    color: '#fff',
+    color: "#fff",
     fontSize: 9,
-    fontWeight: '800',
+    fontWeight: "800",
     lineHeight: 11,
   },
 
@@ -705,53 +758,53 @@ const cardStyles = StyleSheet.create({
     gap: 5,
   },
   nameRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
   },
   counterpart: {
     fontSize: 15,
-    fontWeight: '700',
-    color: '#1A1A2E',
+    fontWeight: "700",
+    color: "#1A1A2E",
     flex: 1,
   },
   dateText: {
     fontSize: 11,
-    color: '#AAAAAA',
-    fontWeight: '500',
+    color: "#AAAAAA",
+    fontWeight: "500",
     marginLeft: 8,
   },
 
   // Items
   itemsRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: "row",
+    alignItems: "center",
     gap: 6,
   },
   itemLabel: {
     flex: 1,
     fontSize: 12.5,
-    color: '#555',
-    fontWeight: '500',
+    color: "#555",
+    fontWeight: "500",
   },
   arrow: {
     fontSize: 14,
     color: DARK_BLUE,
-    fontWeight: '700',
+    fontWeight: "700",
   },
 
   // Note
   note: {
     fontSize: 12,
-    color: '#AAAAAA',
-    fontStyle: 'italic',
+    color: "#AAAAAA",
+    fontStyle: "italic",
   },
 
   // Status pill
   statusPill: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    alignSelf: 'flex-start',
+    flexDirection: "row",
+    alignItems: "center",
+    alignSelf: "flex-start",
     paddingVertical: 3,
     paddingHorizontal: 10,
     borderRadius: 20,
@@ -763,45 +816,45 @@ const cardStyles = StyleSheet.create({
   },
   statusLabel: {
     fontSize: 11,
-    fontWeight: '700',
+    fontWeight: "700",
   },
 });
 
 // ─── Summary Styles ───────────────────────────────────────────────────────────
 const summaryStyles = StyleSheet.create({
   bar: {
-    flexDirection: 'row',
+    flexDirection: "row",
     marginHorizontal: 16,
     marginTop: 16,
-    backgroundColor: '#fff',
+    backgroundColor: "#fff",
     borderRadius: 14,
     paddingVertical: 16,
     elevation: 1,
-    shadowColor: '#000',
+    shadowColor: "#000",
     shadowOffset: { width: 0, height: 1 },
     shadowOpacity: 0.06,
     shadowRadius: 4,
   },
   stat: {
     flex: 1,
-    alignItems: 'center',
+    alignItems: "center",
     gap: 2,
   },
   statNum: {
     fontSize: 22,
-    fontWeight: '800',
+    fontWeight: "800",
     color: DARK_BLUE,
   },
   statLabel: {
     fontSize: 11,
-    color: '#999',
-    fontWeight: '600',
-    textTransform: 'uppercase',
+    color: "#999",
+    fontWeight: "600",
+    textTransform: "uppercase",
     letterSpacing: 0.5,
   },
   divider: {
     width: 1,
-    backgroundColor: '#ECECEC',
+    backgroundColor: "#ECECEC",
     marginVertical: 4,
   },
 });
@@ -809,7 +862,7 @@ const summaryStyles = StyleSheet.create({
 // ─── Empty State Styles ───────────────────────────────────────────────────────
 const emptyStyles = StyleSheet.create({
   container: {
-    alignItems: 'center',
+    alignItems: "center",
     paddingHorizontal: 28,
     paddingTop: 48,
     paddingBottom: 16,
@@ -818,9 +871,9 @@ const emptyStyles = StyleSheet.create({
     width: 80,
     height: 80,
     borderRadius: 40,
-    backgroundColor: '#ECEDF8',
-    justifyContent: 'center',
-    alignItems: 'center',
+    backgroundColor: "#ECEDF8",
+    justifyContent: "center",
+    alignItems: "center",
     marginBottom: 16,
   },
   emoji: {
@@ -828,27 +881,27 @@ const emptyStyles = StyleSheet.create({
   },
   title: {
     fontSize: 20,
-    fontWeight: '800',
-    color: '#1A1A2E',
+    fontWeight: "800",
+    color: "#1A1A2E",
     marginBottom: 8,
-    textAlign: 'center',
+    textAlign: "center",
   },
   subtitle: {
     fontSize: 14,
-    color: '#888',
-    textAlign: 'center',
+    color: "#888",
+    textAlign: "center",
     lineHeight: 20,
     marginBottom: 28,
   },
   comingSoonBox: {
-    backgroundColor: '#fff',
+    backgroundColor: "#fff",
     borderRadius: 16,
     padding: 20,
-    alignItems: 'center',
+    alignItems: "center",
     borderWidth: 1.5,
-    borderColor: '#E8E8F0',
-    borderStyle: 'dashed',
-    width: '100%',
+    borderColor: "#E8E8F0",
+    borderStyle: "dashed",
+    width: "100%",
   },
   comingSoonIcon: {
     fontSize: 28,
@@ -856,15 +909,15 @@ const emptyStyles = StyleSheet.create({
   },
   comingSoonTitle: {
     fontSize: 15,
-    fontWeight: '800',
+    fontWeight: "800",
     color: DARK_BLUE,
     marginBottom: 6,
-    textAlign: 'center',
+    textAlign: "center",
   },
   comingSoonText: {
     fontSize: 13,
-    color: '#888',
-    textAlign: 'center',
+    color: "#888",
+    textAlign: "center",
     lineHeight: 19,
   },
 });
