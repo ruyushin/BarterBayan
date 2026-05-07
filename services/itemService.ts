@@ -183,3 +183,169 @@ export const addItem = async (itemData: {
     throw error;
   }
 };
+
+/**
+ * Add a comment to an item
+ */
+export const addComment = async (itemId: string, userId: string, text: string, userName: string, userAvatar: string) => {
+  try {
+    const itemRef = doc(db, 'items', itemId);
+    const comment = {
+      id: Date.now().toString(),
+      userId,
+      userName,
+      userAvatar,
+      text,
+      likedBy: [],
+      likes: 0,
+      replies: [],
+      createdAt: new Date(),
+    };
+
+    await updateDoc(itemRef, {
+      comments: arrayUnion(comment),
+    });
+
+    return comment;
+  } catch (error) {
+    console.error('Error adding comment:', error);
+    throw error;
+  }
+};
+
+/**
+ * Delete a comment from an item
+ */
+export const deleteComment = async (itemId: string, commentId: string) => {
+  try {
+    const itemRef = doc(db, 'items', itemId);
+    const itemSnap = await getDoc(itemRef);
+    const comments = itemSnap.data()?.comments || [];
+
+    const updatedComments = comments.filter((c: any) => c.id !== commentId);
+
+    await updateDoc(itemRef, {
+      comments: updatedComments,
+    });
+  } catch (error) {
+    console.error('Error deleting comment:', error);
+    throw error;
+  }
+};
+
+/**
+ * Like/unlike a comment
+ */
+export const updateCommentLike = async (itemId: string, commentId: string, userId: string, isLiking: boolean) => {
+  try {
+    const itemRef = doc(db, 'items', itemId);
+    const itemSnap = await getDoc(itemRef);
+    const comments = itemSnap.data()?.comments || [];
+
+    const updatedComments = comments.map((comment: any) => {
+      if (comment.id === commentId) {
+        if (isLiking) {
+          return {
+            ...comment,
+            likedBy: [...(comment.likedBy || []), userId],
+            likes: (comment.likes || 0) + 1,
+          };
+        } else {
+          const likedBy = (comment.likedBy || []).filter((id: string) => id !== userId);
+          return {
+            ...comment,
+            likedBy,
+            likes: Math.max((comment.likes || 0) - 1, 0),
+          };
+        }
+      }
+      return comment;
+    });
+
+    await updateDoc(itemRef, { comments: updatedComments });
+  } catch (error) {
+    console.error('Error updating comment like:', error);
+    throw error;
+  }
+};
+
+/**
+ * Add a reply to a comment
+ */
+export const addCommentReply = async (itemId: string, commentId: string, userId: string, text: string, userName: string, userAvatar: string) => {
+  try {
+    const itemRef = doc(db, 'items', itemId);
+    const itemSnap = await getDoc(itemRef);
+    const comments = itemSnap.data()?.comments || [];
+
+    const updatedComments = comments.map((comment: any) => {
+      if (comment.id === commentId) {
+        return {
+          ...comment,
+          replies: [
+            ...(comment.replies || []),
+            {
+              id: Date.now().toString(),
+              userId,
+              userName,
+              userAvatar,
+              text,
+              createdAt: new Date(),
+            }
+          ]
+        };
+      }
+      return comment;
+    });
+
+    await updateDoc(itemRef, { comments: updatedComments });
+  } catch (error) {
+    console.error('Error adding comment reply:', error);
+    throw error;
+  }
+};
+
+/**
+ * Add/remove item from user's saved list
+ */
+export const updateItemSave = async (itemId: string, userId: string, isSaving: boolean) => {
+  try {
+    const userRef = doc(db, 'users', userId);
+
+    if (isSaving) {
+      await updateDoc(userRef, {
+        savedItems: arrayUnion(itemId),
+      });
+    } else {
+      await updateDoc(userRef, {
+        savedItems: arrayRemove(itemId),
+      });
+    }
+  } catch (error) {
+    console.error('Error updating save:', error);
+    throw error;
+  }
+};
+
+/**
+ * Get user's saved items
+ */
+export const getUserSavedItems = async (userId: string) => {
+  try {
+    const userRef = doc(db, 'users', userId);
+    const userSnap = await getDoc(userRef);
+
+    if (userSnap.exists()) {
+      const savedItemIds = userSnap.data()?.savedItems || [];
+      if (savedItemIds.length === 0) return [];
+
+      // Fetch all saved items
+      const items = await getAllItems();
+      return items.filter(item => savedItemIds.includes(item.id));
+    }
+    return [];
+  } catch (error) {
+    console.error('Error getting saved items:', error);
+    throw error;
+  }
+};

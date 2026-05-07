@@ -22,6 +22,7 @@ import {
 import { LongPressGestureHandler, State } from 'react-native-gesture-handler';
 import { auth } from '../firebaseConfig';
 import { getUserInfo, updateItemLikes } from '../services/itemService';
+import { trackItemView, trackUserActivity } from '../services/trendingService';
 
 const SCREEN_WIDTH = Dimensions.get('window').width;
 
@@ -44,6 +45,7 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
   const [likeCount, setLikeCount] = useState<number>(0);
   const [loading, setLoading] = useState(false);
   const [currentUser] = useState(auth.currentUser?.uid);
+  const [descriptionExpanded, setDescriptionExpanded] = useState(false);
 
   const images = Array.isArray(item?.images)
     ? item.images
@@ -56,8 +58,15 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
       setLikeCount(item.likes || 0);
       loadOwnerInfo();
       checkIfLiked();
+      
+      // Track item view for trending algorithm
+      if (currentUser) {
+        trackItemView(item.id, currentUser).catch(error => 
+          console.error('Error tracking item view:', error)
+        );
+      }
     }
-  }, [visible, item]);
+  }, [visible, item, currentUser]);
 
   const loadOwnerInfo = async () => {
     try {
@@ -88,6 +97,11 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
       await updateItemLikes(item.id, currentUser, nowLiked);
       setIsLiked(nowLiked);
       setLikeCount((prev) => (nowLiked ? prev + 1 : Math.max(0, prev - 1)));
+      
+      // Track like activity for trending algorithm
+      if (nowLiked) {
+        await trackUserActivity(currentUser, 'like', item.id, item.category);
+      }
     } catch (error) {
       Alert.alert('Error', 'Failed to update like status');
       console.error('Error:', error);
@@ -108,9 +122,10 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
       }
 
       const filename = `BarterBayan_${Date.now()}.jpg`;
+      const fileDir = (FileSystem as any).documentDirectory || '';
       const result = await FileSystem.downloadAsync(
         currentImage,
-        FileSystem.documentDirectory + filename
+        fileDir + filename
       );
 
       await MediaLibrary.saveToLibraryAsync(result.uri);
@@ -148,7 +163,7 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
         scrollEnabled={images.length > 1}
         showsHorizontalScrollIndicator={false}
         data={images}
-        keyExtractor={(_, index) => `image-${index}`}
+        keyExtractor={(_, index: number) => `image-${index}`}
         renderItem={({ item: imageUrl }) => (
           <LongPressGestureHandler
             onHandlerStateChange={({ nativeEvent }) =>
@@ -179,7 +194,7 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
       />
       {images.length > 1 && (
         <View style={styles.pagination}>
-          {images.map((_, index) => (
+          {images.map((_: string, index: number) => (
             <View
               key={index}
               style={[
@@ -230,9 +245,47 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
         {/* Product Info */}
         <View style={styles.productInfo}>
           <Text style={styles.title}>{item?.title}</Text>
-          <Text style={styles.category}>{item?.category}</Text>
+        </View>
+
+        {/* Details Section */}
+        <View style={styles.detailsSection}>
+          <Text style={styles.detailsHeader}>Details</Text>
+          
           {item?.description && (
-            <Text style={styles.description}>{item.description}</Text>
+            <View style={styles.descriptionContainer}>
+              <Text style={styles.descriptionText}>
+                {descriptionExpanded 
+                  ? item.description 
+                  : item.description.length > 1000 
+                    ? item.description.substring(0, 1000) + '...' 
+                    : item.description
+                }
+              </Text>
+              {item.description.length > 1000 && (
+                <TouchableOpacity 
+                  onPress={() => setDescriptionExpanded(!descriptionExpanded)}
+                  style={styles.seeMoreButton}
+                >
+                  <Text style={styles.seeMoreText}>
+                    {descriptionExpanded ? 'See less' : 'See more'}
+                  </Text>
+                </TouchableOpacity>
+              )}
+            </View>
+          )}
+
+          {item?.condition && (
+            <View style={styles.detailRow}>
+              <Text style={styles.detailLabel}>Condition</Text>
+              <Text style={styles.detailValue}>{item.condition}</Text>
+            </View>
+          )}
+          
+          {item?.category && (
+            <View style={styles.detailRow}>
+              <Text style={styles.detailLabel}>Category</Text>
+              <Text style={styles.detailValue}>{item.category}</Text>
+            </View>
           )}
         </View>
 
@@ -456,6 +509,57 @@ const styles = StyleSheet.create({
     color: '#4B5563',
     lineHeight: 20,
     marginTop: 8,
+  } as TextStyle,
+  detailsSection: {
+    backgroundColor: '#F9FAFB',
+    borderRadius: 12,
+    padding: 16,
+    gap: 12,
+    marginVertical: 8,
+  } as ViewStyle,
+  detailsHeader: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#111827',
+    marginBottom: 8,
+  } as TextStyle,
+  detailRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: '#E5E7EB',
+  } as ViewStyle,
+  detailLabel: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#6B7280',
+  } as TextStyle,
+  detailValue: {
+    fontSize: 14,
+    fontWeight: '500',
+    color: '#111827',
+  } as TextStyle,
+  descriptionContainer: {
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#E5E7EB',
+    gap: 8,
+  } as ViewStyle,
+  descriptionText: {
+    fontSize: 14,
+    fontWeight: '500',
+    color: '#111827',
+    lineHeight: 20,
+  } as TextStyle,
+  seeMoreButton: {
+    paddingVertical: 4,
+  } as ViewStyle,
+  seeMoreText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#2e2d7c',
   } as TextStyle,
   ownerCard: {
     backgroundColor: '#F9FAFB',

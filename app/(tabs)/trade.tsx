@@ -19,11 +19,23 @@ const DATA: any[] = [];
 
 const OFFERS_DATA: any[] = [];
 
+const FILTER_CATEGORIES = [
+  "All",
+  "Electronics",
+  "Fashion",
+  "Living",
+  "School/Office",
+  "Household",
+];
+
 const NAVY = "#2e2d7c";
 
 export default function TradeScreen() {
   const [activeTab, setActiveTab] = useState("trades");
   const [search, setSearch] = useState("");
+  const [sortType, setSortType] = useState("none");
+  const [filterCategory, setFilterCategory] = useState("All");
+  const [isFilterOpen, setIsFilterOpen] = useState(false);
   const [userItems, setUserItems] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const router = useRouter();
@@ -49,6 +61,21 @@ export default function TradeScreen() {
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleSort = () => {
+    setSortType((prev) =>
+      prev === "none" ? "likes" : prev === "likes" ? "name" : "none"
+    );
+  };
+
+  const handleFilterToggle = () => {
+    setIsFilterOpen((prev) => !prev);
+  };
+
+  const handleCategorySelect = (category: string) => {
+    setFilterCategory(category);
+    setIsFilterOpen(false);
   };
 
   const switchTab = (tab: string) => {
@@ -83,7 +110,23 @@ export default function TradeScreen() {
       router.push("/add-item");
     });
   };
+  const filteredItems = userItems
+    .filter((item) => {
+      const matchSearch = search.length === 0 || (
+        (item.title && item.title.toLowerCase().includes(search.toLowerCase())) ||
+        (item.description && item.description.toLowerCase().includes(search.toLowerCase()))
+      );
 
+      const matchFilter =
+        filterCategory === "All" || (item.category === filterCategory);
+
+      return matchSearch && matchFilter;
+    })
+    .sort((a, b) => {
+      if (sortType === "likes") return (b.likes || 0) - (a.likes || 0);
+      if (sortType === "name") return (a.title || "").localeCompare(b.title || "");
+      return 0;
+    });
   const renderTradeItem = ({ item }: any) => {
     const imageUrl = Array.isArray(item?.images) && item.images.length > 0 
       ? item.images[0] 
@@ -118,7 +161,7 @@ export default function TradeScreen() {
     <SafeAreaView style={styles.container}>
       {/* Search Bar at Top */}
       <View style={styles.searchContainer}>
-        <Ionicons name="search" size={18} color="#777" />
+        <Ionicons name="search-outline" size={20} color="#5B5B7B" style={styles.searchIcon} />
         <TextInput
           placeholder="Search for items..."
           style={styles.searchInput}
@@ -150,20 +193,41 @@ export default function TradeScreen() {
 
       {/* Sort + Filter */}
       <View style={styles.row}>
-        <TouchableOpacity style={styles.smallButton}>
+        <TouchableOpacity style={styles.smallButton} onPress={handleSort}>
           <Ionicons name="swap-vertical" size={14} color="#333" />
-          <Text style={styles.smallText}>Sort</Text>
+          <Text style={styles.smallText}>Sort ({sortType})</Text>
         </TouchableOpacity>
-        <TouchableOpacity style={styles.smallButton}>
+        <TouchableOpacity style={styles.smallButton} onPress={handleFilterToggle}>
           <Ionicons name="funnel" size={14} color="#333" />
-          <Text style={styles.smallText}>Filter</Text>
+          <Text style={styles.smallText}>Filter ({filterCategory})</Text>
         </TouchableOpacity>
       </View>
+
+      {isFilterOpen && (
+        <View style={styles.filterDropdown}>
+          {FILTER_CATEGORIES.map((category) => (
+            <TouchableOpacity
+              key={category}
+              onPress={() => handleCategorySelect(category)}
+              style={styles.dropdownItem}
+            >
+              <Text
+                style={[
+                  styles.dropdownText,
+                  filterCategory === category && styles.dropdownTextActive,
+                ]}
+              >
+                {category}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+      )}
 
       {/* Item List */}
       <Animated.View style={{ flex: 1, opacity: fadeAnim }}>
         <FlatList
-          data={activeTab === "trades" ? userItems : userItems}
+          data={activeTab === "trades" ? filteredItems : filteredItems}
           renderItem={activeTab === "trades" ? renderTradeItem : renderOfferItem}
           keyExtractor={(item) => item.id}
           showsVerticalScrollIndicator={false}
@@ -198,19 +262,26 @@ const styles = StyleSheet.create({
     backgroundColor: "#efeff4",
   },
   searchContainer: {
-    flexDirection: "row",
-    alignItems: "center",
-    backgroundColor: "#e6e6ea",
-    borderRadius: 10,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    marginBottom: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#F5F5F5',
+    borderRadius: 14,
+    height: 48,
+    borderWidth: 1,
+    borderColor: '#E9E9E9',
+    paddingHorizontal: 14,
     marginHorizontal: 16,
-    marginTop: 12,
+    marginTop: 14,
+    marginBottom: 16,
+  },
+  searchIcon: {
+    marginRight: 10,
   },
   searchInput: {
     flex: 1,
-    marginLeft: 8,
+    color: '#242424',
+    fontSize: 15,
+    paddingVertical: 8,
   },
   tabs: {
     flexDirection: "row",
@@ -256,6 +327,27 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: "#444",
     marginLeft: 6,
+  },
+  filterDropdown: {
+    marginHorizontal: 16,
+    backgroundColor: "white",
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: "#DDD",
+    overflow: "hidden",
+    marginBottom: 10,
+  },
+  dropdownItem: {
+    paddingVertical: 12,
+    paddingHorizontal: 15,
+  },
+  dropdownText: {
+    fontSize: 13,
+    color: "#333",
+  },
+  dropdownTextActive: {
+    fontWeight: "700",
+    color: "#5E3EA1",
   },
   card: {
     flexDirection: "row",

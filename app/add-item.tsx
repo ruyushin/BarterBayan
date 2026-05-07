@@ -3,21 +3,21 @@ import * as ImagePicker from "expo-image-picker";
 import { useRouter } from "expo-router";
 import { useRef, useState } from "react";
 import {
-  ActivityIndicator,
-  Alert,
-  Animated,
-  Image,
-  ImageStyle,
-  Modal,
-  SafeAreaView,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  TextStyle,
-  TouchableOpacity,
-  View,
-  ViewStyle,
+    ActivityIndicator,
+    Alert,
+    Animated,
+    Image,
+    ImageStyle,
+    Modal,
+    SafeAreaView,
+    ScrollView,
+    StyleSheet,
+    Text,
+    TextInput,
+    TextStyle,
+    TouchableOpacity,
+    View,
+    ViewStyle,
 } from "react-native";
 import { auth } from "../firebaseConfig";
 import { addItem } from "../services/itemService";
@@ -132,6 +132,7 @@ export default function AddItemScreen() {
       }
 
       formData.append("upload_preset", "barterbayan_items");
+      formData.append("folder", "items");
 
       const response = await fetch(
         "https://api.cloudinary.com/v1_1/dh97c25iz/image/upload",
