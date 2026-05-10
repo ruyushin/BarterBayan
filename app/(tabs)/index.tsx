@@ -49,6 +49,13 @@ export default function HomeScreen() {
     router.push(`/explore?search=${encodeURIComponent(itemTitle)}`);
   };
 
+  const handleSearchSubmit = () => {
+    if (searchQuery.trim().length > 0) {
+      router.push(`/explore?search=${encodeURIComponent(searchQuery)}`);
+      setSearchQuery('');
+    }
+  };
+
   const handleItemPress = (item: any) => {
     setSelectedItem(item);
     setModalVisible(true);
@@ -75,6 +82,9 @@ export default function HomeScreen() {
               placeholderTextColor="#888"
               value={searchQuery}
               onChangeText={setSearchQuery}
+              onSubmitEditing={handleSearchSubmit}
+              returnKeyType="search"
+              returnKeyLabel="Search"
             />
           </View>
 
