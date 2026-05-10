@@ -3,18 +3,18 @@ import { useRouter } from "expo-router";
 import { onAuthStateChanged } from "firebase/auth";
 import React, { useEffect, useState } from "react";
 import {
-    ActivityIndicator,
-    FlatList,
-    Image,
-    Pressable,
-    SafeAreaView,
-    StyleSheet,
-    Text,
-    TouchableOpacity,
-    View,
+  ActivityIndicator,
+  FlatList,
+  Image,
+  Pressable,
+  SafeAreaView,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
 } from "react-native";
 import { auth } from "../firebaseConfig";
-import { getSavedItems } from "../services/itemService";
+import { getUserSavedItems } from "../services/itemService";
 
 interface SavedItem {
   id: string;
@@ -55,7 +55,7 @@ export default function SavedPostsScreen() {
     setLoading(true);
     setError(null);
     try {
-      const items = await getSavedItems(uid);
+      const items = await getUserSavedItems(uid);
       setSavedItems(items);
     } catch (err) {
       console.error("Error fetching saved items:", err);
