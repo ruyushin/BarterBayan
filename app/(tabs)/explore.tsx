@@ -1,7 +1,7 @@
 import { FontAwesome, Ionicons } from "@expo/vector-icons";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { onAuthStateChanged } from "firebase/auth";
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -250,6 +250,9 @@ function ItemCard({ item, onCommentAdded }: any) {
     null,
   );
   const [replyText, setReplyText] = useState("");
+  const [deleteToastVisible, setDeleteToastVisible] = useState(false);
+  const [deletedCommentData, setDeletedCommentData] = useState<any>(null);
+  const deleteTimerRef = useRef<NodeJS.Timeout | null>(null);
   const currentUser = auth.currentUser?.uid;
   const currentUserName = auth.currentUser?.displayName || "Anonymous";
   const currentUserPhotoURL =
@@ -474,12 +477,54 @@ function ItemCard({ item, onCommentAdded }: any) {
 
   const handleDeleteComment = async (commentId: string) => {
     try {
+      const commentToDeleteObj = comments.find((c) => c.id === commentId);
       await deleteComment(item.id, commentId);
       setComments(comments.filter((c) => c.id !== commentId));
+      
+      // Show delete toast with undo option
+      setDeletedCommentData(commentToDeleteObj);
+      setDeleteToastVisible(true);
+      
+      // Auto-dismiss after 5 seconds
+      if (deleteTimerRef.current) clearTimeout(deleteTimerRef.current);
+      deleteTimerRef.current = setTimeout(() => {
+        setDeleteToastVisible(false);
+      }, 5000);
     } catch (error) {
       Alert.alert("Error", "Failed to delete comment");
       console.error("Error:", error);
     }
+  };
+
+  const handleUndoDelete = async () => {
+    if (!deletedCommentData) return;
+    try {
+      if (deleteTimerRef.current) clearTimeout(deleteTimerRef.current);
+      setDeleteToastVisible(false);
+      
+      // Re-add the comment
+      setComments([...comments, deletedCommentData]);
+      setDeletedCommentData(null);
+      
+      // Re-upload to Firebase
+      await addComment(
+        item.id,
+        deletedCommentData.userId,
+        deletedCommentData.text,
+        deletedCommentData.userName,
+        deletedCommentData.userAvatar,
+      );
+    } catch (error) {
+      Alert.alert("Error", "Failed to undo delete");
+      console.error("Error:", error);
+    }
+  };
+
+  const getTopLevelCommentCount = () => {
+    // Count all comments + all replies
+    return comments.reduce((count, c) => {
+      return count + 1 + (c.replies?.length || 0);
+    }, 0);
   };
 
   return (
@@ -610,7 +655,7 @@ function ItemCard({ item, onCommentAdded }: any) {
             onPress={() => setShowComments(!showComments)}
           >
             <Ionicons name="chatbubble-outline" size={18} color="#666" />
-            <Text style={styles.statText}>{comments.length}</Text>
+            <Text style={styles.statText}>{getTopLevelCommentCount()}</Text>
           </Pressable>
 
           <Pressable
@@ -631,7 +676,7 @@ function ItemCard({ item, onCommentAdded }: any) {
       {/* COMMENTS SECTION */}
       {showComments && (
         <View style={styles.commentsSection}>
-          <Text style={styles.commentsTitle}>Comments ({comments.length})</Text>
+          <Text style={styles.commentsTitle}>Comments ({getTopLevelCommentCount()})</Text>
 
           {/* COMMENT INPUT */}
           <View style={styles.commentInputContainer}>
@@ -761,6 +806,19 @@ function ItemCard({ item, onCommentAdded }: any) {
               );
             }}
           />
+        </View>
+      )}
+
+      {/* DELETE COMMENT MODAL - REMOVED */}
+      {/* Toast notification is shown instead of modal */}
+
+      {/* DELETE TOAST NOTIFICATION */}
+      {deleteToastVisible && (
+        <View style={styles.deleteToast}>
+          <Text style={styles.deleteToastText}>1 comment deleted. Tap to undo.</Text>
+          <TouchableOpacity onPress={handleUndoDelete}>
+            <Text style={styles.deleteToastUndo}>Undo</Text>
+          </TouchableOpacity>
         </View>
       )}
     </View>
@@ -1231,4 +1289,111 @@ const styles = StyleSheet.create({
 
   navItem: { flex: 1, alignItems: "center" },
   navText: { fontSize: 10, color: "#777" },
+
+  deleteModalOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0, 0, 0, 0.5)",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+
+  deleteModalContent: {
+    backgroundColor: "white",
+    borderRadius: 16,
+    padding: 24,
+    width: "80%",
+    alignItems: "center",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 10,
+  },
+
+  deleteModalHeader: {
+    marginBottom: 16,
+  },
+
+  deleteModalTitle: {
+    fontSize: 18,
+    fontWeight: "700",
+    color: "#1F1F1F",
+    marginBottom: 8,
+  },
+
+  deleteModalText: {
+    fontSize: 14,
+    color: "#666",
+    textAlign: "center",
+    marginBottom: 20,
+  },
+
+  deleteModalButtons: {
+    flexDirection: "row",
+    width: "100%",
+    gap: 12,
+  },
+
+  deleteModalBtn: {
+    flex: 1,
+    paddingVertical: 12,
+    borderRadius: 8,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+
+  deleteModalBtnCancel: {
+    backgroundColor: "#F0F0F0",
+  },
+
+  deleteModalBtnDelete: {
+    backgroundColor: "#FF6B6B",
+  },
+
+  deleteModalBtnTextCancel: {
+    fontSize: 14,
+    fontWeight: "600",
+    color: "#333",
+  },
+
+  deleteModalBtnTextDelete: {
+    fontSize: 14,
+    fontWeight: "600",
+    color: "white",
+  },
+
+  deleteToast: {
+    position: "absolute",
+    top: 20,
+    left: 12,
+    right: 12,
+    backgroundColor: "#2C2C2C",
+    borderRadius: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3,
+    shadowRadius: 6,
+    elevation: 5,
+    zIndex: 1000,
+  },
+
+  deleteToastText: {
+    fontSize: 14,
+    color: "white",
+    fontWeight: "500",
+    flex: 1,
+  },
+
+  deleteToastUndo: {
+    fontSize: 14,
+    fontWeight: "600",
+    color: "#5D5FEF",
+    marginLeft: 12,
+  },
 });
+

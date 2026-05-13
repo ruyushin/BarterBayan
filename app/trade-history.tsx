@@ -1,23 +1,25 @@
+import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from "expo-router";
 import { onAuthStateChanged, User } from "firebase/auth";
 import {
-  collection,
-  limit,
-  onSnapshot,
-  orderBy,
-  query,
-  where,
+    collection,
+    limit,
+    onSnapshot,
+    orderBy,
+    query,
+    where,
 } from "firebase/firestore";
 import React, { useEffect, useRef, useState } from "react";
 import {
-  ActivityIndicator,
-  Animated,
-  RefreshControl,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TouchableOpacity,
-  View,
+    ActivityIndicator,
+    Animated,
+    Linking,
+    RefreshControl,
+    ScrollView,
+    StyleSheet,
+    Text,
+    TouchableOpacity,
+    View,
 } from "react-native";
 import { auth, db } from "../firebaseConfig.ts";
 
@@ -62,26 +64,26 @@ const FILTER_TABS: { key: FilterTab; label: string }[] = [
 // ─── Status config ────────────────────────────────────────────────────────────
 const STATUS_CONFIG: Record<
   TradeStatus,
-  { label: string; color: string; bg: string; emoji: string }
+  { label: string; color: string; bg: string; icon: string }
 > = {
-  pending: { label: "Pending", color: "#B45309", bg: "#FEF3C7", emoji: "⏳" },
+  pending: { label: "Pending", color: "#B45309", bg: "#FEF3C7", icon: "time" },
   completed: {
     label: "Completed",
     color: "#065F46",
     bg: "#D1FAE5",
-    emoji: "✅",
+    icon: "checkmark-circle",
   },
   cancelled: {
     label: "Cancelled",
     color: "#6B7280",
     bg: "#F3F4F6",
-    emoji: "🚫",
+    icon: "close-circle",
   },
   declined: {
     label: "Declined",
     color: ACCENT_RED,
     bg: "#FEE2E2",
-    emoji: "❌",
+    icon: "close-circle",
   },
 };
 
@@ -175,7 +177,7 @@ function TradeCard({ trade }: { trade: TradeRecord }) {
 
           {/* Status pill */}
           <View style={[cardStyles.statusPill, { backgroundColor: cfg.bg }]}>
-            <Text style={cardStyles.statusEmoji}>{cfg.emoji}</Text>
+            <Ionicons name={cfg.icon as any} size={16} color={cfg.color} />
             <Text style={[cardStyles.statusLabel, { color: cfg.color }]}>
               {cfg.label}
             </Text>
@@ -190,31 +192,31 @@ function TradeCard({ trade }: { trade: TradeRecord }) {
 function EmptyState({ filter }: { filter: FilterTab }) {
   const messages: Record<
     FilterTab,
-    { emoji: string; title: string; subtitle: string }
+    { icon: string; title: string; subtitle: string }
   > = {
     all: {
-      emoji: "🤝",
+      icon: "swap-horizontal",
       title: "No trades yet",
       subtitle:
         "Your trade history will appear here once you start proposing or receiving trades.",
     },
     pending: {
-      emoji: "⏳",
+      icon: "time",
       title: "No pending trades",
       subtitle: "Trades waiting for a response will show up here.",
     },
     completed: {
-      emoji: "✅",
+      icon: "checkmark-circle",
       title: "No completed trades",
       subtitle: "Successfully exchanged trades will be recorded here.",
     },
     cancelled: {
-      emoji: "🚫",
+      icon: "close-circle",
       title: "No cancelled trades",
       subtitle: "Trades you or your counterpart cancelled will appear here.",
     },
     declined: {
-      emoji: "❌",
+      icon: "close-circle",
       title: "No declined trades",
       subtitle: "Trades that were declined will show up here.",
     },
@@ -225,14 +227,14 @@ function EmptyState({ filter }: { filter: FilterTab }) {
   return (
     <View style={emptyStyles.container}>
       <View style={emptyStyles.iconCircle}>
-        <Text style={emptyStyles.emoji}>{msg.emoji}</Text>
+        <Ionicons name={msg.icon as any} size={48} color={DARK_BLUE} />
       </View>
       <Text style={emptyStyles.title}>{msg.title}</Text>
       <Text style={emptyStyles.subtitle}>{msg.subtitle}</Text>
 
       {/* Coming soon callout */}
       <View style={emptyStyles.comingSoonBox}>
-        <Text style={emptyStyles.comingSoonIcon}>🔧</Text>
+        <Ionicons name="build" size={32} color={DARK_BLUE} />
         <Text style={emptyStyles.comingSoonTitle}>
           Trade module coming soon
         </Text>
@@ -303,6 +305,18 @@ export default function TradeHistoryScreen() {
     ]).start();
   };
 
+  const handleBackPress = () => {
+    try {
+      if (router.canGoBack?.()) {
+        router.back();
+      } else {
+        router.replace("/(tabs)");
+      }
+    } catch {
+      router.replace("/(tabs)");
+    }
+  };
+
   // ── Auth + Firestore listener ──
   useEffect(() => {
     const unsubscribeAuth = onAuthStateChanged(auth, (user) => {
@@ -363,11 +377,33 @@ export default function TradeHistoryScreen() {
         console.error("Trade history error:", err);
         const isOffline =
           err?.code === "unavailable" || /offline/i.test(err?.message ?? "");
-        setError(
-          isOffline
-            ? "You appear to be offline. Showing cached data."
-            : "Failed to load trade history.",
-        );
+        const isIndexError = err?.code === "failed-precondition";
+        
+        if (isIndexError) {
+          // Extract the index creation URL from the error message if available
+          const errorMsg = err?.message ?? "";
+          const indexUrl = errorMsg.match(/https:\/\/console\.firebase\.google\.com[^\s]+/)?.[0];
+          
+          if (indexUrl) {
+            setError(
+              "Trade history requires a database index. Creating it now..."
+            );
+            Linking.openURL(indexUrl).catch(() => {
+              setError(
+                "Please create the composite index in Firebase Console to view trade history."
+              );
+            });
+          } else {
+            setError(
+              "Trade history is being set up. Please try again shortly."
+            );
+          }
+        } else if (isOffline) {
+          setError("You appear to be offline. Showing cached data.");
+        } else {
+          setError("Failed to load trade history.");
+        }
+        
         setLoading(false);
         setRefreshing(false);
         animateIn();
@@ -397,7 +433,7 @@ export default function TradeHistoryScreen() {
         <View style={styles.header}>
           <TouchableOpacity
             style={styles.backButton}
-            onPress={() => router.back()}
+            onPress={handleBackPress}
             hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
           >
             <Text style={styles.backIcon}>‹</Text>
@@ -420,7 +456,7 @@ export default function TradeHistoryScreen() {
       <View style={styles.header}>
         <TouchableOpacity
           style={styles.backButton}
-          onPress={() => router.back()}
+          onPress={handleBackPress}
           activeOpacity={0.75}
           hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
         >
@@ -448,7 +484,10 @@ export default function TradeHistoryScreen() {
           {/* ── Error Banner ── */}
           {error && (
             <View style={styles.errorBanner}>
-              <Text style={styles.errorBannerText}>⚠️ {error}</Text>
+              <View style={styles.errorBannerContent}>
+                <Ionicons name="alert-circle" size={18} color="#F5A623" />
+                <Text style={styles.errorBannerText}>{error}</Text>
+              </View>
             </View>
           )}
 
@@ -598,10 +637,16 @@ const styles = StyleSheet.create({
     borderLeftWidth: 4,
     borderLeftColor: "#F5A623",
   },
+  errorBannerContent: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
   errorBannerText: {
     color: "#856404",
     fontSize: 13,
     fontWeight: "500",
+    flex: 1,
   },
 
   // Scroll
@@ -811,9 +856,6 @@ const cardStyles = StyleSheet.create({
     gap: 4,
     marginTop: 2,
   },
-  statusEmoji: {
-    fontSize: 11,
-  },
   statusLabel: {
     fontSize: 11,
     fontWeight: "700",
@@ -876,9 +918,6 @@ const emptyStyles = StyleSheet.create({
     alignItems: "center",
     marginBottom: 16,
   },
-  emoji: {
-    fontSize: 36,
-  },
   title: {
     fontSize: 20,
     fontWeight: "800",
@@ -902,10 +941,6 @@ const emptyStyles = StyleSheet.create({
     borderColor: "#E8E8F0",
     borderStyle: "dashed",
     width: "100%",
-  },
-  comingSoonIcon: {
-    fontSize: 28,
-    marginBottom: 8,
   },
   comingSoonTitle: {
     fontSize: 15,

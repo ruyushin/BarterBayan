@@ -2,27 +2,27 @@
 import * as ImagePicker from "expo-image-picker";
 import { useRouter } from "expo-router";
 import {
-  onAuthStateChanged,
-  sendPasswordResetEmail,
-  updateProfile,
-  User,
+    onAuthStateChanged,
+    sendPasswordResetEmail,
+    updateProfile,
+    User,
 } from "firebase/auth";
 import { doc, getDoc, updateDoc } from "firebase/firestore";
 import React, { useEffect, useRef, useState } from "react";
 import {
-  ActivityIndicator,
-  Alert,
-  Animated,
-  Image,
-  KeyboardAvoidingView,
-  Linking,
-  Platform,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  View,
+    ActivityIndicator,
+    Alert,
+    Animated,
+    Image,
+    KeyboardAvoidingView,
+    Linking,
+    Platform,
+    ScrollView,
+    StyleSheet,
+    Text,
+    TextInput,
+    TouchableOpacity,
+    View,
 } from "react-native";
 import { auth, db } from "../firebaseConfig";
 
@@ -393,6 +393,18 @@ export default function EditProfileScreen() {
     ]).start();
   };
 
+  const handleBackPress = () => {
+    try {
+      if (router.canGoBack?.()) {
+        router.back();
+      } else {
+        router.replace("/(tabs)/profile");
+      }
+    } catch {
+      router.replace("/(tabs)/profile");
+    }
+  };
+
   // ── Load user data ──
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, async (user) => {
@@ -587,7 +599,7 @@ export default function EditProfileScreen() {
         <View style={styles.header}>
           <TouchableOpacity
             style={styles.backButton}
-            onPress={() => router.back()}
+            onPress={handleBackPress}
           >
             <Text style={styles.backIcon}>‹</Text>
           </TouchableOpacity>
@@ -621,11 +633,11 @@ export default function EditProfileScreen() {
                 {
                   text: "Leave",
                   style: "destructive",
-                  onPress: () => router.back(),
+                  onPress: () => handleBackPress(),
                 },
               ]);
             } else {
-              router.back();
+              handleBackPress();
             }
           }}
           activeOpacity={0.75}

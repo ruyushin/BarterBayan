@@ -1,15 +1,16 @@
+import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import React, { useRef, useState } from 'react';
 import {
-  Animated,
-  LayoutAnimation,
-  Platform,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TouchableOpacity,
-  UIManager,
-  View,
+    Animated,
+    LayoutAnimation,
+    Platform,
+    ScrollView,
+    StyleSheet,
+    Text,
+    TouchableOpacity,
+    UIManager,
+    View,
 } from 'react-native';
 
 // ─── Enable LayoutAnimation on Android ───────────────────────────────────────
@@ -20,6 +21,24 @@ if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental
 // ─── Constants ────────────────────────────────────────────────────────────────
 const DARK_BLUE = '#2D2D7A';
 const LIGHT_BG = '#F4F5F9';
+
+// ─── Icon mapping for categories ────────────────────────────────────────────
+const getIconForCategory = (id: string): string => {
+  switch (id) {
+    case 'getting-started':
+      return 'rocket';
+    case 'trading':
+      return 'swap-horizontal';
+    case 'account':
+      return 'person';
+    case 'ratings':
+      return 'star';
+    case 'safety':
+      return 'lock-closed';
+    default:
+      return 'help-circle';
+  }
+};
 
 // ─── FAQ Data ─────────────────────────────────────────────────────────────────
 interface FAQItem {
@@ -57,7 +76,7 @@ const FAQ_DATA: FAQCategory[] = [
         id: 'gs-3',
         question: 'How do I get verified?',
         answer:
-          'Tap the edit profile button (✏️) from your profile screen and follow the verification steps. Verified users get a blue checkmark badge and are trusted more by the community.',
+          'Tap the edit profile button from your profile screen and follow the verification steps. Verified users get a blue checkmark badge and are trusted more by the community.',
       },
     ],
   },
@@ -101,7 +120,7 @@ const FAQ_DATA: FAQCategory[] = [
         id: 'ac-1',
         question: 'How do I change my profile photo?',
         answer:
-          'Tap the ✏️ edit button on your profile screen. From there you can tap your avatar to upload a new photo from your camera roll or take a new one.',
+          'Tap the edit button on your profile screen. From there you can tap your avatar to upload a new photo from your camera roll or take a new one.',
       },
       {
         id: 'ac-2',
@@ -138,7 +157,7 @@ const FAQ_DATA: FAQCategory[] = [
         id: 'rt-3',
         question: 'What is the Overview page?',
         answer:
-          'The Overview page shows a detailed breakdown of your trading activity, review history, and reputation over time. Tap the gold "Overview ⭐" button on your profile to access it.',
+          'The Overview page shows a detailed breakdown of your trading activity, review history, and reputation over time. Tap the gold Overview button on your profile to access it.',
       },
     ],
   },
@@ -192,21 +211,14 @@ function AccordionItem({ item }: { item: FAQItem }) {
 
   return (
     <View style={accordionStyles.container}>
-      <TouchableOpacity
-        style={accordionStyles.header}
-        onPress={toggle}
-        activeOpacity={0.7}
-      >
-        <Text style={[accordionStyles.question, expanded && accordionStyles.questionActive]}>
-          {item.question}
-        </Text>
+      <TouchableOpacity style={accordionStyles.header} onPress={toggle} activeOpacity={0.7}>
+        <Text style={[accordionStyles.question, expanded && accordionStyles.questionActive]}>{item.question}</Text>
         <Animated.View style={{ transform: [{ rotate }] }}>
           <View style={[accordionStyles.iconCircle, expanded && accordionStyles.iconCircleActive]}>
             <Text style={[accordionStyles.icon, expanded && accordionStyles.iconActive]}>+</Text>
           </View>
         </Animated.View>
       </TouchableOpacity>
-
       {expanded && (
         <View style={accordionStyles.body}>
           <View style={accordionStyles.divider} />
@@ -222,16 +234,11 @@ function CategorySection({ category }: { category: FAQCategory }) {
   return (
     <View style={sectionStyles.wrapper}>
       <View style={sectionStyles.titleRow}>
-        <Text style={sectionStyles.emoji}>{category.emoji}</Text>
+        <Ionicons name={getIconForCategory(category.id) as any} size={24} color={DARK_BLUE} />
         <Text style={sectionStyles.title}>{category.title}</Text>
       </View>
       <View style={sectionStyles.card}>
-        {category.items.map((item, index) => (
-          <React.Fragment key={item.id}>
-            <AccordionItem item={item} />
-            {index < category.items.length - 1 && <View style={sectionStyles.separator} />}
-          </React.Fragment>
-        ))}
+        {category.items.map((item, index) => (<React.Fragment key={item.id}><AccordionItem item={item} />{index < category.items.length - 1 && <View style={sectionStyles.separator} />}</React.Fragment>))}
       </View>
     </View>
   );
@@ -241,48 +248,38 @@ function CategorySection({ category }: { category: FAQCategory }) {
 export default function FAQScreen() {
   const router = useRouter();
 
+  const handleBackPress = () => {
+    try {
+      if (router.canGoBack?.()) {
+        router.back();
+      } else {
+        router.replace("/(tabs)");
+      }
+    } catch {
+      router.replace("/(tabs)");
+    }
+  };
+
   return (
     <View style={styles.container}>
-      {/* ── Header ── */}
       <View style={styles.header}>
-        <TouchableOpacity
-          style={styles.backButton}
-          onPress={() => router.back()}
-          activeOpacity={0.75}
-          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-        >
+        <TouchableOpacity style={styles.backButton} onPress={handleBackPress} activeOpacity={0.75} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
           <Text style={styles.backIcon}>‹</Text>
         </TouchableOpacity>
         <Text style={styles.headerTitle}>FAQs</Text>
-        {/* Spacer to balance the back button */}
         <View style={styles.headerSpacer} />
       </View>
-
-      <ScrollView
-        contentContainerStyle={styles.scrollContent}
-        showsVerticalScrollIndicator={false}
-      >
-        {/* ── Hero ── */}
+      <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
         <View style={styles.hero}>
-          <Text style={styles.heroEmoji}>💬</Text>
+          <Ionicons name="chatbubble" size={48} color={DARK_BLUE} />
           <Text style={styles.heroTitle}>How can we help?</Text>
-          <Text style={styles.heroSubtitle}>
-            Find answers to the most common questions about trading, your account, and staying safe.
-          </Text>
+          <Text style={styles.heroSubtitle}>Find answers to the most common questions about trading, your account, and staying safe.</Text>
         </View>
-
-        {/* ── Categories ── */}
-        {FAQ_DATA.map((category) => (
-          <CategorySection key={category.id} category={category} />
-        ))}
-
-        {/* ── Contact Footer ── */}
+        {FAQ_DATA.map((category) => (<CategorySection key={category.id} category={category} />))}
         <View style={styles.contactCard}>
-          <Text style={styles.contactEmoji}>📬</Text>
+          <Ionicons name="mail" size={40} color={DARK_BLUE} />
           <Text style={styles.contactTitle}>Still need help?</Text>
-          <Text style={styles.contactText}>
-            Can't find what you're looking for? Our support team is happy to assist.
-          </Text>
+          <Text style={styles.contactText}>Can't find what you're looking for? Our support team is happy to assist.</Text>
           <Text style={styles.contactEmail}>support@yourapp.com</Text>
         </View>
       </ScrollView>

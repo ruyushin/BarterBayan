@@ -37,6 +37,18 @@ export default function ChatScreen() {
     const currentUserId = auth.currentUser?.uid;
     const flatListRef = useRef<FlatList>(null);
 
+    const handleBackPress = () => {
+        try {
+            if (router.canGoBack?.()) {
+                router.back();
+            } else {
+                router.replace("/(tabs)");
+            }
+        } catch {
+            router.replace("/(tabs)");
+        }
+    };
+
     useEffect(() => {
         loadChatData();
     }, []);
@@ -152,7 +164,7 @@ export default function ChatScreen() {
             <SafeAreaView style={styles.container}>
                 <View style={styles.header}>
                     <TouchableOpacity
-                        onPress={() => router.back()}
+                        onPress={handleBackPress}
                         style={styles.backBtn}
                     >
                         <Text style={styles.backArrow}>←</Text>
@@ -171,7 +183,7 @@ export default function ChatScreen() {
             {/* Header */}
             <View style={styles.header}>
                 <TouchableOpacity
-                    onPress={() => router.back()}
+                    onPress={handleBackPress}
                     style={styles.backBtn}
                 >
                     <Text style={styles.backArrow}>←</Text>

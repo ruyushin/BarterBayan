@@ -4,20 +4,20 @@ import * as MediaLibrary from 'expo-media-library';
 import { useRouter } from 'expo-router';
 import React, { useEffect, useState } from 'react';
 import {
-  ActivityIndicator,
-  Alert,
-  Dimensions,
-  FlatList,
-  Image,
-  ImageStyle,
-  Modal,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextStyle,
-  TouchableOpacity,
-  View,
-  ViewStyle,
+    ActivityIndicator,
+    Alert,
+    Dimensions,
+    FlatList,
+    Image,
+    ImageStyle,
+    Modal,
+    ScrollView,
+    StyleSheet,
+    Text,
+    TextStyle,
+    TouchableOpacity,
+    View,
+    ViewStyle,
 } from 'react-native';
 import { LongPressGestureHandler, State } from 'react-native-gesture-handler';
 import { auth } from '../firebaseConfig';
@@ -40,12 +40,12 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
   const router = useRouter();
   const [currentImageIndex, setCurrentImageIndex] = useState(0);
   const [ownerInfo, setOwnerInfo] = useState<any>(null);
-  const [isFullscreen, setIsFullscreen] = useState(false);
   const [isLiked, setIsLiked] = useState(false);
   const [likeCount, setLikeCount] = useState<number>(0);
   const [loading, setLoading] = useState(false);
   const [currentUser] = useState(auth.currentUser?.uid);
   const [descriptionExpanded, setDescriptionExpanded] = useState(false);
+  const [fullScreenImageIndex, setFullScreenImageIndex] = useState<number | null>(null);
 
   const images = Array.isArray(item?.images)
     ? item.images
@@ -75,6 +75,7 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
       setOwnerInfo(info);
     } catch (error) {
       console.error('Error loading owner info:', error);
+      setOwnerInfo(null);
     }
   };
 
@@ -149,10 +150,76 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
     onClose();
   };
 
+  const handleEnlargePress = () => {
+    router.push({
+      pathname: '/product-details',
+      params: {
+        itemId: item.id,
+        item: JSON.stringify(item),
+      },
+    });
+    onClose();
+  };
   const handleImageLongPress = (nativeEvent: any) => {
-    if (nativeEvent.state === State.ACTIVE) {
+    // Handle both web and native platforms
+    if (nativeEvent.state === State.ACTIVE || nativeEvent.state === 4) {
       handleSaveImage();
     }
+  };
+  const renderFullScreenImage = () => {
+    if (fullScreenImageIndex === null) return null;
+    const image = images[fullScreenImageIndex];
+    return (
+      <Modal
+        visible={true}
+        transparent={true}
+        animationType="fade"
+        onRequestClose={() => setFullScreenImageIndex(null)}
+      >
+        <View style={styles.fullScreenContainer}>
+          <TouchableOpacity
+            style={styles.fullScreenCloseButton}
+            onPress={() => setFullScreenImageIndex(null)}
+          >
+            <Ionicons name="close" size={28} color="#fff" />
+          </TouchableOpacity>
+          <Image
+            source={{ uri: image }}
+            style={styles.fullScreenImage}
+            resizeMode="contain"
+          />
+          <View style={styles.fullScreenControls}>
+            <TouchableOpacity
+              onPress={() => {
+                setCurrentImageIndex((prev) =>
+                  prev > 0 ? prev - 1 : images.length - 1
+                );
+                setFullScreenImageIndex((prev) =>
+                  prev! > 0 ? prev! - 1 : images.length - 1
+                );
+              }}
+            >
+              <Ionicons name="chevron-back" size={32} color="#fff" />
+            </TouchableOpacity>
+            <Text style={styles.fullScreenCounter}>
+              {fullScreenImageIndex + 1} / {images.length}
+            </Text>
+            <TouchableOpacity
+              onPress={() => {
+                setCurrentImageIndex((prev) =>
+                  prev < images.length - 1 ? prev + 1 : 0
+                );
+                setFullScreenImageIndex((prev) =>
+                  prev! < images.length - 1 ? prev! + 1 : 0
+                );
+              }}
+            >
+              <Ionicons name="chevron-forward" size={32} color="#fff" />
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+    );
   };
 
   const renderImageCarousel = () => (
@@ -174,12 +241,12 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
             <TouchableOpacity
               activeOpacity={0.8}
               style={styles.imageWrapper}
-              onPress={() => setIsFullscreen(true)}
+              onPress={() => setFullScreenImageIndex(currentImageIndex)}
             >
               <Image
                 source={{ uri: imageUrl }}
                 style={styles.carouselImage}
-                resizeMode="cover"
+                resizeMode="contain"
               />
             </TouchableOpacity>
           </LongPressGestureHandler>
@@ -223,11 +290,11 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Product Details</Text>
         <TouchableOpacity
-          onPress={() => setIsFullscreen(!isFullscreen)}
+          onPress={handleEnlargePress}
           style={styles.expandButton}
         >
           <Ionicons
-            name={isFullscreen ? 'contract' : 'expand'}
+            name="expand"
             size={24}
             color="#2e2d7c"
           />
@@ -355,44 +422,18 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
     </View>
   );
 
-  if (isFullscreen) {
-    return (
-      <Modal
-        visible={visible && isFullscreen}
-        transparent={false}
-        animationType="fade"
-      >
-        <View style={styles.fullscreenContainer}>
-          <TouchableOpacity
-            style={styles.fullscreenCloseButton}
-            onPress={() => setIsFullscreen(false)}
-          >
-            <Ionicons name="arrow-back" size={28} color="#fff" />
-          </TouchableOpacity>
-          {renderImageCarousel()}
-          <View style={styles.fullscreenBottom}>
-            <TouchableOpacity
-              style={styles.fullscreenMessageButton}
-              onPress={handleSendMessage}
-            >
-              <Ionicons name="send" size={20} color="#fff" />
-              <Text style={styles.fullscreenMessageText}>Message Owner</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      </Modal>
-    );
-  }
-
   return (
-    <Modal
-      visible={visible}
-      transparent
-      animationType="slide"
-      onRequestClose={onClose}
-    >
-      <View style={styles.modalOverlay}>{modalContent}</View>
-    </Modal>
+    <>
+      {renderFullScreenImage()}
+      <Modal
+        visible={visible}
+        transparent
+        animationType="slide"
+        onRequestClose={onClose}
+      >
+        <View style={styles.modalOverlay}>{modalContent}</View>
+      </Modal>
+    </>
   );
 };
 
@@ -432,6 +473,7 @@ const styles = StyleSheet.create({
     height: 300,
     backgroundColor: '#F3F4F6',
     position: 'relative',
+    marginHorizontal: 0,
   } as ViewStyle,
   // FIX: explicit pixel width so images render inside horizontal FlatList
   imageWrapper: {
@@ -468,7 +510,37 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     marginLeft: 8,
   } as TextStyle,
-  // FIX: split into a View container + Text child to avoid text-node-in-View error
+  // Full screen image modal styles
+  fullScreenContainer: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.95)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  } as ViewStyle,
+  fullScreenCloseButton: {
+    position: 'absolute',
+    top: 40,
+    right: 20,
+    zIndex: 10,
+  } as ViewStyle,
+  fullScreenImage: {
+    width: '100%',
+    height: '75%',
+  } as ImageStyle,
+  fullScreenControls: {
+    position: 'absolute',
+    bottom: 40,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    width: '100%',
+    paddingHorizontal: 20,
+  } as ViewStyle,
+  fullScreenCounter: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '600',
+  } as TextStyle,
   holdToSaveContainer: {
     position: 'absolute',
     top: 12,
@@ -636,39 +708,6 @@ const styles = StyleSheet.create({
     marginBottom: 20,
   } as ViewStyle,
   messageButtonText: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#fff',
-  } as TextStyle,
-  fullscreenContainer: {
-    flex: 1,
-    backgroundColor: '#000',
-    justifyContent: 'center',
-    alignItems: 'center',
-  } as ViewStyle,
-  fullscreenCloseButton: {
-    position: 'absolute',
-    top: 20,
-    left: 20,
-    zIndex: 10,
-    padding: 8,
-  } as ViewStyle,
-  fullscreenBottom: {
-    position: 'absolute',
-    bottom: 40,
-    left: 20,
-    right: 20,
-  } as ViewStyle,
-  fullscreenMessageButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: '#2e2d7c',
-    borderRadius: 12,
-    paddingVertical: 14,
-    gap: 8,
-  } as ViewStyle,
-  fullscreenMessageText: {
     fontSize: 16,
     fontWeight: '600',
     color: '#fff',

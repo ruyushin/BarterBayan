@@ -1,30 +1,31 @@
 //profile.tsx
+import { Ionicons } from "@expo/vector-icons";
 import * as ImagePicker from "expo-image-picker";
 import { useRouter } from "expo-router";
 import { onAuthStateChanged, signOut, User } from "firebase/auth";
 import {
-  collection,
-  doc,
-  getDoc,
-  getDocs,
-  limit,
-  orderBy,
-  query,
+    collection,
+    doc,
+    getDoc,
+    getDocs,
+    limit,
+    orderBy,
+    query,
 } from "firebase/firestore";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
-  ActivityIndicator,
-  Alert,
-  Animated,
-  Image,
-  Linking,
-  Modal,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  View,
+    ActivityIndicator,
+    Alert,
+    Animated,
+    Image,
+    Linking,
+    Modal,
+    ScrollView,
+    StyleSheet,
+    Text,
+    TextInput,
+    TouchableOpacity,
+    View,
 } from "react-native";
 import { auth, db } from "../../firebaseConfig";
 
@@ -93,18 +94,13 @@ function StarRating({
     <View style={ratingStyles.wrapper}>
       <View style={ratingStyles.starsRow}>
         {stars.map(({ filled, half, index }) => (
-          <Text
+          <Ionicons
             key={index}
-            style={[
-              ratingStyles.star,
-              {
-                fontSize: size,
-                color: filled || half ? STAR_FILLED : STAR_EMPTY,
-              },
-            ]}
-          >
-            {filled ? "★" : half ? "★" : "☆"}
-          </Text>
+            name={filled ? "star" : half ? "star-half" : "star-outline"}
+            size={size}
+            color={filled || half ? STAR_FILLED : STAR_EMPTY}
+            style={{ marginRight: 2 }}
+          />
         ))}
       </View>
       <View style={ratingStyles.ratingInfo}>
@@ -126,12 +122,12 @@ function StarRating({
 
 // ─── Helper: Stat Card ───────────────────────────────────────────────────────
 function StatCard({
-  emoji,
+  iconName,
   label,
   count,
   onPress,
 }: {
-  emoji: string;
+  iconName: string;
   label: string;
   count: number | string;
   onPress?: () => void;
@@ -146,7 +142,7 @@ function StatCard({
   const inner = (
     <View style={styles.statCard}>
       <Text style={styles.statTopLabel}>{label}</Text>
-      <Text style={styles.statEmoji}>{emoji}</Text>
+      <Ionicons name={iconName as any} size={26} color="#2e2d7c" style={{ marginVertical: 2 }} />
       <Text style={styles.statCountNum}>{count}</Text>
       <Text style={styles.statCountLabel}>{label}</Text>
       {/* FIX: Show chevron hint when tappable */}
@@ -302,7 +298,7 @@ function OverviewModal({
             />
           ) : reviews.length === 0 ? (
             <View style={overviewStyles.emptyBox}>
-              <Text style={overviewStyles.emptyEmoji}>💬</Text>
+              <Ionicons name="chatbubble-outline" size={36} color="#D8D8D8" style={{ marginBottom: 8 }} />
               <Text style={overviewStyles.emptyText}>
                 No reviews yet. Complete trades to earn ratings from other
                 traders.
@@ -611,7 +607,7 @@ function ReportModal({
                         onPress={() => handleRemovePhoto(index)}
                         hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
                       >
-                        <Text style={reportStyles.photoRemoveText}>✕</Text>
+                        <Ionicons name="close" size={16} color="#fff" />
                       </TouchableOpacity>
                     </View>
                   ))}
@@ -674,6 +670,10 @@ export default function ProfileScreen() {
 
         if (docSnap.exists()) {
           const data = docSnap.data();
+          // Calculate saved count from savedItems array
+          const savedItems = data.savedItems || [];
+          const savedCount = Array.isArray(savedItems) ? savedItems.length : 0;
+          
           setUserData({
             ...data,
             // FIX: ensure rating is always a proper number
@@ -683,6 +683,8 @@ export default function ProfileScreen() {
                 : parseFloat(data.rating) || 0,
             ratingCount:
               typeof data.ratingCount === "number" ? data.ratingCount : 0,
+            // FIX: calculate saved count from savedItems array
+            savedCount: savedCount,
           } as UserData);
           setError(null);
         } else {
@@ -787,7 +789,7 @@ export default function ProfileScreen() {
   if (error && !userData) {
     return (
       <View style={styles.errorContainer}>
-        <Text style={styles.errorIcon}>⚠️</Text>
+        <Ionicons name="alert-circle" size={48} color={ACCENT_RED} style={{ marginBottom: 12 }} />
         <Text style={styles.errorTitle}>Something went wrong</Text>
         <Text style={styles.errorMessage}>{error}</Text>
         <TouchableOpacity style={styles.retryButton} onPress={handleRetry}>
@@ -833,7 +835,7 @@ export default function ProfileScreen() {
           onPress={() => router.push("/edit-profile" as any)}
           activeOpacity={0.75}
         >
-          <Text style={styles.editButtonText}>✏️</Text>
+          <Ionicons name="pencil" size={18} color="#FF6B6B" />
         </TouchableOpacity>
       </View>
 
@@ -911,27 +913,27 @@ export default function ProfileScreen() {
               activeOpacity={0.8}
             >
               <Text style={styles.overviewText}>Overview</Text>
-              <Text style={styles.overviewStar}>⭐</Text>
+              <Ionicons name="star" size={18} color="#FFB800" />
             </TouchableOpacity>
           </View>
 
           {/* ── Stats ── */}
           <View style={styles.statsRow}>
             <StatCard
-              emoji="🔄"
+              iconName="swap-horizontal"
               label="Trades"
               count={userData?.tradesCount ?? 0}
             />
             <View style={styles.statDivider} />
             <StatCard
-              emoji="📤"
+              iconName="arrow-forward"
               label="Exchanged"
               count={userData?.exchangedCount ?? 0}
             />
             <View style={styles.statDivider} />
             {/* FIX: Saved stat card is now tappable → navigates to saved posts */}
             <StatCard
-              emoji="🔖"
+              iconName="bookmark"
               label="Saved"
               count={userData?.savedCount ?? 0}
               onPress={handleSavedPress}

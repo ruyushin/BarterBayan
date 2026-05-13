@@ -2,11 +2,26 @@ import { Ionicons } from '@expo/vector-icons';
 import { Tabs, useRouter } from 'expo-router';
 import { onAuthStateChanged } from 'firebase/auth';
 import React, { useEffect } from 'react';
-import { Platform } from 'react-native';
+import { Platform, StyleSheet, View } from 'react-native';
 
 import { HapticTab } from '@/components/haptic-tab';
 import { Colors } from '@/constants/theme';
 import { auth } from '../../firebaseConfig';
+
+const styles = StyleSheet.create({
+  tabIconContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingVertical: 0,
+    paddingHorizontal: 0,
+    borderBottomWidth: 3,
+    borderBottomColor: 'transparent',
+  },
+  tabIconActive: {
+    borderBottomColor: '#2f2f6f',
+  },
+});
 
 export default function TabLayout() {
   const router = useRouter();
@@ -46,8 +61,10 @@ export default function TabLayout() {
         name="index"
         options={{
           title: 'Home',
-          tabBarIcon: ({ color, size }) => (
-            <Ionicons name="home" size={size} color={color} />
+          tabBarIcon: ({ color, focused }) => (
+            <View style={[styles.tabIconContainer, focused && styles.tabIconActive]}>
+              <Ionicons name="home" size={24} color={focused ? '#2f2f6f' : color} />
+            </View>
           ),
         }}
       />
@@ -55,8 +72,10 @@ export default function TabLayout() {
         name="explore"
         options={{
           title: 'Explore',
-          tabBarIcon: ({ color, size }) => (
-            <Ionicons name="compass" size={size} color={color} />
+          tabBarIcon: ({ color, focused }) => (
+            <View style={[styles.tabIconContainer, focused && styles.tabIconActive]}>
+              <Ionicons name="compass" size={24} color={focused ? '#2f2f6f' : color} />
+            </View>
           ),
         }}
       />
@@ -64,8 +83,10 @@ export default function TabLayout() {
         name="trade"
         options={{
           title: 'Trade',
-          tabBarIcon: ({ color, size }) => (
-            <Ionicons name="swap-horizontal" size={size} color={color} />
+          tabBarIcon: ({ color, focused }) => (
+            <View style={[styles.tabIconContainer, focused && styles.tabIconActive]}>
+              <Ionicons name="swap-horizontal" size={24} color={focused ? '#2f2f6f' : color} />
+            </View>
           ),
         }}
       />
@@ -73,8 +94,10 @@ export default function TabLayout() {
         name="inbox"
         options={{
           title: 'Inbox',
-          tabBarIcon: ({ color, size }) => (
-            <Ionicons name="mail" size={size} color={color} />
+          tabBarIcon: ({ color, focused }) => (
+            <View style={[styles.tabIconContainer, focused && styles.tabIconActive]}>
+              <Ionicons name="mail" size={24} color={focused ? '#2f2f6f' : color} />
+            </View>
           ),
         }}
       />
@@ -82,8 +105,10 @@ export default function TabLayout() {
         name="profile"
         options={{
           title: 'Account',
-          tabBarIcon: ({ color, size }) => (
-            <Ionicons name="person" size={size} color={color} />
+          tabBarIcon: ({ color, focused }) => (
+            <View style={[styles.tabIconContainer, focused && styles.tabIconActive]}>
+              <Ionicons name="person" size={24} color={focused ? '#2f2f6f' : color} />
+            </View>
           ),
         }}
       />

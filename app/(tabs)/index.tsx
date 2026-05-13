@@ -1,12 +1,13 @@
 ﻿import React, { useState } from "react";
 import {
-  ActivityIndicator,
-  FlatList,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  View,
+    ActivityIndicator,
+    FlatList,
+    ScrollView,
+    StyleSheet,
+    Text,
+    TextInput,
+    TouchableOpacity,
+    View,
 } from "react-native";
 
 import { ThemedView } from "@/components/themed-view";
@@ -101,9 +102,10 @@ export default function HomeScreen() {
                   showsVerticalScrollIndicator={false}
                   keyExtractor={(item) => item.id}
                   renderItem={({ item }) => (
-                    <View
+                    <TouchableOpacity
                       style={styles.searchResultLink}
-                      onTouchEnd={() => handleSearchResultPress(item.title)}
+                      onPress={() => handleSearchResultPress(item.title)}
+                      activeOpacity={0.7}
                     >
                       <View style={styles.searchResultItem}>
                         <Text style={styles.searchResultText}>
@@ -113,7 +115,7 @@ export default function HomeScreen() {
                           {item.category}
                         </Text>
                       </View>
-                    </View>
+                    </TouchableOpacity>
                   )}
                   ItemSeparatorComponent={() => <View style={{ height: 4 }} />}
                   contentContainerStyle={styles.searchResultList}

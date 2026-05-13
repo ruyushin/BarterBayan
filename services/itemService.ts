@@ -1,12 +1,12 @@
 import {
-  addDoc,
-  arrayRemove,
-  arrayUnion,
-  collection,
-  doc,
-  getDoc,
-  getDocs,
-  updateDoc,
+    addDoc,
+    arrayRemove,
+    arrayUnion,
+    collection,
+    doc,
+    getDoc,
+    getDocs,
+    updateDoc,
 } from "firebase/firestore";
 import { db } from "../firebaseConfig";
 
@@ -337,14 +337,24 @@ export const updateItemSave = async (
 ) => {
   try {
     const userRef = doc(db, "users", userId);
+    const userSnap = await getDoc(userRef);
+    
+    if (!userSnap.exists()) {
+      throw new Error("User not found");
+    }
+
+    const currentSavedCount = userSnap.data()?.savedCount || 0;
+    const newSavedCount = isSaving ? currentSavedCount + 1 : Math.max(0, currentSavedCount - 1);
 
     if (isSaving) {
       await updateDoc(userRef, {
         savedItems: arrayUnion(itemId),
+        savedCount: newSavedCount,
       });
     } else {
       await updateDoc(userRef, {
         savedItems: arrayRemove(itemId),
+        savedCount: newSavedCount,
       });
     }
   } catch (error) {

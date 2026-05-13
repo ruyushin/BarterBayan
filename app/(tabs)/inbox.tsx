@@ -1,28 +1,29 @@
+import { Ionicons } from "@expo/vector-icons";
 import { useFocusEffect, useRouter } from "expo-router";
 import { useCallback, useState } from "react";
 import {
-  ActivityIndicator,
-  Alert,
-  FlatList,
-  Image,
-  SafeAreaView,
-  StyleSheet,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  View,
+    ActivityIndicator,
+    Alert,
+    FlatList,
+    Image,
+    SafeAreaView,
+    StyleSheet,
+    Text,
+    TextInput,
+    TouchableOpacity,
+    View,
 } from "react-native";
 import { auth } from "../../firebaseConfig";
 import { getUserInfo } from "../../services/itemService";
 import {
-  getOtherUserInConversation,
-  getUserConversations,
+    getOtherUserInConversation,
+    getUserConversations,
 } from "../../services/messagingService";
 import {
-  deleteNotifications,
-  getNotifications,
-  markAllNotificationsRead,
-  markNotificationRead,
+    deleteNotifications,
+    getNotifications,
+    markAllNotificationsRead,
+    markNotificationRead,
 } from "../../services/notificationService";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -79,13 +80,13 @@ const letterAvatarColor = (name: string): string => {
 const notifIcon = (type: NotifType): string => {
   switch (type) {
     case "trade_offer":
-      return "🔄";
+      return "swap-horizontal";
     case "trade_accepted":
-      return "✅";
+      return "checkmark-circle";
     case "message":
-      return "💬";
+      return "mail";
     default:
-      return "🔔";
+      return "notifications";
   }
 };
 
@@ -315,7 +316,7 @@ export default function InboxScreen() {
         {/* Selection checkbox */}
         {selectionMode && (
           <View style={[styles.checkbox, isSelected && styles.checkboxChecked]}>
-            {isSelected && <Text style={styles.checkmark}>✓</Text>}
+            {isSelected && <Ionicons name="checkmark" size={16} color="#2e2d7c" />}
           </View>
         )}
 
@@ -330,9 +331,7 @@ export default function InboxScreen() {
                 { backgroundColor: letterAvatarColor(item.title) },
               ]}
             >
-              <Text style={styles.letterAvatarText}>
-                {item.title?.charAt(0).toUpperCase() ?? "?"}
-              </Text>
+              <Ionicons name={notifIcon(item.type)} size={20} color="#fff" />
             </View>
           )}
           {!item.read && <View style={styles.unreadBadge} />}
@@ -377,7 +376,7 @@ export default function InboxScreen() {
             ]}
             onPress={() => setActiveTab("messages")}
           >
-            <Text style={styles.sideIconText}>💬</Text>
+            <Ionicons name="mail" size={24} color={activeTab === "messages" ? "#fff" : "#999"} />
           </TouchableOpacity>
           <TouchableOpacity
             style={[
@@ -386,7 +385,7 @@ export default function InboxScreen() {
             ]}
             onPress={() => setActiveTab("notifications")}
           >
-            <Text style={styles.sideIconText}>🔔</Text>
+            <Ionicons name="notifications" size={24} color={activeTab === "notifications" ? "#fff" : "#999"} />
             {unreadCount > 0 && (
               <View style={styles.badgePill}>
                 <Text style={styles.badgePillText}>
@@ -493,7 +492,7 @@ export default function InboxScreen() {
                 </View>
               ) : notifications.length === 0 ? (
                 <View style={styles.centered}>
-                  <Text style={styles.emptyIcon}>🔔</Text>
+                  <Ionicons name="notifications" size={48} color={NAVY} />
                   <Text style={styles.emptyText}>You're all caught up!</Text>
                 </View>
               ) : (
