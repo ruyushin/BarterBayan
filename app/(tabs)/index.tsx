@@ -1,22 +1,26 @@
 ﻿import React, { useState } from "react";
 import {
-    ActivityIndicator,
-    FlatList,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TextInput,
-    TouchableOpacity,
-    View,
+  ActivityIndicator,
+  FlatList,
+  Image,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
 } from "react-native";
+
 
 import { ThemedView } from "@/components/themed-view";
 import { Ionicons } from "@expo/vector-icons";
-import { Link, useRouter } from "expo-router";
+import { Link, useFocusEffect, useRouter } from "expo-router";
+import { auth } from "../../firebaseConfig";
 
 import ItemCard from "../../components/ItemCard";
 import { ProductDetailModal } from "../../components/ProductDetailModal";
 import { useItems } from "../../hooks/useItems";
+import { getUserPostedItems } from "../../services/itemService";
 
 const CATEGORIES = [
   { id: "1", name: "Electronics", icon: "phone-portrait" },
@@ -26,19 +30,44 @@ const CATEGORIES = [
   { id: "5", name: "Household", icon: "home" },
 ];
 
+// ─── Put your image in assets/images/ and update this path ───────────────────
+const MAGNIFIER_IMG = require("../../assets/images/magnifier.png");;
+
 export default function HomeScreen() {
   const { items, loading } = useItems("trending");
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedItem, setSelectedItem] = useState(null);
   const [modalVisible, setModalVisible] = useState(false);
+  const [userPostedItems, setUserPostedItems] = useState<any[]>([]);
+  const [loadingUserItems, setLoadingUserItems] = useState(true);
   const router = useRouter();
+
+  useFocusEffect(
+    React.useCallback(() => {
+      const fetchUserItems = async () => {
+        try {
+          const currentUser = auth.currentUser;
+          if (currentUser) {
+            const postedItems = await getUserPostedItems(currentUser.uid);
+            setUserPostedItems(postedItems);
+          }
+        } catch (error) {
+          console.error("Error fetching user items:", error);
+        } finally {
+          setLoadingUserItems(false);
+        }
+      };
+
+      fetchUserItems();
+    }, [])
+  );
 
   const query = searchQuery.toLowerCase().trim();
   const filteredResults = query
     ? items.filter(
         (item) =>
           item.title.toLowerCase().includes(query) ||
-          item.category.toLowerCase().includes(query),
+          item.category.toLowerCase().includes(query)
       )
     : [];
   const searchResults = filteredResults.slice(0, 5);
@@ -53,13 +82,25 @@ export default function HomeScreen() {
   const handleSearchSubmit = () => {
     if (searchQuery.trim().length > 0) {
       router.push(`/explore?search=${encodeURIComponent(searchQuery)}`);
-      setSearchQuery('');
+      setSearchQuery("");
     }
   };
 
   const handleItemPress = (item: any) => {
     setSelectedItem(item);
     setModalVisible(true);
+  };
+
+  const hasItems = userPostedItems.length > 0;
+
+  const bannerDescription = () => {
+    if (userPostedItems.length === 0)
+      return "No trades listed yet. Adding even one item increases your chances of finding the perfect deal.";
+    if (userPostedItems.length === 1)
+      return `Great start! You have ${userPostedItems.length} item listed. Keep adding more to boost your chances!`;
+    if (userPostedItems.length < 5)
+      return `Nice collection! You have ${userPostedItems.length} items listed. You're on your way to finding great deals!`;
+    return `Awesome! You're a trading pro with ${userPostedItems.length} items! You're part of our top traders. Keep it up!`;
   };
 
   return (
@@ -69,6 +110,7 @@ export default function HomeScreen() {
       showsVerticalScrollIndicator={false}
     >
       <ThemedView style={styles.container}>
+        {/* ── Search ── */}
         <View style={styles.searchWrapper}>
           <View style={styles.searchContainer}>
             <Ionicons
@@ -108,9 +150,7 @@ export default function HomeScreen() {
                       activeOpacity={0.7}
                     >
                       <View style={styles.searchResultItem}>
-                        <Text style={styles.searchResultText}>
-                          {item.title}
-                        </Text>
+                        <Text style={styles.searchResultText}>{item.title}</Text>
                         <Text style={styles.searchResultCategory}>
                           {item.category}
                         </Text>
@@ -129,6 +169,7 @@ export default function HomeScreen() {
           )}
         </View>
 
+        {/* ── Categories ── */}
         <View style={styles.sectionHeaderSmall}>
           <Text style={styles.sectionTitleSmall}>Categories</Text>
         </View>
@@ -154,21 +195,47 @@ export default function HomeScreen() {
           )}
         />
 
-        <ThemedView style={styles.bannerCard}>
+        {/* ── Your Trades Banner ── */}
+        <ThemedView
+          style={[styles.bannerCard, hasItems && styles.bannerCardActive]}
+        >
+          {/* Text content — left side */}
           <View style={styles.bannerContent}>
             <Text style={styles.bannerTitle}>Your Trades</Text>
-            <Text style={styles.bannerDescription}>
-              No trades listed yet. Adding even one item increases your chances
-              of finding the perfect deal.
-            </Text>
+            <Text style={styles.bannerDescription}>{bannerDescription()}</Text>
+
+            {hasItems && (
+              <TouchableOpacity
+                style={styles.bannerButton}
+                onPress={() => router.push("/trade")}
+                activeOpacity={0.8}
+              >
+                <Ionicons name="checkmark-circle" size={16} color="#3F51F4" />
+                <Text style={styles.bannerButtonText}>View Trades</Text>
+              </TouchableOpacity>
+            )}
+
+            {!hasItems && (
+              <TouchableOpacity
+                style={styles.bannerButton}
+                onPress={() => router.push("/add-item")}
+                activeOpacity={0.8}
+              >
+                <Ionicons name="add-circle" size={16} color="#3F51F4" />
+                <Text style={styles.bannerButtonText}>Add an Item</Text>
+              </TouchableOpacity>
+            )}
           </View>
-          <View style={styles.bannerIconOuter}>
-            <View style={styles.bannerIconCircle}>
-              <Ionicons name="search" size={24} color="#3F51F4" />
-            </View>
-          </View>
+
+          {/* Character image — right side */}
+          <Image
+            source={MAGNIFIER_IMG}
+            style={styles.bannerImage}
+            resizeMode="contain"
+          />
         </ThemedView>
 
+        {/* ── Trending ── */}
         <View style={styles.sectionHeader}>
           <Text style={styles.sectionTitle}>Trending</Text>
           <Link href="/explore">
@@ -201,6 +268,7 @@ export default function HomeScreen() {
           />
         )}
 
+        {/* ── Suggested ── */}
         <View style={styles.sectionHeader}>
           <Text style={styles.sectionTitle}>Suggested</Text>
           <Link href="/explore">
@@ -250,6 +318,8 @@ const styles = StyleSheet.create({
     paddingTop: 16,
     paddingBottom: 24,
   },
+
+  // ── Search ──────────────────────────────────────────────────────────────────
   searchWrapper: {
     marginHorizontal: 16,
     marginTop: 14,
@@ -268,67 +338,12 @@ const styles = StyleSheet.create({
     borderColor: "#E9E9E9",
     paddingHorizontal: 14,
   },
-  searchIcon: {
-    marginRight: 10,
-  },
+  searchIcon: { marginRight: 10 },
   searchInput: {
     flex: 1,
     color: "#242424",
     fontSize: 15,
     paddingVertical: 8,
-  },
-  searchPlaceholder: {
-    flex: 1,
-    color: "#888",
-    fontSize: 15,
-  },
-  headerRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    marginHorizontal: 16,
-    marginBottom: 8,
-  },
-  titleText: {
-    fontSize: 32,
-    fontWeight: "700",
-    color: "#1F2937",
-  },
-  sectionHeaderSmall: {
-    marginHorizontal: 16,
-    marginBottom: 8,
-  },
-  sectionTitleSmall: {
-    fontSize: 20,
-    fontWeight: "700",
-    color: "#1F2937",
-  },
-  categoryList: {
-    paddingHorizontal: 16,
-    paddingVertical: 6,
-  },
-  categoryLink: {
-    marginRight: 18,
-  },
-  categoryItem: {
-    alignItems: "center",
-    flexDirection: "column",
-  },
-  categoryCircle: {
-    width: 62,
-    height: 62,
-    borderRadius: 32,
-    backgroundColor: "#F5F7FF",
-    justifyContent: "center",
-    alignItems: "center",
-    borderWidth: 1,
-    borderColor: "#E8EEF9",
-  },
-  categoryText: {
-    marginTop: 8,
-    fontSize: 12,
-    fontWeight: "600",
-    color: "#1F2937",
   },
   searchPopup: {
     position: "absolute",
@@ -353,74 +368,97 @@ const styles = StyleSheet.create({
     color: "#111827",
     marginBottom: 10,
   },
-  searchResultList: {
-    paddingBottom: 6,
-  },
-  searchResultLink: {
-    width: "100%",
-  },
+  searchResultList: { paddingBottom: 6 },
+  searchResultLink: { width: "100%" },
   searchResultItem: {
     paddingVertical: 10,
     borderBottomWidth: 1,
     borderBottomColor: "#E5E7EB",
   },
-  searchResultText: {
-    fontSize: 14,
-    fontWeight: "600",
-    color: "#111827",
+  searchResultText: { fontSize: 14, fontWeight: "600", color: "#111827" },
+  searchResultCategory: { fontSize: 12, color: "#6B7280", marginTop: 2 },
+  noResultsText: { color: "#6B7280", fontSize: 13, lineHeight: 20 },
+
+  // ── Categories ───────────────────────────────────────────────────────────────
+  sectionHeaderSmall: { marginHorizontal: 16, marginBottom: 8 },
+  sectionTitleSmall: { fontSize: 20, fontWeight: "700", color: "#1F2937" },
+  categoryList: { paddingHorizontal: 16, paddingVertical: 6 },
+  categoryLink: { marginRight: 18 },
+  categoryItem: { alignItems: "center", flexDirection: "column" },
+  categoryCircle: {
+    width: 62,
+    height: 62,
+    borderRadius: 32,
+    backgroundColor: "#F5F7FF",
+    justifyContent: "center",
+    alignItems: "center",
+    borderWidth: 1,
+    borderColor: "#E8EEF9",
   },
-  searchResultCategory: {
-    fontSize: 12,
-    color: "#6B7280",
-    marginTop: 2,
-  },
-  noResultsText: {
-    color: "#6B7280",
-    fontSize: 13,
-    lineHeight: 20,
-  },
+  categoryText: { marginTop: 8, fontSize: 12, fontWeight: "600", color: "#1F2937" },
+
+  // ── Banner Card ──────────────────────────────────────────────────────────────
   bannerCard: {
+    flexDirection: "row",           // text left, image right
+    alignItems: "center",
     backgroundColor: "#3f51f4",
     borderRadius: 22,
-    padding: 22,
     marginHorizontal: 16,
     marginVertical: 22,
-    overflow: "hidden",
+    overflow: "hidden",             // clips the character at the bottom edge
     minHeight: 140,
+    paddingLeft: 22,
+    paddingVertical: 22,
+  },
+  bannerCardActive: {
+    backgroundColor: "#2d3aa1",
+    shadowColor: "#3f51f4",
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.3,
+    shadowRadius: 12,
+    elevation: 15,
   },
   bannerContent: {
-    flex: 1,
-    maxWidth: "70%",
+    flex: 1,                        // takes up remaining space left of the image
+    paddingRight: 12,
   },
   bannerTitle: {
     color: "#FFFFFF",
     fontSize: 20,
     fontWeight: "700",
-    marginBottom: 10,
+    marginBottom: 8,
   },
   bannerDescription: {
     color: "#EBF0FF",
-    fontSize: 14,
-    lineHeight: 20,
+    fontSize: 13,
+    lineHeight: 19,
     opacity: 0.95,
+    marginBottom: 14,
   },
-  bannerIconOuter: {
-    position: "absolute",
-    right: 18,
-    bottom: 18,
-  },
-  bannerIconCircle: {
-    width: 54,
-    height: 54,
-    borderRadius: 27,
-    backgroundColor: "#F9E16F",
-    justifyContent: "center",
+  bannerButton: {
+    flexDirection: "row",
     alignItems: "center",
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.12,
-    shadowRadius: 8,
+    alignSelf: "flex-start",
+    backgroundColor: "#FFFFFF",
+    borderRadius: 20,
+    paddingHorizontal: 14,
+    paddingVertical: 7,
+    gap: 6,
   },
+  bannerButtonText: {
+    color: "#3F51F4",
+    fontSize: 13,
+    fontWeight: "700",
+  },
+  // The character — anchored to the right, slightly overflowing the bottom
+  bannerImage: {
+    width: 130,
+    height: 160,
+    marginBottom: -22,             // pulls the feet below the card edge (clipped by overflow:hidden)
+    alignSelf: "flex-end",
+  },
+
+  // ── Section headers ──────────────────────────────────────────────────────────
   sectionHeader: {
     flexDirection: "row",
     justifyContent: "space-between",
@@ -428,32 +466,12 @@ const styles = StyleSheet.create({
     marginHorizontal: 16,
     marginBottom: 14,
   },
-  sectionTitle: {
-    fontSize: 20,
-    fontWeight: "700",
-    color: "#111827",
-  },
-  seeAllText: {
-    color: "#5D5FEF",
-    fontSize: 14,
-    fontWeight: "700",
-  },
-  loaderContainer: {
-    paddingVertical: 24,
-    alignItems: "center",
-  },
-  loadingText: {
-    marginTop: 10,
-    fontSize: 13,
-    color: "#000000",
-  },
-  emptyText: {
-    opacity: 0.6,
-    paddingVertical: 18,
-    color: "#6B7280",
-  },
-  horizontalList: {
-    paddingHorizontal: 16,
-    paddingBottom: 18,
-  },
+  sectionTitle: { fontSize: 20, fontWeight: "700", color: "#111827" },
+  seeAllText: { color: "#5D5FEF", fontSize: 14, fontWeight: "700" },
+
+  // ── Lists ────────────────────────────────────────────────────────────────────
+  loaderContainer: { paddingVertical: 24, alignItems: "center" },
+  loadingText: { marginTop: 10, fontSize: 13, color: "#000000" },
+  emptyText: { opacity: 0.6, paddingVertical: 18, color: "#6B7280" },
+  horizontalList: { paddingHorizontal: 16, paddingBottom: 18 },
 });

@@ -3,32 +3,32 @@ import { useLocalSearchParams, useRouter } from "expo-router";
 import { onAuthStateChanged } from "firebase/auth";
 import React, { useEffect, useRef, useState } from "react";
 import {
-  ActivityIndicator,
-  Alert,
-  Dimensions,
-  FlatList,
-  Image,
-  Modal,
-  Pressable,
-  SafeAreaView,
-  ScrollView,
-  Share,
-  StyleSheet,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  View,
+    ActivityIndicator,
+    Alert,
+    Dimensions,
+    FlatList,
+    Image,
+    Modal,
+    Pressable,
+    SafeAreaView,
+    ScrollView,
+    Share,
+    StyleSheet,
+    Text,
+    TextInput,
+    TouchableOpacity,
+    View,
 } from "react-native";
 import { auth } from "../../firebaseConfig";
 import {
-  addComment,
-  addCommentReply,
-  deleteComment,
-  getAllItems,
-  getUserSavedItems,
-  updateCommentLike,
-  updateItemLikes,
-  updateItemSave,
+    addComment,
+    addCommentReply,
+    deleteComment,
+    getAllItems,
+    getUserSavedItems,
+    updateCommentLike,
+    updateItemLikes,
+    updateItemSave,
 } from "../../services/itemService";
 import { sendMessage } from "../../services/messagingService";
 
@@ -385,7 +385,6 @@ function ItemCard({ item, onCommentAdded }: any) {
       );
       setComments([...comments, newComment]);
       setCommentText("");
-      onCommentAdded();
     } catch (error) {
       Alert.alert("Error", "Failed to add comment");
       console.error("Error:", error);
@@ -433,7 +432,6 @@ function ItemCard({ item, onCommentAdded }: any) {
       setComments(updatedComments);
       setReplyText("");
       setReplyingToCommentId(null);
-      onCommentAdded();
     } catch (error) {
       Alert.alert("Error", "Failed to add reply");
       console.error("Error:", error);

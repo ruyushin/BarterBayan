@@ -385,3 +385,23 @@ export const getUserSavedItems = async (userId: string) => {
     throw error;
   }
 };
+
+/**
+ * Get user's posted items by their userId (ownerId)
+ */
+export const getUserPostedItems = async (userId: string) => {
+  try {
+    const querySnapshot = await getDocs(collection(db, "items"));
+    const userItems = querySnapshot.docs
+      .filter((doc) => doc.data().ownerId === userId)
+      .map((doc) => ({
+        id: doc.id,
+        ...doc.data(),
+      }));
+    
+    return userItems;
+  } catch (error) {
+    console.error("Error getting user's posted items:", error);
+    throw error;
+  }
+};

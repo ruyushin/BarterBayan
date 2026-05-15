@@ -202,7 +202,7 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
               <Ionicons name="chevron-back" size={32} color="#fff" />
             </TouchableOpacity>
             <Text style={styles.fullScreenCounter}>
-              {fullScreenImageIndex + 1} / {images.length}
+              {`${fullScreenImageIndex + 1} / ${images.length}`}
             </Text>
             <TouchableOpacity
               onPress={() => {
@@ -224,66 +224,71 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
 
   const renderImageCarousel = () => (
     <View style={styles.carouselContainer}>
-      <FlatList
-        horizontal
-        pagingEnabled
-        scrollEnabled={images.length > 1}
-        showsHorizontalScrollIndicator={false}
-        data={images}
-        keyExtractor={(_, index: number) => `image-${index}`}
-        renderItem={({ item: imageUrl }) => (
-          <LongPressGestureHandler
-            onHandlerStateChange={({ nativeEvent }) =>
-              handleImageLongPress(nativeEvent)
-            }
-            minDurationMs={500}
-          >
-            <TouchableOpacity
-              activeOpacity={0.8}
-              style={styles.imageWrapper}
-              onPress={() => setFullScreenImageIndex(currentImageIndex)}
-            >
-              <Image
-                source={{ uri: imageUrl }}
-                style={styles.carouselImage}
-                resizeMode="contain"
-              />
-            </TouchableOpacity>
-          </LongPressGestureHandler>
-        )}
-        onMomentumScrollEnd={(event) => {
-          const index = Math.round(
-            event.nativeEvent.contentOffset.x /
-              event.nativeEvent.layoutMeasurement.width
-          );
-          setCurrentImageIndex(index);
-        }}
-      />
-      {images.length > 1 && (
-        <View style={styles.pagination}>
-          {images.map((_: string, index: number) => (
-            <View
-              key={index}
-              style={[
-                styles.paginationDot,
-                index === currentImageIndex && styles.paginationDotActive,
-              ]}
-            />
-          ))}
-          <Text style={styles.paginationText}>
-            {currentImageIndex + 1} / {images.length}
-          </Text>
-        </View>
+      {images.length > 0 ? (
+        <>
+          <FlatList
+            horizontal
+            pagingEnabled
+            scrollEnabled={images.length > 1}
+            showsHorizontalScrollIndicator={false}
+            data={images}
+            keyExtractor={(_, index: number) => `image-${index}`}
+            renderItem={({ item: imageUrl }) => (
+              <LongPressGestureHandler
+                onHandlerStateChange={({ nativeEvent }) =>
+                  handleImageLongPress(nativeEvent)
+                }
+                minDurationMs={500}
+              >
+                <TouchableOpacity
+                  activeOpacity={0.8}
+                  style={styles.imageWrapper}
+                  onPress={() => setFullScreenImageIndex(currentImageIndex)}
+                >
+                  <Image
+                    source={{ uri: imageUrl }}
+                    style={styles.carouselImage}
+                    resizeMode="contain"
+                  />
+                </TouchableOpacity>
+              </LongPressGestureHandler>
+            )}
+            onMomentumScrollEnd={(event) => {
+              const index = Math.round(
+                event.nativeEvent.contentOffset.x /
+                  event.nativeEvent.layoutMeasurement.width
+              );
+              setCurrentImageIndex(index);
+            }}
+          />
+          {images.length > 1 && (
+            <View style={styles.pagination}>
+              {images.map((_: string, index: number) => (
+                <View
+                  key={index}
+                  style={[
+                    styles.paginationDot,
+                    index === currentImageIndex && styles.paginationDotActive,
+                  ]}
+                />
+              ))}
+              <Text style={styles.paginationText}>
+                {`${currentImageIndex + 1} / ${images.length}`}
+              </Text>
+            </View>
+          )}
+          <View style={styles.holdToSaveContainer}>
+            <Text style={styles.holdToSaveText}>Hold image to save</Text>
+          </View>
+        </>
+      ) : (
+        <View style={{ flex: 1, backgroundColor: '#F3F4F6' }} />
       )}
-      <View style={styles.holdToSaveContainer}>
-        <Text style={styles.holdToSaveText}>Hold image to save</Text>
-      </View>
     </View>
   );
 
   const modalContent = (
     <View style={styles.container}>
-      {/* Header */}
       <View style={styles.header}>
         <TouchableOpacity onPress={onClose} style={styles.closeButton}>
           <Ionicons name="close" size={28} color="#2e2d7c" />
@@ -300,24 +305,17 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
           />
         </TouchableOpacity>
       </View>
-
-      {/* Image Carousel */}
       {renderImageCarousel()}
-
       <ScrollView
         style={styles.content}
         showsVerticalScrollIndicator={false}
         contentContainerStyle={styles.scrollContent}
       >
-        {/* Product Info */}
         <View style={styles.productInfo}>
           <Text style={styles.title}>{item?.title}</Text>
         </View>
-
-        {/* Details Section */}
         <View style={styles.detailsSection}>
           <Text style={styles.detailsHeader}>Details</Text>
-          
           {item?.description && (
             <View style={styles.descriptionContainer}>
               <Text style={styles.descriptionText}>
@@ -340,14 +338,12 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
               )}
             </View>
           )}
-
           {item?.condition && (
             <View style={styles.detailRow}>
               <Text style={styles.detailLabel}>Condition</Text>
               <Text style={styles.detailValue}>{item.condition}</Text>
             </View>
           )}
-          
           {item?.category && (
             <View style={styles.detailRow}>
               <Text style={styles.detailLabel}>Category</Text>
@@ -356,7 +352,6 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
           )}
         </View>
 
-        {/* Owner Info */}
         {ownerInfo && (
           <View style={styles.ownerCard}>
             <View style={styles.ownerHeader}>
@@ -383,7 +378,6 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
           </View>
         )}
 
-        {/* Like Button */}
         <TouchableOpacity
           style={[styles.likeButton, isLiked && styles.likeButtonActive]}
           onPress={handleLike}
@@ -409,8 +403,6 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
             </>
           )}
         </TouchableOpacity>
-
-        {/* Message Button */}
         <TouchableOpacity
           style={styles.messageButton}
           onPress={handleSendMessage}

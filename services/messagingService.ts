@@ -1,160 +1,558 @@
 import {
-    addDoc,
-    collection,
-    doc,
-    getDocs,
-    limit,
-    orderBy,
-    query,
-    setDoc,
-    Timestamp,
-    where,
+  addDoc,
+  arrayUnion,
+  collection,
+  deleteDoc,
+  doc,
+  getDoc,
+  getDocs,
+  limit,
+  onSnapshot,
+  orderBy,
+  query,
+  setDoc,
+  Timestamp,
+  updateDoc,
+  where,
 } from 'firebase/firestore';
 import { db } from '../firebaseConfig';
 
-/**
- * Create a unique conversation ID from two user IDs
- * Ensures consistent conversation ID regardless of order
- */
-const getConversationId = (userId1: string, userId2: string): string => {
-  return [userId1, userId2].sort().join('_');
-};
+// ─── Types ────────────────────────────────────────────────────────────────────
+
+interface ConversationData {
+    id: string;
+    participants: string[];
+    lastMessage?: string;
+    lastMessageTime?: Timestamp;
+    lastMessageSenderId?: string;
+    isRead?: boolean;
+    readBy?: string[];
+    deletedBy?: string[];
+    archivedBy?: string[];
+    mutedBy?: Record<string, Timestamp | null>;
+    deletedAt?: Timestamp;
+}
+
+interface ReplyRef {
+    id: string;
+    text: string;
+    senderId: string;
+}
+
+interface MessageData {
+    id: string;
+    senderId: string;
+    recipientId: string;
+    text: string | null;
+    timestamp: Timestamp;
+    read: boolean;
+    itemId?: string;
+    replyTo?: ReplyRef;
+    deletedForEveryone?: boolean;
+    deletedFor?: string[];           // user IDs who deleted for themselves only
+    edited?: boolean;
+    editHistory?: { text: string; editedAt: Timestamp }[];
+    reactions?: Record<string, string[]>; // emoji → array of user IDs
+}
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+const getConversationId = (userId1: string, userId2: string): string =>
+    [userId1, userId2].sort().join('_');
+
+// ─── Real-time message subscription (FIX: replaces one-time fetch) ────────────
 
 /**
- * Send a message in a conversation
+ * Subscribe to messages in real-time using Firestore onSnapshot.
+ * Returns an unsubscribe function.
+ *
+ * Messages that the current user has deleted for themselves are filtered out.
+ * Messages deleted for everyone are kept so the "deleted" placeholder renders.
  */
-export const sendMessage = async (
-  senderId: string,
-  recipientId: string,
-  messageText: string,
-  itemId?: string
-) => {
-  try {
-    const conversationId = getConversationId(senderId, recipientId);
-    const messagesRef = collection(db, 'messages', conversationId, 'threads');
-
-    const messageDoc = await addDoc(messagesRef, {
-      senderId,
-      recipientId,
-      text: messageText,
-      itemId,
-      timestamp: Timestamp.now(),
-      read: false,
-    });
-
-    // Update conversation metadata
-    const conversationRef = doc(db, 'messages', conversationId);
-    await setDoc(
-      conversationRef,
-      {
-        participants: [senderId, recipientId],
-        lastMessage: messageText,
-        lastMessageTime: Timestamp.now(),
-        lastMessageSenderId: senderId,
-      },
-      { merge: true }
-    );
-
-    return messageDoc.id;
-  } catch (error) {
-    console.error('Error sending message:', error);
-    throw error;
-  }
-};
-
-/**
- * Get all messages in a conversation
- */
-export const getConversationMessages = async (
-  userId1: string,
-  userId2: string,
-  limitCount: number = 50
-) => {
-  try {
+export const subscribeToMessages = (
+    userId1: string,
+    userId2: string,
+    onMessages: (messages: MessageData[]) => void,
+    limitCount: number = 100
+): (() => void) => {
     const conversationId = getConversationId(userId1, userId2);
     const messagesRef = collection(db, 'messages', conversationId, 'threads');
 
     const q = query(
-      messagesRef,
-      orderBy('timestamp', 'desc'),
-      limit(limitCount)
+        messagesRef,
+        orderBy('timestamp', 'asc'),
+        limit(limitCount)
     );
 
-    const snapshot = await getDocs(q);
-    return snapshot.docs
-      .map((doc) => ({
-        id: doc.id,
-        ...doc.data(),
-      }))
-      .reverse();
-  } catch (error) {
-    console.error('Error getting messages:', error);
-    throw error;
-  }
+    const unsubscribe = onSnapshot(
+        q,
+        (snapshot) => {
+            const msgs: MessageData[] = snapshot.docs
+                .map((d) => ({ id: d.id, ...(d.data() as Omit<MessageData, 'id'>) }))
+                // FIX: filter out messages the current user deleted for themselves
+                .filter((msg) => {
+                    if (msg.deletedForEveryone) return true; // keep — show placeholder
+                    if (Array.isArray(msg.deletedFor) && msg.deletedFor.includes(userId1)) return false;
+                    return true;
+                });
+            onMessages(msgs);
+        },
+        (error) => {
+            console.error('Message subscription error:', error);
+        }
+    );
+
+    return unsubscribe;
+};
+
+// ─── Send ─────────────────────────────────────────────────────────────────────
+
+/**
+ * Send a message. Optionally include a replyTo reference.
+ */
+export const sendMessage = async (
+    senderId: string,
+    recipientId: string,
+    messageText: string,
+    itemId?: string,
+    replyTo?: ReplyRef
+): Promise<string> => {
+    try {
+        const conversationId = getConversationId(senderId, recipientId);
+        const messagesRef = collection(db, 'messages', conversationId, 'threads');
+
+        const messageData: Omit<MessageData, 'id'> = {
+            senderId,
+            recipientId,
+            text: messageText,
+            timestamp: Timestamp.now(),
+            read: false,
+            deletedForEveryone: false,
+            deletedFor: [],
+            reactions: {},
+        };
+
+        if (itemId) (messageData as any).itemId = itemId;
+        if (replyTo) messageData.replyTo = replyTo;
+
+        const messageDoc = await addDoc(messagesRef, messageData);
+
+        const conversationRef = doc(db, 'messages', conversationId);
+        await setDoc(
+            conversationRef,
+            {
+                participants: [senderId, recipientId],
+                lastMessage: messageText,
+                lastMessageTime: Timestamp.now(),
+                lastMessageSenderId: senderId,
+                deletedBy: [],
+                deletedAt: null,
+            },
+            { merge: true }
+        );
+
+        return messageDoc.id;
+    } catch (error) {
+        console.error('Error sending message:', error);
+        throw error;
+    }
+};
+
+// ─── React to message (FIX: one emoji per user) ───────────────────────────────
+
+/**
+ * Toggle a reaction on a message.
+ *
+ * Rules (one emoji per user):
+ *  - If the user already reacted with THIS emoji → remove it (toggle off).
+ *  - If the user reacted with a DIFFERENT emoji → remove old, add new.
+ *  - If the user has no reaction → add the emoji.
+ */
+export const reactToMessage = async (
+    conversationId: string,
+    messageId: string,
+    emoji: string,
+    userId: string
+): Promise<void> => {
+    try {
+        const msgRef = doc(db, 'messages', conversationId, 'threads', messageId);
+        const snap = await getDoc(msgRef);
+        if (!snap.exists()) return;
+
+        const data = snap.data();
+        const reactions: Record<string, string[]> = data.reactions ?? {};
+
+        // Remove this user from ALL emoji arrays first
+        const updated: Record<string, string[]> = {};
+        for (const [key, users] of Object.entries(reactions)) {
+            updated[key] = (users as string[]).filter((u) => u !== userId);
+        }
+
+        // If user already had this emoji → toggle off (don't re-add)
+        const hadThisEmoji = (reactions[emoji] ?? []).includes(userId);
+        if (!hadThisEmoji) {
+            updated[emoji] = [...(updated[emoji] ?? []), userId];
+        }
+
+        await updateDoc(msgRef, { reactions: updated });
+    } catch (error) {
+        console.error('Error reacting to message:', error);
+        throw error;
+    }
+};
+
+// ─── Edit message (FIX: persists edit history) ───────────────────────────────
+
+/**
+ * Edit a message text. Stores the previous text in editHistory array.
+ */
+export const editMessage = async (
+    conversationId: string,
+    messageId: string,
+    newText: string
+): Promise<void> => {
+    try {
+        const msgRef = doc(db, 'messages', conversationId, 'threads', messageId);
+        const snap = await getDoc(msgRef);
+        if (!snap.exists()) return;
+
+        const data = snap.data();
+        const editHistoryEntry = {
+            text: data.text,
+            editedAt: data.timestamp, // record when the previous version was from
+        };
+
+        await updateDoc(msgRef, {
+            text: newText,
+            edited: true,
+            editHistory: arrayUnion(editHistoryEntry),
+        });
+    } catch (error) {
+        console.error('Error editing message:', error);
+        throw error;
+    }
+};
+
+// ─── Delete for me (FIX: persists to Firestore, filters in subscription) ─────
+
+/**
+ * Delete a message only for the current user.
+ * Adds userId to the message's deletedFor array.
+ * The other participant still sees the message normally.
+ */
+export const deleteMessageForMe = async (
+    conversationId: string,
+    messageId: string,
+    userId: string
+): Promise<void> => {
+    try {
+        const msgRef = doc(db, 'messages', conversationId, 'threads', messageId);
+        await updateDoc(msgRef, {
+            deletedFor: arrayUnion(userId),
+        });
+    } catch (error) {
+        console.error('Error deleting message for me:', error);
+        throw error;
+    }
+};
+
+// ─── Delete for everyone (FIX: persists flag so other user sees placeholder) ─
+
+/**
+ * Delete a message for everyone.
+ * Sets deletedForEveryone = true and clears the text.
+ * Both participants will see "(name) deleted a message".
+ */
+export const deleteMessageForEveryone = async (
+    conversationId: string,
+    messageId: string,
+    _userId: string
+): Promise<void> => {
+    try {
+        const msgRef = doc(db, 'messages', conversationId, 'threads', messageId);
+        await updateDoc(msgRef, {
+            deletedForEveryone: true,
+            text: null,
+        });
+    } catch (error) {
+        console.error('Error deleting message for everyone:', error);
+        throw error;
+    }
+};
+
+// ─── Read ─────────────────────────────────────────────────────────────────────
+
+/**
+ * Get all messages once (non-realtime). Use subscribeToMessages for live updates.
+ */
+export const getConversationMessages = async (
+    userId1: string,
+    userId2: string,
+    limitCount: number = 50
+): Promise<MessageData[]> => {
+    try {
+        const conversationId = getConversationId(userId1, userId2);
+        const messagesRef = collection(db, 'messages', conversationId, 'threads');
+
+        const q = query(
+            messagesRef,
+            orderBy('timestamp', 'desc'),
+            limit(limitCount)
+        );
+
+        const snapshot = await getDocs(q);
+        return snapshot.docs
+            .map((d) => ({ id: d.id, ...(d.data() as Omit<MessageData, 'id'>) }))
+            .reverse();
+    } catch (error) {
+        console.error('Error getting messages:', error);
+        throw error;
+    }
 };
 
 /**
- * Get all conversations for a user
+ * Get all conversations for a user, excluding deleted ones.
  */
-export const getUserConversations = async (userId: string) => {
-  try {
-    const conversationsRef = collection(db, 'messages');
-    const q = query(
-      conversationsRef,
-      where('participants', 'array-contains', userId)
-    );
+export const getUserConversations = async (
+    userId: string
+): Promise<ConversationData[]> => {
+    try {
+        const conversationsRef = collection(db, 'messages');
+        const q = query(
+            conversationsRef,
+            where('participants', 'array-contains', userId)
+        );
 
-    const snapshot = await getDocs(q);
-    const conversations = snapshot.docs.map((doc) => ({
-      id: doc.id,
-      ...doc.data(),
-    }));
+        const snapshot = await getDocs(q);
+        const conversations = snapshot.docs
+            .map((d) => ({ id: d.id, ...(d.data() as Omit<ConversationData, 'id'>) }))
+            .filter(
+                (conv) =>
+                    !Array.isArray(conv.deletedBy) || !conv.deletedBy.includes(userId)
+            );
 
-    // Sort by lastMessageTime on client side
-    return conversations.sort((a, b) => {
-      const timeA = a.lastMessageTime?.toMillis?.() || 0;
-      const timeB = b.lastMessageTime?.toMillis?.() || 0;
-      return timeB - timeA; // Descending order
-    });
-  } catch (error) {
-    console.error('Error getting conversations:', error);
-    throw error;
-  }
+        return conversations.sort((a, b) => {
+            const timeA = a.lastMessageTime?.toMillis?.() ?? 0;
+            const timeB = b.lastMessageTime?.toMillis?.() ?? 0;
+            return timeB - timeA;
+        });
+    } catch (error) {
+        console.error('Error getting conversations:', error);
+        throw error;
+    }
 };
 
-/**
- * Mark messages as read
- */
-export const markMessagesAsRead = async (
-  conversationId: string,
-  userId: string
-) => {
-  try {
-    const messagesRef = collection(db, 'messages', conversationId, 'threads');
-    const q = query(
-      messagesRef,
-      where('recipientId', '==', userId),
-      where('read', '==', false)
-    );
-
-    const snapshot = await getDocs(q);
-    snapshot.docs.forEach((messageDoc) => {
-      // Update each message to read
-      // Note: This is a simple implementation. For production, use batch writes
-    });
-  } catch (error) {
-    console.error('Error marking messages as read:', error);
-    throw error;
-  }
-};
-
-/**
- * Get the other user in a conversation
- */
 export const getOtherUserInConversation = (
-  conversationId: string,
-  currentUserId: string
-) => {
-  const [userId1, userId2] = conversationId.split('_');
-  return userId1 === currentUserId ? userId2 : userId1;
+    conversationId: string,
+    currentUserId: string
+): string => {
+    const [userId1, userId2] = conversationId.split('_');
+    return userId1 === currentUserId ? userId2 : userId1;
+};
+
+// ─── Read / Unread ────────────────────────────────────────────────────────────
+
+export const markMessagesAsRead = async (
+    conversationId: string,
+    userId: string
+): Promise<void> => {
+    try {
+        const messagesRef = collection(db, 'messages', conversationId, 'threads');
+        const q = query(
+            messagesRef,
+            where('recipientId', '==', userId),
+            where('read', '==', false)
+        );
+
+        const snapshot = await getDocs(q);
+        snapshot.docs.forEach((messageDoc) => {
+            const messageRef = doc(db, 'messages', conversationId, 'threads', messageDoc.id);
+            setDoc(messageRef, { read: true }, { merge: true }).catch((error) =>
+                console.error('Error marking message as read:', error)
+            );
+        });
+    } catch (error) {
+        console.error('Error marking messages as read:', error);
+        throw error;
+    }
+};
+
+export const markConversationAsRead = async (
+    conversationId: string,
+    userId: string
+): Promise<void> => {
+    try {
+        const conversationRef = doc(db, 'messages', conversationId);
+        await setDoc(
+            conversationRef,
+            { isRead: true, readBy: arrayUnion(userId) },
+            { merge: true }
+        );
+    } catch (error) {
+        console.error('Error marking conversation as read:', error);
+        throw error;
+    }
+};
+
+export const markConversationAsUnread = async (
+    conversationId: string,
+    _userId: string
+): Promise<void> => {
+    try {
+        const conversationRef = doc(db, 'messages', conversationId);
+        await setDoc(conversationRef, { isRead: false, readBy: [] }, { merge: true });
+    } catch (error) {
+        console.error('Error marking conversation as unread:', error);
+        throw error;
+    }
+};
+
+// ─── Archive / Unarchive ──────────────────────────────────────────────────────
+
+export const archiveConversation = async (
+    conversationId: string,
+    userId: string
+): Promise<void> => {
+    try {
+        const conversationRef = doc(db, 'messages', conversationId);
+        await setDoc(
+            conversationRef,
+            { archivedBy: arrayUnion(userId) },
+            { merge: true }
+        );
+    } catch (error) {
+        console.error('Error archiving conversation:', error);
+        throw error;
+    }
+};
+
+export const unarchiveConversation = async (
+    conversationId: string,
+    _userId: string
+): Promise<void> => {
+    try {
+        const conversationRef = doc(db, 'messages', conversationId);
+        await setDoc(conversationRef, { archivedBy: [] }, { merge: true });
+    } catch (error) {
+        console.error('Error unarchiving conversation:', error);
+        throw error;
+    }
+};
+
+// ─── Delete conversation ──────────────────────────────────────────────────────
+
+export const deleteConversation = async (
+    conversationId: string,
+    userId: string
+): Promise<void> => {
+    try {
+        const threadsRef = collection(db, 'messages', conversationId, 'threads');
+        const threadsSnapshot = await getDocs(threadsRef);
+
+        await Promise.all(
+            threadsSnapshot.docs.map((threadDoc) =>
+                deleteDoc(doc(db, 'messages', conversationId, 'threads', threadDoc.id))
+            )
+        );
+
+        const conversationRef = doc(db, 'messages', conversationId);
+        await setDoc(
+            conversationRef,
+            {
+                deletedBy: arrayUnion(userId),
+                deletedAt: Timestamp.now(),
+                lastMessage: '',
+            },
+            { merge: true }
+        );
+    } catch (error) {
+        console.error('Error deleting conversation:', error);
+        throw error;
+    }
+};
+
+// ─── Mute / Unmute ────────────────────────────────────────────────────────────
+
+export const muteConversation = async (
+    conversationId: string,
+    userId: string,
+    muteUntil: Date
+): Promise<void> => {
+    try {
+        const conversationRef = doc(db, 'messages', conversationId);
+        await setDoc(
+            conversationRef,
+            { mutedBy: { [userId]: Timestamp.fromDate(muteUntil) } },
+            { merge: true }
+        );
+    } catch (error) {
+        console.error('Error muting conversation:', error);
+        throw error;
+    }
+};
+
+export const unmuteConversation = async (
+    conversationId: string,
+    userId: string
+): Promise<void> => {
+    try {
+        const conversationRef = doc(db, 'messages', conversationId);
+        await setDoc(
+            conversationRef,
+            { mutedBy: { [userId]: null } },
+            { merge: true }
+        );
+    } catch (error) {
+        console.error('Error unmuting conversation:', error);
+        throw error;
+    }
+};
+
+// ─── Fetch Conversation Metadata ──────────────────────────────────────────────
+
+export const getConversationData = async (
+    conversationId: string
+): Promise<ConversationData | null> => {
+    try {
+        const conversationRef = doc(db, 'messages', conversationId);
+        const snapshot = await getDoc(conversationRef);
+        if (snapshot.exists()) {
+            return { id: snapshot.id, ...(snapshot.data() as Omit<ConversationData, 'id'>) };
+        }
+        return null;
+    } catch (error) {
+        console.error('Error fetching conversation data:', error);
+        throw error;
+    }
+};
+
+// ─── One-time migration helper ────────────────────────────────────────────────
+
+export const migrateMissingTimestamps = async (): Promise<number> => {
+    let updatedCount = 0;
+    try {
+        const messagesRef = collection(db, 'messages');
+        const conversationDocs = await getDocs(messagesRef);
+
+        for (const convDoc of conversationDocs.docs) {
+            const conversationId = convDoc.id;
+            const threadsRef = collection(db, 'messages', conversationId, 'threads');
+            const threadDocs = await getDocs(threadsRef);
+
+            for (const threadDoc of threadDocs.docs) {
+                const msgData = threadDoc.data();
+                if (!msgData.timestamp) {
+                    const msgRef = doc(db, 'messages', conversationId, 'threads', threadDoc.id);
+                    await setDoc(msgRef, { timestamp: Timestamp.now() }, { merge: true });
+                    updatedCount++;
+                }
+            }
+        }
+
+        console.log(`Migration complete: Updated ${updatedCount} messages`);
+        return updatedCount;
+    } catch (error) {
+        console.error('Migration error:', error);
+        throw error;
+    }
 };
