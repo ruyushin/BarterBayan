@@ -1,25 +1,25 @@
-import { Ionicons } from '@expo/vector-icons';
+import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import { onAuthStateChanged, User } from "firebase/auth";
 import {
-    collection,
-    limit,
-    onSnapshot,
-    orderBy,
-    query,
-    where,
+  collection,
+  limit,
+  onSnapshot,
+  orderBy,
+  query,
+  where,
 } from "firebase/firestore";
 import React, { useEffect, useRef, useState } from "react";
 import {
-    ActivityIndicator,
-    Animated,
-    Linking,
-    RefreshControl,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TouchableOpacity,
-    View,
+  ActivityIndicator,
+  Animated,
+  Linking,
+  RefreshControl,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
 } from "react-native";
 import { auth, db } from "../firebaseConfig.ts";
 
@@ -378,24 +378,26 @@ export default function TradeHistoryScreen() {
         const isOffline =
           err?.code === "unavailable" || /offline/i.test(err?.message ?? "");
         const isIndexError = err?.code === "failed-precondition";
-        
+
         if (isIndexError) {
           // Extract the index creation URL from the error message if available
           const errorMsg = err?.message ?? "";
-          const indexUrl = errorMsg.match(/https:\/\/console\.firebase\.google\.com[^\s]+/)?.[0];
-          
+          const indexUrl = errorMsg.match(
+            /https:\/\/console\.firebase\.google\.com[^\s]+/,
+          )?.[0];
+
           if (indexUrl) {
             setError(
-              "Trade history requires a database index. Creating it now..."
+              "Trade history requires a database index. Creating it now...",
             );
             Linking.openURL(indexUrl).catch(() => {
               setError(
-                "Please create the composite index in Firebase Console to view trade history."
+                "Please create the composite index in Firebase Console to view trade history.",
               );
             });
           } else {
             setError(
-              "Trade history is being set up. Please try again shortly."
+              "Trade history is being set up. Please try again shortly.",
             );
           }
         } else if (isOffline) {
@@ -403,7 +405,7 @@ export default function TradeHistoryScreen() {
         } else {
           setError("Failed to load trade history.");
         }
-        
+
         setLoading(false);
         setRefreshing(false);
         animateIn();
