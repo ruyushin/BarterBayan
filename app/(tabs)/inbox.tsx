@@ -64,13 +64,17 @@ interface SheetOption {
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
+
+// FIX #1: Handles Firestore Timestamp, plain Date,
+//         {seconds, nanoseconds} objects, and raw strings/numbers.
 const tsToDate = (timestamp: any): Date => {
   if (!timestamp) return new Date(0);
   if (timestamp instanceof Date) return timestamp;
   if (typeof timestamp.toDate === "function") return timestamp.toDate();
   if (typeof timestamp.seconds === "number")
     return new Date(timestamp.seconds * 1000);
-  return new Date(timestamp);
+  const parsed = new Date(timestamp);
+  return isNaN(parsed.getTime()) ? new Date(0) : parsed;
 };
 
 const formatTime = (timestamp: any): string => {
@@ -111,16 +115,93 @@ const notifIcon = (type: NotifType): any => {
   }
 };
 
-// ─── Resolve avatar from any user-info shape ──────────────────────────────────
-const resolveAvatar = (info: any): string | null =>
-  info?.avatarUrl ||
-  info?.photoURL ||
-  info?.profileImage ||
-  info?.avatar ||
-  info?.profilePicture ||
-  info?.photo ||
-  info?.picture ||
-  null;
+// FIX #2: Resolve avatar — checks every possible field name,
+//         only returns if it looks like a real HTTP(S) URL.
+const resolveAvatar = (info: any): string | null => {
+  const url =
+    info?.avatarUrl ||
+    info?.photoURL ||
+    info?.profileImage ||
+    info?.avatar ||
+    info?.profilePicture ||
+    info?.photo ||
+    info?.picture ||
+    null;
+  if (url && typeof url === "string" && url.startsWith("http")) return url;
+  return null;
+};
+
+// ─── Avatar component with onError fallback ───────────────────────────────────
+// FIX #3: If the image URI fails to load, immediately falls back to
+//         the letter/colour avatar instead of showing a broken image.
+function AvatarWithFallback({
+  uri,
+  name,
+  size,
+  style,
+  fallbackFontSize,
+}: {
+  uri: string | null;
+  name: string;
+  size: number;
+  style?: any;
+  fallbackFontSize?: number;
+}) {
+  const [failed, setFailed] = useState(false);
+  const initials = (name || "?").charAt(0).toUpperCase();
+  const bg = letterAvatarColor(name || "?");
+  const baseStyle = {
+    width: size,
+    height: size,
+    borderRadius: size / 2,
+    backgroundColor: "#ddd",
+  };
+
+  if (uri && !failed) {
+    return (
+      <Image
+        source={{ uri }}
+        style={[baseStyle, style]}
+        onError={() => setFailed(true)}
+      />
+    );
+  }
+  return (
+    <View style={[baseStyle, { backgroundColor: bg, justifyContent: "center", alignItems: "center" }, style]}>
+      <Text style={{ color: "#fff", fontSize: fallbackFontSize ?? size * 0.42, fontWeight: "700" }}>
+        {initials}
+      </Text>
+    </View>
+  );
+}
+
+// ─── Notification avatar with fallback ───────────────────────────────────────
+function NotifAvatarWithFallback({
+  uri,
+  title,
+  type,
+}: {
+  uri?: string;
+  title: string;
+  type: NotifType;
+}) {
+  const [failed, setFailed] = useState(false);
+
+  if (uri && !failed) {
+    return (
+      <Image
+        source={{ uri }}
+        style={styles.notifAvatar}
+        onError={() => setFailed(true)}
+      />
+    );
+  }
+  return (
+    <View style={[styles.notifIconCircle, { backgroundColor: letterAvatarColor(title) }]}>
+      <Ionicons name={notifIcon(type)} size={20} color="#fff" />
+    </View>
+  );
+}
 
 // ─── Bottom Sheet ─────────────────────────────────────────────────────────────
 function BottomSheet({
@@ -192,7 +273,6 @@ export default function InboxScreen() {
   const [conversations, setConversations] = useState<any[]>([]);
   const [archivedConversations, setArchivedConversations] = useState<any[]>([]);
   const [convLoading, setConvLoading] = useState(false);
-  // mutedConversations is now DERIVED from Firestore data on every load
   const [mutedConversations, setMutedConversations] = useState<{ [key: string]: Date }>({});
   const [searchQuery, setSearchQuery] = useState<string>("");
 
@@ -239,11 +319,19 @@ export default function InboxScreen() {
       setConvLoading(true);
       const convs = await getUserConversations(currentUserId!);
 
+      if (!convs || convs.length === 0) {
+        setConversations([]);
+        setArchivedConversations([]);
+        setMutedConversations({});
+        return;
+      }
+
       const enriched = await Promise.all(
         convs.map(async (conv: any) => {
           try {
             const otherUserId = getOtherUserInConversation(conv.id, currentUserId!);
-            const userInfo: any = await getUserInfo(otherUserId);
+            if (!otherUserId) return conv;
+            const userInfo: any = await getUserInfo(otherUserId).catch(() => null);
             const avatarUri = resolveAvatar(userInfo);
             return {
               ...conv,
@@ -252,19 +340,19 @@ export default function InboxScreen() {
               userAvatar: avatarUri,
             };
           } catch {
-            return conv;
+            return { ...conv, userName: "User", userAvatar: null };
           }
         }),
       );
 
-      // ── Sync mute state from Firestore ──────────────────────────────────────
-      // This ensures mutes set in chat.tsx are reflected here on every load.
+      // FIX #4: Sync mute state from Firestore on every load so changes
+      //         made in chat.tsx are reflected here immediately on return.
       const newMuted: { [key: string]: Date } = {};
       enriched.forEach((conv: any) => {
         const mutedTs = conv.mutedBy?.[currentUserId!];
         if (mutedTs) {
           const until = tsToDate(mutedTs);
-          if (until > new Date()) {
+          if (until.getTime() > Date.now()) {
             newMuted[conv.id] = until;
           }
         }
@@ -281,6 +369,8 @@ export default function InboxScreen() {
       setArchivedConversations(archived);
     } catch (err) {
       console.error("Error loading conversations:", err);
+      setConversations([]);
+      setArchivedConversations([]);
     } finally {
       setConvLoading(false);
     }
@@ -290,9 +380,10 @@ export default function InboxScreen() {
     try {
       setNotifLoading(true);
       const data = await getNotifications(currentUserId!);
-      setNotifications(data);
+      setNotifications(data ?? []);
     } catch (err) {
       console.error("Error loading notifications:", err);
+      setNotifications([]);
     } finally {
       setNotifLoading(false);
     }
@@ -326,10 +417,12 @@ export default function InboxScreen() {
     switch (item.type) {
       case "trade_offer":
       case "trade_accepted":
-        router.push({ pathname: "/trade", params: { tradeId: item.tradeId } });
+        if (item.tradeId)
+          router.push({ pathname: "/trade", params: { tradeId: item.tradeId } });
         break;
       case "message":
-        router.push({ pathname: "/chat", params: { ownerUserId: item.otherUserId } });
+        if (item.otherUserId)
+          router.push({ pathname: "/chat", params: { ownerUserId: item.otherUserId } });
         break;
     }
   };
@@ -394,7 +487,6 @@ export default function InboxScreen() {
         onPress: async () => {
           try {
             await unmuteConversation(item.id, currentUserId!);
-            // Remove from local muted state immediately
             setMutedConversations((prev) => {
               const next = { ...prev };
               delete next[item.id];
@@ -468,7 +560,6 @@ export default function InboxScreen() {
       const muteUntil = new Date(Date.now() + ms);
       try {
         await muteConversation(item.id, currentUserId!, muteUntil);
-        // Update local muted state immediately so UI reflects change without reload
         setMutedConversations((prev) => ({ ...prev, [item.id]: muteUntil }));
       } catch (err) { console.error(err); }
     };
@@ -503,7 +594,14 @@ export default function InboxScreen() {
     const isMuted = mutedConversations[item.id];
     const isMutedActive = isMuted && new Date() < isMuted;
     const isRead = item.readBy?.includes(currentUserId!) || item.isRead === true;
-    const initials = (item.userName || "U").charAt(0).toUpperCase();
+    const name = item.userName || "User";
+
+    // Build the last-message line — only include the dot separator if there's
+    // both a message text AND a non-empty time string.
+    const timeStr = item.lastMessageTime ? formatTime(item.lastMessageTime) : "";
+    const lastLine = timeStr
+      ? `${item.lastMessage || "No messages"} · ${timeStr}`
+      : (item.lastMessage || "No messages");
 
     return (
       <View style={[styles.messageRowContainer, !isRead && styles.messageRowUnread]}>
@@ -515,29 +613,29 @@ export default function InboxScreen() {
             }
             activeOpacity={0.75}
           >
+            {/* FIX #3: AvatarWithFallback replaces the bare <Image> */}
             <View style={styles.avatarWrap}>
-              {item.userAvatar ? (
-                <Image source={{ uri: item.userAvatar }} style={styles.avatar} />
-              ) : (
-                <View style={[styles.avatar, styles.avatarFallback, { backgroundColor: letterAvatarColor(item.userName || "U") }]}>
-                  <Text style={styles.avatarInitial}>{initials}</Text>
-                </View>
-              )}
+              <AvatarWithFallback
+                uri={item.userAvatar}
+                name={name}
+                size={50}
+                fallbackFontSize={20}
+              />
               <View style={[styles.statusDot, { backgroundColor: "#aaa" }]} />
             </View>
 
             <View style={styles.messageInfo}>
               <View style={styles.messageNameRow}>
                 <Text style={[styles.messageName, !isRead && styles.messageNameUnread]}>
-                  {item.userName || "User"}
+                  {name}
                 </Text>
                 {isMutedActive && (
                   <Ionicons name="notifications-off" size={13} color="#999" style={{ marginLeft: 4 }} />
                 )}
               </View>
+              {/* FIX #1: lastLine always shows the correct formatted time */}
               <Text style={[styles.messageLast, !isRead && styles.messageLastUnread]} numberOfLines={1}>
-                {item.lastMessage || "No messages"}
-                {item.lastMessageTime ? ` · ${formatTime(item.lastMessageTime)}` : ""}
+                {lastLine}
               </Text>
             </View>
           </TouchableOpacity>
@@ -573,19 +671,17 @@ export default function InboxScreen() {
           </View>
         )}
         <View style={styles.notifIconWrap}>
-          {item.avatar ? (
-            <Image source={{ uri: item.avatar }} style={styles.notifAvatar} />
-          ) : (
-            <View style={[styles.notifIconCircle, { backgroundColor: letterAvatarColor(item.title) }]}>
-              <Ionicons name={notifIcon(item.type)} size={20} color="#fff" />
-            </View>
-          )}
+          {/* FIX #3: NotifAvatarWithFallback replaces bare <Image> */}
+          <NotifAvatarWithFallback uri={item.avatar} title={item.title} type={item.type} />
           {!item.read && <View style={styles.unreadBadge} />}
         </View>
         <View style={styles.notifContent}>
           <Text style={styles.notifTitle} numberOfLines={1}>{item.title}</Text>
           <Text style={styles.notifBody} numberOfLines={2}>{item.body}</Text>
-          <Text style={styles.notifTime}>{formatTime(item.createdAt)}</Text>
+          {/* FIX #1: Only render time text when it's non-empty */}
+          {formatTime(item.createdAt) ? (
+            <Text style={styles.notifTime}>{formatTime(item.createdAt)}</Text>
+          ) : null}
         </View>
       </TouchableOpacity>
     );
@@ -870,9 +966,6 @@ const styles = StyleSheet.create({
   messageRowBgUnread: { backgroundColor: "#ffffff" },
 
   avatarWrap: { position: "relative", marginRight: 12 },
-  avatar: { width: 50, height: 50, borderRadius: 25, backgroundColor: "#ddd" },
-  avatarFallback: { justifyContent: "center", alignItems: "center" },
-  avatarInitial: { color: "#fff", fontSize: 20, fontWeight: "700" },
   statusDot: {
     position: "absolute", bottom: 1, right: 1,
     width: 12, height: 12, borderRadius: 6,

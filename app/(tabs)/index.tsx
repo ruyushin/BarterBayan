@@ -11,7 +11,6 @@ import {
   View,
 } from "react-native";
 
-
 import { ThemedView } from "@/components/themed-view";
 import { Ionicons } from "@expo/vector-icons";
 import { Link, useFocusEffect, useRouter } from "expo-router";
@@ -30,8 +29,7 @@ const CATEGORIES = [
   { id: "5", name: "Household", icon: "home" },
 ];
 
-// ─── Put your image in assets/images/ and update this path ───────────────────
-const MAGNIFIER_IMG = require("../../assets/images/magnifier.png");;
+const MAGNIFIER_IMG = require("../../assets/images/magnifier.png");
 
 export default function HomeScreen() {
   const { items, loading } = useItems("trending");
@@ -59,7 +57,7 @@ export default function HomeScreen() {
       };
 
       fetchUserItems();
-    }, [])
+    }, []),
   );
 
   const query = searchQuery.toLowerCase().trim();
@@ -67,7 +65,7 @@ export default function HomeScreen() {
     ? items.filter(
         (item) =>
           item.title.toLowerCase().includes(query) ||
-          item.category.toLowerCase().includes(query)
+          item.category.toLowerCase().includes(query),
       )
     : [];
   const searchResults = filteredResults.slice(0, 5);
@@ -90,6 +88,17 @@ export default function HomeScreen() {
     setSelectedItem(item);
     setModalVisible(true);
   };
+
+  // ── NEW: navigate to the poster's profile on long-press ──────────────────
+  const handleItemLongPress = (item: any) => {
+    if (item.ownerId) {
+      router.push({
+        pathname: "/user-profile",
+        params: { userId: item.ownerId },
+      });
+    }
+  };
+  // ─────────────────────────────────────────────────────────────────────────
 
   const hasItems = userPostedItems.length > 0;
 
@@ -150,7 +159,9 @@ export default function HomeScreen() {
                       activeOpacity={0.7}
                     >
                       <View style={styles.searchResultItem}>
-                        <Text style={styles.searchResultText}>{item.title}</Text>
+                        <Text style={styles.searchResultText}>
+                          {item.title}
+                        </Text>
                         <Text style={styles.searchResultCategory}>
                           {item.category}
                         </Text>
@@ -199,7 +210,6 @@ export default function HomeScreen() {
         <ThemedView
           style={[styles.bannerCard, hasItems && styles.bannerCardActive]}
         >
-          {/* Text content — left side */}
           <View style={styles.bannerContent}>
             <Text style={styles.bannerTitle}>Your Trades</Text>
             <Text style={styles.bannerDescription}>{bannerDescription()}</Text>
@@ -227,7 +237,6 @@ export default function HomeScreen() {
             )}
           </View>
 
-          {/* Character image — right side */}
           <Image
             source={MAGNIFIER_IMG}
             style={styles.bannerImage}
@@ -255,7 +264,11 @@ export default function HomeScreen() {
             showsHorizontalScrollIndicator={false}
             keyExtractor={(item) => item.id}
             renderItem={({ item }) => (
-              <ItemCard item={item} onPress={() => handleItemPress(item)} />
+              <ItemCard
+                item={item}
+                onPress={() => handleItemPress(item)}
+                onLongPress={() => handleItemLongPress(item)}
+              />
             )}
             ItemSeparatorComponent={() => <View style={{ width: 12 }} />}
             contentContainerStyle={styles.horizontalList}
@@ -282,7 +295,11 @@ export default function HomeScreen() {
           showsHorizontalScrollIndicator={false}
           keyExtractor={(item) => `suggested-${item.id}`}
           renderItem={({ item }) => (
-            <ItemCard item={item} onPress={() => handleItemPress(item)} />
+            <ItemCard
+              item={item}
+              onPress={() => handleItemPress(item)}
+              onLongPress={() => handleItemLongPress(item)}
+            />
           )}
           ItemSeparatorComponent={() => <View style={{ width: 12 }} />}
           contentContainerStyle={styles.horizontalList}
@@ -395,17 +412,22 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: "#E8EEF9",
   },
-  categoryText: { marginTop: 8, fontSize: 12, fontWeight: "600", color: "#1F2937" },
+  categoryText: {
+    marginTop: 8,
+    fontSize: 12,
+    fontWeight: "600",
+    color: "#1F2937",
+  },
 
   // ── Banner Card ──────────────────────────────────────────────────────────────
   bannerCard: {
-    flexDirection: "row",           // text left, image right
+    flexDirection: "row",
     alignItems: "center",
     backgroundColor: "#3f51f4",
     borderRadius: 22,
     marginHorizontal: 16,
     marginVertical: 22,
-    overflow: "hidden",             // clips the character at the bottom edge
+    overflow: "hidden",
     minHeight: 140,
     paddingLeft: 22,
     paddingVertical: 22,
@@ -419,7 +441,7 @@ const styles = StyleSheet.create({
     elevation: 15,
   },
   bannerContent: {
-    flex: 1,                        // takes up remaining space left of the image
+    flex: 1,
     paddingRight: 12,
   },
   bannerTitle: {
@@ -450,11 +472,10 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: "700",
   },
-  // The character — anchored to the right, slightly overflowing the bottom
   bannerImage: {
     width: 130,
     height: 160,
-    marginBottom: -22,             // pulls the feet below the card edge (clipped by overflow:hidden)
+    marginBottom: -22,
     alignSelf: "flex-end",
   },
 

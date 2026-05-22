@@ -1,12 +1,12 @@
 import {
-    addDoc,
-    arrayRemove,
-    arrayUnion,
-    collection,
-    doc,
-    getDoc,
-    getDocs,
-    updateDoc,
+  addDoc,
+  arrayRemove,
+  arrayUnion,
+  collection,
+  doc,
+  getDoc,
+  getDocs,
+  updateDoc,
 } from "firebase/firestore";
 import { db } from "../firebaseConfig";
 
@@ -25,9 +25,39 @@ export const getItemsByCategory = async (category: string) => {
 // FETCH ALL: For your index.tsx feed
 export const getAllItems = async () => {
   const querySnapshot = await getDocs(collection(db, "items"));
-  return querySnapshot.docs.map((doc) => ({
+
+  const items = querySnapshot.docs.map((doc) => ({
     id: doc.id,
     ...doc.data(),
+  })) as any[];
+
+  // Deduplicate owner IDs so we only fetch each user doc once
+  const ownerIds = [...new Set(items.map((i) => i.ownerId).filter(Boolean))];
+
+  const userMap: Record<string, { userName: string; userAvatar: string }> = {};
+
+  await Promise.all(
+    ownerIds.map(async (ownerId) => {
+      try {
+        const userSnap = await getDoc(doc(db, "users", ownerId as string));
+        if (userSnap.exists()) {
+          const data = userSnap.data();
+          userMap[ownerId as string] = {
+            userName: data.username ?? "Unknown User",
+            userAvatar: data.avatarUrl ?? "",
+          };
+        }
+      } catch {
+        // user doc missing — item will show "Unknown User" gracefully
+      }
+    }),
+  );
+
+  return items.map((item) => ({
+    ...item,
+    userName:
+      item.userName || userMap[item.ownerId]?.userName || "Unknown User",
+    userAvatar: item.userAvatar || userMap[item.ownerId]?.userAvatar || "",
   }));
 };
 
@@ -116,13 +146,11 @@ export const updateItemLikes = async (
     const itemRef = doc(db, "items", itemId);
 
     if (isLiking) {
-      // Add user to likedBy array and increment likes count
       await updateDoc(itemRef, {
         likedBy: arrayUnion(userId),
         likes: (await getDoc(itemRef)).data()?.likes + 1 || 1,
       });
     } else {
-      // Remove user from likedBy array and decrement likes count
       const itemSnap = await getDoc(itemRef);
       const currentLikes = itemSnap.data()?.likes || 0;
 
@@ -166,7 +194,7 @@ export const addItem = async (itemData: {
   description: string;
   category: string;
   condition: string;
-  images: string[]; // Array of image URLs from Cloudinary
+  images: string[];
   ownerId: string;
   likes?: number;
   likedBy?: string[];
@@ -338,13 +366,15 @@ export const updateItemSave = async (
   try {
     const userRef = doc(db, "users", userId);
     const userSnap = await getDoc(userRef);
-    
+
     if (!userSnap.exists()) {
       throw new Error("User not found");
     }
 
     const currentSavedCount = userSnap.data()?.savedCount || 0;
-    const newSavedCount = isSaving ? currentSavedCount + 1 : Math.max(0, currentSavedCount - 1);
+    const newSavedCount = isSaving
+      ? currentSavedCount + 1
+      : Math.max(0, currentSavedCount - 1);
 
     if (isSaving) {
       await updateDoc(userRef, {
@@ -375,7 +405,6 @@ export const getUserSavedItems = async (userId: string) => {
       const savedItemIds = userSnap.data()?.savedItems || [];
       if (savedItemIds.length === 0) return [];
 
-      // Fetch all saved items
       const items = await getAllItems();
       return items.filter((item) => savedItemIds.includes(item.id));
     }
@@ -398,7 +427,7 @@ export const getUserPostedItems = async (userId: string) => {
         id: doc.id,
         ...doc.data(),
       }));
-    
+
     return userItems;
   } catch (error) {
     console.error("Error getting user's posted items:", error);

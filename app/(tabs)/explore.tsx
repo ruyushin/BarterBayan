@@ -3,38 +3,36 @@ import { useLocalSearchParams, useRouter } from "expo-router";
 import { onAuthStateChanged } from "firebase/auth";
 import React, { useEffect, useRef, useState } from "react";
 import {
-    ActivityIndicator,
-    Alert,
-    Dimensions,
-    FlatList,
-    Image,
-    Modal,
-    Pressable,
-    SafeAreaView,
-    ScrollView,
-    Share,
-    StyleSheet,
-    Text,
-    TextInput,
-    TouchableOpacity,
-    View,
+  ActivityIndicator,
+  Alert,
+  Dimensions,
+  FlatList,
+  Image,
+  Modal,
+  Pressable,
+  SafeAreaView,
+  ScrollView,
+  Share,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
 } from "react-native";
 import { auth } from "../../firebaseConfig";
 import {
-    addComment,
-    addCommentReply,
-    deleteComment,
-    getAllItems,
-    getUserSavedItems,
-    updateCommentLike,
-    updateItemLikes,
-    updateItemSave,
+  addComment,
+  addCommentReply,
+  deleteComment,
+  getAllItems,
+  getUserSavedItems,
+  updateCommentLike,
+  updateItemLikes,
+  updateItemSave,
 } from "../../services/itemService";
 import { sendMessage } from "../../services/messagingService";
 
 const { width: screenWidth, height: screenHeight } = Dimensions.get("window");
-
-/* ---------------- DATA ---------------- */
 
 const FILTER_CATEGORIES = [
   "All",
@@ -44,8 +42,6 @@ const FILTER_CATEGORIES = [
   "School/Office",
   "Household",
 ];
-
-/* ---------------- COMPONENT ---------------- */
 
 export default function Screen() {
   const params = useLocalSearchParams<{ filter?: string; search?: string }>();
@@ -59,17 +55,13 @@ export default function Screen() {
   const [userId, setUserId] = useState<string | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
 
-  // Setup auth listener
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (user) => {
-      if (user) {
-        setUserId(user.uid);
-      }
+      if (user) setUserId(user.uid);
     });
     return () => unsubscribe();
   }, []);
 
-  // Fetch items from Firebase on component mount
   useEffect(() => {
     const fetchItems = async () => {
       try {
@@ -82,11 +74,9 @@ export default function Screen() {
         setLoading(false);
       }
     };
-
     fetchItems();
   }, [refreshKey, userId]);
 
-  // Handle search from params (passed from home screen)
   useEffect(() => {
     if (
       typeof params.filter === "string" &&
@@ -96,13 +86,8 @@ export default function Screen() {
     } else {
       setFilter("All");
     }
-
-    if (typeof params.search === "string") {
-      setSearch(params.search);
-    }
+    if (typeof params.search === "string") setSearch(params.search);
   }, [params.filter, params.search]);
-
-  /* ---------- LOGIC ---------- */
 
   const filteredItems = allItems
     .filter((item) => {
@@ -112,9 +97,7 @@ export default function Screen() {
           item.title.toLowerCase().includes(search.toLowerCase())) ||
         (item.description &&
           item.description.toLowerCase().includes(search.toLowerCase()));
-
       const matchFilter = filter === "All" || item.category === filter;
-
       return matchSearch && matchFilter;
     })
     .sort((a, b) => {
@@ -124,24 +107,18 @@ export default function Screen() {
       return 0;
     });
 
-  /* ---------- BUTTON ACTIONS ---------- */
-
   const handleSort = () => {
     setSortType((prev) =>
       prev === "none" ? "likes" : prev === "likes" ? "name" : "none",
     );
   };
 
-  const handleFilterToggle = () => {
-    setIsFilterOpen((prev) => !prev);
-  };
+  const handleFilterToggle = () => setIsFilterOpen((prev) => !prev);
 
   const handleCategorySelect = (category: string) => {
     setFilter(category);
     setIsFilterOpen(false);
   };
-
-  /* ---------- UI ---------- */
 
   if (loading) {
     return (
@@ -167,7 +144,6 @@ export default function Screen() {
         )}
         ListHeaderComponent={
           <>
-            {/* SEARCH */}
             <View style={styles.searchContainer}>
               <Ionicons
                 name="search-outline"
@@ -183,13 +159,11 @@ export default function Screen() {
               />
             </View>
 
-            {/* FILTER BUTTONS */}
             <View style={styles.filterRow}>
               <Pressable style={styles.filterBtn} onPress={handleSort}>
                 <Text style={styles.filterText}>Sort ({sortType})</Text>
                 <Ionicons name="swap-vertical" size={14} />
               </Pressable>
-
               <Pressable style={styles.filterBtn} onPress={handleFilterToggle}>
                 <Text style={styles.filterText}>Filter ({filter})</Text>
                 <Ionicons
@@ -198,6 +172,7 @@ export default function Screen() {
                 />
               </Pressable>
             </View>
+
             {isFilterOpen && (
               <View style={styles.filterDropdown}>
                 {FILTER_CATEGORIES.map((category) => (
@@ -233,9 +208,11 @@ export default function Screen() {
   );
 }
 
-/* ---------------- CARD ---------------- */
-
+// ─── ItemCard ─────────────────────────────────────────────────────────────────
 function ItemCard({ item, onCommentAdded }: any) {
+  // PATCH: add router for profile navigation
+  const router = useRouter();
+
   const [isLiked, setIsLiked] = useState(false);
   const [likes, setLikes] = useState(item.likes || 0);
   const [isSaved, setIsSaved] = useState(false);
@@ -258,18 +235,14 @@ function ItemCard({ item, onCommentAdded }: any) {
   const currentUserPhotoURL =
     auth.currentUser?.photoURL || "https://i.pravatar.cc/150?img=1";
 
-  // Get images array
   const imagesList =
     Array.isArray(item?.images) && item.images.length > 0
       ? item.images
       : [item?.image || "https://via.placeholder.com/400x200"];
-
   const imageUrl = imagesList[0];
 
   useEffect(() => {
-    if (currentUser && item?.likedBy?.includes(currentUser)) {
-      setIsLiked(true);
-    }
+    if (currentUser && item?.likedBy?.includes(currentUser)) setIsLiked(true);
     checkIfSaved();
   }, [item, currentUser]);
 
@@ -288,7 +261,6 @@ function ItemCard({ item, onCommentAdded }: any) {
       Alert.alert("Please log in", "You must be logged in to like items");
       return;
     }
-
     try {
       setLoading(true);
       await updateItemLikes(item.id, currentUser, !isLiked);
@@ -296,7 +268,6 @@ function ItemCard({ item, onCommentAdded }: any) {
       setLikes(isLiked ? likes - 1 : likes + 1);
     } catch (error) {
       Alert.alert("Error", "Failed to update like status");
-      console.error("Error:", error);
     } finally {
       setLoading(false);
     }
@@ -307,7 +278,6 @@ function ItemCard({ item, onCommentAdded }: any) {
       Alert.alert("Please log in", "You must be logged in to save items");
       return;
     }
-
     try {
       setCommentsLoading(true);
       await updateItemSave(item.id, currentUser, !isSaved);
@@ -318,7 +288,6 @@ function ItemCard({ item, onCommentAdded }: any) {
       );
     } catch (error) {
       Alert.alert("Error", "Failed to save item");
-      console.error("Error:", error);
     } finally {
       setCommentsLoading(false);
     }
@@ -329,12 +298,10 @@ function ItemCard({ item, onCommentAdded }: any) {
       Alert.alert("Please log in", "You must be logged in to send messages");
       return;
     }
-
     if (currentUser === item.ownerId) {
       Alert.alert("Cannot message", "You cannot message yourself");
       return;
     }
-
     try {
       setCommentsLoading(true);
       await sendMessage(
@@ -347,7 +314,6 @@ function ItemCard({ item, onCommentAdded }: any) {
       router.push("/inbox");
     } catch (error) {
       Alert.alert("Error", "Failed to send message");
-      console.error("Error:", error);
     } finally {
       setCommentsLoading(false);
     }
@@ -363,7 +329,6 @@ function ItemCard({ item, onCommentAdded }: any) {
       });
     } catch (error) {
       Alert.alert("Error", "Failed to save image");
-      console.error("Error:", error);
     }
   };
 
@@ -373,7 +338,6 @@ function ItemCard({ item, onCommentAdded }: any) {
         Alert.alert("Please log in", "You must be logged in to comment");
       return;
     }
-
     try {
       setCommentsLoading(true);
       const newComment = await addComment(
@@ -387,7 +351,6 @@ function ItemCard({ item, onCommentAdded }: any) {
       setCommentText("");
     } catch (error) {
       Alert.alert("Error", "Failed to add comment");
-      console.error("Error:", error);
     } finally {
       setCommentsLoading(false);
     }
@@ -399,7 +362,6 @@ function ItemCard({ item, onCommentAdded }: any) {
         Alert.alert("Please log in", "You must be logged in to reply");
       return;
     }
-
     try {
       setCommentsLoading(true);
       await addCommentReply(
@@ -434,7 +396,6 @@ function ItemCard({ item, onCommentAdded }: any) {
       setReplyingToCommentId(null);
     } catch (error) {
       Alert.alert("Error", "Failed to add reply");
-      console.error("Error:", error);
     } finally {
       setCommentsLoading(false);
     }
@@ -448,7 +409,6 @@ function ItemCard({ item, onCommentAdded }: any) {
       Alert.alert("Please log in", "You must be logged in to like comments");
       return;
     }
-
     try {
       await updateCommentLike(item.id, commentId, currentUser, !commentLiked);
       const updatedComments = comments.map((c) => {
@@ -469,7 +429,6 @@ function ItemCard({ item, onCommentAdded }: any) {
       setComments(updatedComments);
     } catch (error) {
       Alert.alert("Error", "Failed to update comment like");
-      console.error("Error:", error);
     }
   };
 
@@ -478,19 +437,14 @@ function ItemCard({ item, onCommentAdded }: any) {
       const commentToDeleteObj = comments.find((c) => c.id === commentId);
       await deleteComment(item.id, commentId);
       setComments(comments.filter((c) => c.id !== commentId));
-      
-      // Show delete toast with undo option
       setDeletedCommentData(commentToDeleteObj);
       setDeleteToastVisible(true);
-      
-      // Auto-dismiss after 5 seconds
       if (deleteTimerRef.current) clearTimeout(deleteTimerRef.current);
       deleteTimerRef.current = setTimeout(() => {
         setDeleteToastVisible(false);
       }, 5000);
     } catch (error) {
       Alert.alert("Error", "Failed to delete comment");
-      console.error("Error:", error);
     }
   };
 
@@ -499,12 +453,8 @@ function ItemCard({ item, onCommentAdded }: any) {
     try {
       if (deleteTimerRef.current) clearTimeout(deleteTimerRef.current);
       setDeleteToastVisible(false);
-      
-      // Re-add the comment
       setComments([...comments, deletedCommentData]);
       setDeletedCommentData(null);
-      
-      // Re-upload to Firebase
       await addComment(
         item.id,
         deletedCommentData.userId,
@@ -514,22 +464,27 @@ function ItemCard({ item, onCommentAdded }: any) {
       );
     } catch (error) {
       Alert.alert("Error", "Failed to undo delete");
-      console.error("Error:", error);
     }
   };
 
-  const getTopLevelCommentCount = () => {
-    // Count all comments + all replies
-    return comments.reduce((count, c) => {
-      return count + 1 + (c.replies?.length || 0);
-    }, 0);
-  };
+  const getTopLevelCommentCount = () =>
+    comments.reduce((count, c) => count + 1 + (c.replies?.length || 0), 0);
 
   return (
     <View style={styles.card}>
-      {/* HEADER */}
+      {/* ── HEADER — PATCH: userInfo wrapped in TouchableOpacity for profile nav ── */}
       <View style={styles.cardHeader}>
-        <View style={styles.userInfo}>
+        <TouchableOpacity
+          style={styles.userInfo}
+          onPress={() =>
+            item.ownerId &&
+            router.push({
+              pathname: "/user-profile",
+              params: { userId: item.ownerId },
+            })
+          }
+          activeOpacity={0.8}
+        >
           <Image
             source={{
               uri: item.userAvatar || "https://i.pravatar.cc/150?img=1",
@@ -544,13 +499,13 @@ function ItemCard({ item, onCommentAdded }: any) {
               {item.date || new Date().toLocaleDateString()}
             </Text>
           </View>
-        </View>
+        </TouchableOpacity>
         <View style={styles.badgeContainer}>
           <Ionicons name="ribbon" size={18} color="#FFC107" />
         </View>
       </View>
 
-      {/* IMAGE - TOUCHABLE FOR GALLERY */}
+      {/* IMAGE */}
       <TouchableOpacity
         style={styles.cardImageContainer}
         onPress={() => setShowImageGallery(true)}
@@ -576,13 +531,14 @@ function ItemCard({ item, onCommentAdded }: any) {
             horizontal
             pagingEnabled
             onMomentumScrollEnd={(e) => {
-              const contentOffsetX = e.nativeEvent.contentOffset.x;
-              const currentIndex = Math.round(contentOffsetX / screenWidth);
+              const currentIndex = Math.round(
+                e.nativeEvent.contentOffset.x / screenWidth,
+              );
               setCurrentImageIndex(currentIndex);
             }}
             style={styles.imageScroller}
           >
-            {imagesList.map((img, idx) => (
+            {imagesList.map((img: string, idx: number) => (
               <Image
                 key={idx}
                 source={{ uri: img }}
@@ -594,8 +550,6 @@ function ItemCard({ item, onCommentAdded }: any) {
               />
             ))}
           </ScrollView>
-
-          {/* GALLERY CONTROLS */}
           <View style={styles.galleryControls}>
             <TouchableOpacity
               style={styles.galleryBtn}
@@ -647,7 +601,6 @@ function ItemCard({ item, onCommentAdded }: any) {
             </Pressable>
             <Text style={styles.statText}>{likes}</Text>
           </View>
-
           <Pressable
             style={styles.stat}
             onPress={() => setShowComments(!showComments)}
@@ -655,7 +608,6 @@ function ItemCard({ item, onCommentAdded }: any) {
             <Ionicons name="chatbubble-outline" size={18} color="#666" />
             <Text style={styles.statText}>{getTopLevelCommentCount()}</Text>
           </Pressable>
-
           <Pressable
             style={styles.stat}
             onPress={handleSave}
@@ -674,9 +626,9 @@ function ItemCard({ item, onCommentAdded }: any) {
       {/* COMMENTS SECTION */}
       {showComments && (
         <View style={styles.commentsSection}>
-          <Text style={styles.commentsTitle}>Comments ({getTopLevelCommentCount()})</Text>
-
-          {/* COMMENT INPUT */}
+          <Text style={styles.commentsTitle}>
+            Comments ({getTopLevelCommentCount()})
+          </Text>
           <View style={styles.commentInputContainer}>
             <TextInput
               style={styles.commentInput}
@@ -694,7 +646,6 @@ function ItemCard({ item, onCommentAdded }: any) {
             </TouchableOpacity>
           </View>
 
-          {/* COMMENTS LIST */}
           <FlatList
             data={comments}
             keyExtractor={(c) => c.id}
@@ -756,7 +707,6 @@ function ItemCard({ item, onCommentAdded }: any) {
                       )}
                     </View>
 
-                    {/* REPLIES */}
                     {comment.replies && comment.replies.length > 0 && (
                       <View style={styles.repliesContainer}>
                         {comment.replies.map((reply: any) => (
@@ -780,7 +730,6 @@ function ItemCard({ item, onCommentAdded }: any) {
                       </View>
                     )}
 
-                    {/* REPLY INPUT */}
                     {replyingToCommentId === comment.id && (
                       <View style={styles.replyInputContainer}>
                         <TextInput
@@ -807,13 +756,12 @@ function ItemCard({ item, onCommentAdded }: any) {
         </View>
       )}
 
-      {/* DELETE COMMENT MODAL - REMOVED */}
-      {/* Toast notification is shown instead of modal */}
-
-      {/* DELETE TOAST NOTIFICATION */}
+      {/* DELETE TOAST */}
       {deleteToastVisible && (
         <View style={styles.deleteToast}>
-          <Text style={styles.deleteToastText}>1 comment deleted. Tap to undo.</Text>
+          <Text style={styles.deleteToastText}>
+            1 comment deleted. Tap to undo.
+          </Text>
           <TouchableOpacity onPress={handleUndoDelete}>
             <Text style={styles.deleteToastUndo}>Undo</Text>
           </TouchableOpacity>
@@ -823,11 +771,8 @@ function ItemCard({ item, onCommentAdded }: any) {
   );
 }
 
-/* ... existing code ... */
-
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#ECECEC" },
-
   searchContainer: {
     flexDirection: "row",
     alignItems: "center",
@@ -841,24 +786,9 @@ const styles = StyleSheet.create({
     marginTop: 14,
     marginBottom: 16,
   },
-
-  searchIcon: {
-    marginRight: 10,
-  },
-
-  searchInput: {
-    flex: 1,
-    color: "#242424",
-    fontSize: 15,
-    paddingVertical: 8,
-  },
-
-  filterRow: {
-    flexDirection: "row",
-    marginHorizontal: 15,
-    marginBottom: 10,
-  },
-
+  searchIcon: { marginRight: 10 },
+  searchInput: { flex: 1, color: "#242424", fontSize: 15, paddingVertical: 8 },
+  filterRow: { flexDirection: "row", marginHorizontal: 15, marginBottom: 10 },
   filterBtn: {
     flexDirection: "row",
     backgroundColor: "#D9D9D9",
@@ -868,9 +798,7 @@ const styles = StyleSheet.create({
     marginRight: 10,
     alignItems: "center",
   },
-
   filterText: { marginRight: 5, fontSize: 13 },
-
   filterDropdown: {
     marginHorizontal: 15,
     backgroundColor: "white",
@@ -880,22 +808,9 @@ const styles = StyleSheet.create({
     overflow: "hidden",
     marginBottom: 10,
   },
-
-  dropdownItem: {
-    paddingVertical: 12,
-    paddingHorizontal: 15,
-  },
-
-  dropdownText: {
-    fontSize: 13,
-    color: "#333",
-  },
-
-  dropdownTextActive: {
-    fontWeight: "700",
-    color: "#5E3EA1",
-  },
-
+  dropdownItem: { paddingVertical: 12, paddingHorizontal: 15 },
+  dropdownText: { fontSize: 13, color: "#333" },
+  dropdownTextActive: { fontWeight: "700", color: "#5E3EA1" },
   card: {
     backgroundColor: "#FFFFFF",
     marginHorizontal: 12,
@@ -908,7 +823,6 @@ const styles = StyleSheet.create({
     shadowRadius: 4,
     elevation: 3,
   },
-
   cardHeader: {
     flexDirection: "row",
     alignItems: "center",
@@ -917,53 +831,19 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: "#F0F0F0",
   },
-
-  userInfo: {
-    flexDirection: "row",
-    alignItems: "center",
-    flex: 1,
-  },
-
-  avatar: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    marginRight: 12,
-  },
-
-  userDetails: {
-    flex: 1,
-  },
-
-  username: {
-    fontWeight: "700",
-    fontSize: 14,
-    color: "#1F1F1F",
-  },
-
-  date: {
-    fontSize: 12,
-    color: "#999",
-    marginTop: 2,
-  },
-
-  badgeContainer: {
-    padding: 6,
-  },
-
-  cardImage: {
-    width: "100%",
-    height: 220,
-    backgroundColor: "#F5F5F5",
-  },
-
+  userInfo: { flexDirection: "row", alignItems: "center", flex: 1 },
+  avatar: { width: 40, height: 40, borderRadius: 20, marginRight: 12 },
+  userDetails: { flex: 1 },
+  username: { fontWeight: "700", fontSize: 14, color: "#1F1F1F" },
+  date: { fontSize: 12, color: "#999", marginTop: 2 },
+  badgeContainer: { padding: 6 },
+  cardImage: { width: "100%", height: 220, backgroundColor: "#F5F5F5" },
   cardImageContainer: {
     position: "relative",
     width: "100%",
     height: 220,
     backgroundColor: "#F5F5F5",
   },
-
   imageCountBadge: {
     position: "absolute",
     bottom: 10,
@@ -976,22 +856,9 @@ const styles = StyleSheet.create({
     alignItems: "center",
     gap: 6,
   },
-
-  imageCountText: {
-    color: "white",
-    fontSize: 12,
-    fontWeight: "700",
-  },
-
-  galleryContainer: {
-    flex: 1,
-    backgroundColor: "#000",
-  },
-
-  imageScroller: {
-    flex: 1,
-  },
-
+  imageCountText: { color: "white", fontSize: 12, fontWeight: "700" },
+  galleryContainer: { flex: 1, backgroundColor: "#000" },
+  imageScroller: { flex: 1 },
   galleryControls: {
     position: "absolute",
     bottom: 20,
@@ -1002,7 +869,6 @@ const styles = StyleSheet.create({
     alignItems: "center",
     paddingHorizontal: 20,
   },
-
   galleryBtn: {
     width: 50,
     height: 50,
@@ -1011,7 +877,6 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     alignItems: "center",
   },
-
   imageCounter: {
     color: "white",
     fontSize: 16,
@@ -1019,31 +884,15 @@ const styles = StyleSheet.create({
     textAlign: "center",
     flex: 1,
   },
-
-  cardContent: {
-    padding: 14,
-  },
-
-  title: {
-    fontWeight: "700",
-    fontSize: 16,
-    color: "#1F1F1F",
-    marginBottom: 6,
-  },
-
-  description: {
-    fontSize: 13,
-    color: "#666",
-    lineHeight: 18,
-  },
-
+  cardContent: { padding: 14 },
+  title: { fontWeight: "700", fontSize: 16, color: "#1F1F1F", marginBottom: 6 },
+  description: { fontSize: 13, color: "#666", lineHeight: 18 },
   actionButtons: {
     paddingHorizontal: 14,
     paddingVertical: 10,
     borderTopWidth: 1,
     borderTopColor: "#F0F0F0",
   },
-
   actionBtn: {
     flexDirection: "row",
     alignItems: "center",
@@ -1054,57 +903,34 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     alignSelf: "flex-start",
   },
-
   actionBtnText: {
     fontSize: 12,
     fontWeight: "600",
     color: "#5D5FEF",
     marginLeft: 6,
   },
-
   cardFooter: {
     paddingHorizontal: 14,
     paddingVertical: 12,
     borderTopWidth: 1,
     borderTopColor: "#F0F0F0",
   },
-
-  statRow: {
-    flexDirection: "row",
-    justifyContent: "space-around",
-  },
-
-  stat: {
-    alignItems: "center",
-    paddingHorizontal: 12,
-  },
-
-  statText: {
-    fontSize: 12,
-    color: "#666",
-    marginTop: 4,
-  },
-
+  statRow: { flexDirection: "row", justifyContent: "space-around" },
+  stat: { alignItems: "center", paddingHorizontal: 12 },
+  statText: { fontSize: 12, color: "#666", marginTop: 4 },
   commentsSection: {
     borderTopWidth: 1,
     borderTopColor: "#F0F0F0",
     padding: 14,
     backgroundColor: "#FAFAFA",
   },
-
   commentsTitle: {
     fontSize: 14,
     fontWeight: "700",
     color: "#1F1F1F",
     marginBottom: 12,
   },
-
-  commentInputContainer: {
-    flexDirection: "row",
-    marginBottom: 14,
-    gap: 8,
-  },
-
+  commentInputContainer: { flexDirection: "row", marginBottom: 14, gap: 8 },
   commentInput: {
     flex: 1,
     backgroundColor: "#FFFFFF",
@@ -1116,7 +942,6 @@ const styles = StyleSheet.create({
     fontSize: 13,
     maxHeight: 80,
   },
-
   commentSendBtn: {
     width: 36,
     height: 36,
@@ -1125,69 +950,17 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-
-  commentItem: {
-    flexDirection: "row",
-    marginBottom: 12,
-  },
-
-  commentAvatar: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    marginRight: 10,
-  },
-
-  commentContent: {
-    flex: 1,
-  },
-
-  commentUserName: {
-    fontWeight: "700",
-    fontSize: 13,
-    color: "#1F1F1F",
-  },
-
-  commentText: {
-    fontSize: 12,
-    color: "#555",
-    marginTop: 4,
-    lineHeight: 16,
-  },
-
-  commentActions: {
-    flexDirection: "row",
-    marginTop: 6,
-    gap: 12,
-  },
-
-  commentLikeBtn: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 4,
-  },
-
-  commentLikeText: {
-    fontSize: 11,
-    color: "#999",
-  },
-
-  commentDeleteBtn: {
-    padding: 4,
-  },
-
-  commentReplyBtn: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 4,
-  },
-
-  commentReplyText: {
-    fontSize: 11,
-    color: "#5D5FEF",
-    fontWeight: "600",
-  },
-
+  commentItem: { flexDirection: "row", marginBottom: 12 },
+  commentAvatar: { width: 32, height: 32, borderRadius: 16, marginRight: 10 },
+  commentContent: { flex: 1 },
+  commentUserName: { fontWeight: "700", fontSize: 13, color: "#1F1F1F" },
+  commentText: { fontSize: 12, color: "#555", marginTop: 4, lineHeight: 16 },
+  commentActions: { flexDirection: "row", marginTop: 6, gap: 12 },
+  commentLikeBtn: { flexDirection: "row", alignItems: "center", gap: 4 },
+  commentLikeText: { fontSize: 11, color: "#999" },
+  commentDeleteBtn: { padding: 4 },
+  commentReplyBtn: { flexDirection: "row", alignItems: "center", gap: 4 },
+  commentReplyText: { fontSize: 11, color: "#5D5FEF", fontWeight: "600" },
   repliesContainer: {
     marginTop: 10,
     marginLeft: 10,
@@ -1195,42 +968,12 @@ const styles = StyleSheet.create({
     borderLeftWidth: 2,
     borderLeftColor: "#E0E0E0",
   },
-
-  replyItem: {
-    flexDirection: "row",
-    marginBottom: 10,
-  },
-
-  replyAvatar: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
-    marginRight: 8,
-  },
-
-  replyContent: {
-    flex: 1,
-  },
-
-  replyUserName: {
-    fontWeight: "600",
-    fontSize: 12,
-    color: "#1F1F1F",
-  },
-
-  replyText: {
-    fontSize: 11,
-    color: "#555",
-    marginTop: 2,
-    lineHeight: 14,
-  },
-
-  replyInputContainer: {
-    flexDirection: "row",
-    marginTop: 10,
-    gap: 6,
-  },
-
+  replyItem: { flexDirection: "row", marginBottom: 10 },
+  replyAvatar: { width: 28, height: 28, borderRadius: 14, marginRight: 8 },
+  replyContent: { flex: 1 },
+  replyUserName: { fontWeight: "600", fontSize: 12, color: "#1F1F1F" },
+  replyText: { fontSize: 11, color: "#555", marginTop: 2, lineHeight: 14 },
+  replyInputContainer: { flexDirection: "row", marginTop: 10, gap: 6 },
   replyInput: {
     flex: 1,
     backgroundColor: "#FFFFFF",
@@ -1242,7 +985,6 @@ const styles = StyleSheet.create({
     fontSize: 12,
     maxHeight: 60,
   },
-
   replySendBtn: {
     width: 32,
     height: 32,
@@ -1251,32 +993,15 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-
-  loaderContainer: {
-    flex: 1,
-    justifyContent: "center",
-    alignItems: "center",
-  },
-
-  loadingText: {
-    marginTop: 10,
-    fontSize: 14,
-    color: "#777",
-  },
-
+  loaderContainer: { flex: 1, justifyContent: "center", alignItems: "center" },
+  loadingText: { marginTop: 10, fontSize: 14, color: "#777" },
   emptyContainer: {
     flex: 1,
     justifyContent: "center",
     alignItems: "center",
     marginVertical: 50,
   },
-
-  emptyText: {
-    fontSize: 14,
-    color: "#777",
-    textAlign: "center",
-  },
-
+  emptyText: { fontSize: 14, color: "#777", textAlign: "center" },
   nav: {
     flexDirection: "row",
     borderTopWidth: 1,
@@ -1284,82 +1009,8 @@ const styles = StyleSheet.create({
     backgroundColor: "white",
     paddingVertical: 8,
   },
-
   navItem: { flex: 1, alignItems: "center" },
   navText: { fontSize: 10, color: "#777" },
-
-  deleteModalOverlay: {
-    flex: 1,
-    backgroundColor: "rgba(0, 0, 0, 0.5)",
-    justifyContent: "center",
-    alignItems: "center",
-  },
-
-  deleteModalContent: {
-    backgroundColor: "white",
-    borderRadius: 16,
-    padding: 24,
-    width: "80%",
-    alignItems: "center",
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-    elevation: 10,
-  },
-
-  deleteModalHeader: {
-    marginBottom: 16,
-  },
-
-  deleteModalTitle: {
-    fontSize: 18,
-    fontWeight: "700",
-    color: "#1F1F1F",
-    marginBottom: 8,
-  },
-
-  deleteModalText: {
-    fontSize: 14,
-    color: "#666",
-    textAlign: "center",
-    marginBottom: 20,
-  },
-
-  deleteModalButtons: {
-    flexDirection: "row",
-    width: "100%",
-    gap: 12,
-  },
-
-  deleteModalBtn: {
-    flex: 1,
-    paddingVertical: 12,
-    borderRadius: 8,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-
-  deleteModalBtnCancel: {
-    backgroundColor: "#F0F0F0",
-  },
-
-  deleteModalBtnDelete: {
-    backgroundColor: "#FF6B6B",
-  },
-
-  deleteModalBtnTextCancel: {
-    fontSize: 14,
-    fontWeight: "600",
-    color: "#333",
-  },
-
-  deleteModalBtnTextDelete: {
-    fontSize: 14,
-    fontWeight: "600",
-    color: "white",
-  },
-
   deleteToast: {
     position: "absolute",
     top: 20,
@@ -1379,19 +1030,51 @@ const styles = StyleSheet.create({
     elevation: 5,
     zIndex: 1000,
   },
-
-  deleteToastText: {
-    fontSize: 14,
-    color: "white",
-    fontWeight: "500",
-    flex: 1,
-  },
-
+  deleteToastText: { fontSize: 14, color: "white", fontWeight: "500", flex: 1 },
   deleteToastUndo: {
     fontSize: 14,
     fontWeight: "600",
     color: "#5D5FEF",
     marginLeft: 12,
   },
-});
 
+  // Unused legacy delete modal styles kept for reference
+  deleteModalOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0, 0, 0, 0.5)",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  deleteModalContent: {
+    backgroundColor: "white",
+    borderRadius: 16,
+    padding: 24,
+    width: "80%",
+    alignItems: "center",
+  },
+  deleteModalHeader: { marginBottom: 16 },
+  deleteModalTitle: {
+    fontSize: 18,
+    fontWeight: "700",
+    color: "#1F1F1F",
+    marginBottom: 8,
+  },
+  deleteModalText: {
+    fontSize: 14,
+    color: "#666",
+    textAlign: "center",
+    marginBottom: 20,
+  },
+  deleteModalButtons: { flexDirection: "row", width: "100%", gap: 12 },
+  deleteModalBtn: {
+    flex: 1,
+    paddingVertical: 12,
+    borderRadius: 8,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  deleteModalBtnCancel: { backgroundColor: "#F0F0F0" },
+  deleteModalBtnDelete: { backgroundColor: "#FF6B6B" },
+  deleteModalBtnTextCancel: { fontSize: 14, fontWeight: "600", color: "#333" },
+  deleteModalBtnTextDelete: { fontSize: 14, fontWeight: "600", color: "white" },
+});
