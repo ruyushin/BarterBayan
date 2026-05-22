@@ -7,10 +7,9 @@ import Constants from 'expo-constants';
 import { useRouter } from 'expo-router';
 import * as WebBrowser from 'expo-web-browser';
 import { createUserWithEmailAndPassword, FacebookAuthProvider, GoogleAuthProvider, sendEmailVerification, signInWithCredential, signOut } from 'firebase/auth';
-import { doc, setDoc } from "firebase/firestore";
 import React, { useEffect, useRef, useState } from 'react';
 import { Alert, Animated, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
-import { auth, db } from '../../firebaseConfig';
+import { auth } from '../../firebaseConfig';
 
 export default function SignUpScreen() {
   // --- Auth request redirectUri ---
@@ -169,15 +168,6 @@ export default function SignUpScreen() {
       const userCredential = await signInWithCredential(auth, credential);
       const user = userCredential.user;
 
-      const profileData = {
-        email: user.email,
-        username: user.email?.split('@')[0],
-        createdAt: new Date().toISOString(),
-        rating: 5.0,
-        tradeCount: 0,
-        emailVerified: user.emailVerified,
-      };
-
       try {
         await sendEmailVerification(user);
       } catch (error: any) {
@@ -185,16 +175,9 @@ export default function SignUpScreen() {
         Alert.alert('Verification Email Failed', error?.message || 'Unable to send a verification email. Please try again.');
       }
 
-      const successMessage = 'Account created successfully with Google! We sent a verification link to your Gmail. Please verify your email before continuing.';
-
-      showSuccessAndReset(successMessage, 'verify');
+      // Navigate to profile setup
       setIsSubmitting(false);
-
-      // Background tasks - don't await these
-      setDoc(doc(db, 'users', user.uid), profileData).catch((err) => console.warn('Firestore setDoc error', err));
-      if (user.emailVerified) {
-        signOut(auth).catch((err) => console.warn('Google signOut error', err));
-      }
+      router.push('/(auth)/profile-setup');
     } catch (error: any) {
       console.error('Google Signup Error:', error);
       Alert.alert('Google Signup Error', error?.message || String(error));
@@ -230,15 +213,6 @@ export default function SignUpScreen() {
       const userCredential = await signInWithCredential(auth, credential);
       const user = userCredential.user;
 
-      const profileData = {
-        email: user.email,
-        username: user.email?.split('@')[0],
-        createdAt: new Date().toISOString(),
-        rating: 5.0,
-        tradeCount: 0,
-        emailVerified: user.emailVerified,
-      };
-
       try {
         await sendEmailVerification(user);
       } catch (error: any) {
@@ -246,16 +220,9 @@ export default function SignUpScreen() {
         Alert.alert('Verification Email Failed', error?.message || 'Unable to send a verification email. Please try again.');
       }
 
-      const successMessage = 'Account created successfully with Facebook! We sent a verification link to your Gmail. Please verify your email before continuing.';
-
-      showSuccessAndReset(successMessage, 'verify');
+      // Navigate to profile setup
       setIsSubmitting(false);
-
-      // Background tasks - don't await these
-      setDoc(doc(db, 'users', user.uid), profileData).catch((err) => console.warn('Firestore setDoc error', err));
-      if (user.emailVerified) {
-        signOut(auth).catch((err) => console.warn('Facebook signOut error', err));
-      }
+      router.push('/(auth)/profile-setup');
     } catch (error: any) {
       console.error('Facebook Signup Error:', error);
       Alert.alert('Facebook Signup Error', error?.message || String(error));
@@ -315,15 +282,20 @@ export default function SignUpScreen() {
       return;
     }
 
-    const message = "Account created successfully! We've sent a verification link to your Gmail. Please verify your email before logging in.";
     try {
       await sendEmailVerification(user);
     } catch (error: any) {
       console.error('Email verification send error:', error);
       Alert.alert('Verification Email Failed', error?.message || 'Unable to send a verification email. Please try again.');
     }
-    showSuccessAndReset(message, 'verify');
+
+    // Reset form and navigate to profile setup
+    setEmail('');
+    setPassword('');
+    setConfirm('');
+    setErrors({});
     setIsSubmitting(false);
+    router.push('/(auth)/profile-setup');
   };
 
   return (
