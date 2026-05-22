@@ -40,11 +40,14 @@ const MAX_RATING = 5;
 // ─── Types ────────────────────────────────────────────────────────────────────
 interface UserData {
   username?: string;
+  firstName?: string;
+  lastName?: string;
   email?: string;
   phone?: string;
   bio?: string;
   rating?: number;
   ratingCount?: number;
+  photo?: string;
   avatarUrl?: string;
   tradesCount?: number;
   exchangedCount?: number;
@@ -857,22 +860,26 @@ export default function ProfileScreen() {
           {/* ── Avatar + Identity ── */}
           <View style={styles.avatarSection}>
             <View style={styles.avatarWrapper}>
-              {userData?.avatarUrl ? (
+              {userData?.avatarUrl || userData?.photo ? (
                 <Image
-                  source={{ uri: userData.avatarUrl }}
+                  source={{ uri: userData.avatarUrl || userData.photo }}
                   style={styles.avatar}
                 />
               ) : (
                 <View style={styles.avatarPlaceholder}>
                   <Text style={styles.avatarInitial}>
-                    {(userData?.username ?? "U")[0].toUpperCase()}
+                    {((userData?.firstName?.[0] ?? '') + (userData?.lastName?.[0] ?? '') || (userData?.username ?? 'U')[0]).toUpperCase()}
                   </Text>
                 </View>
               )}
             </View>
 
             <View style={styles.nameRow}>
-              <Text style={styles.username}>{userData?.username ?? "N/A"}</Text>
+              <Text style={styles.username}>
+                {userData?.firstName && userData?.lastName
+                  ? `${userData.firstName} ${userData.lastName}`
+                  : userData?.username ?? 'N/A'}
+              </Text>
               {userData?.isVerified && (
                 <View style={styles.verifiedBadge}>
                   <Text style={styles.verifiedText}>✔</Text>

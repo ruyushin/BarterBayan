@@ -217,14 +217,16 @@ export default function LoginScreen() {
             rating: 5.0,
             tradeCount: 0,
             emailVerified: user.emailVerified,
+            termsAccepted: false,
+            profileComplete: false,
           });
         }
       } catch (firestoreError) {
         console.warn("Unable to create Firestore user doc:", firestoreError);
       }
 
-      // Navigate once signed in (Google accounts are already verified)
-      router.replace("/");
+      // Auth guard in _layout.tsx will handle routing based on user state
+      console.log('[Login] Google sign-in successful, auth guard will route');
     } catch (err: any) {
       let message = "Google sign-in failed. Please try again.";
       if (err.code === "auth/popup-closed-by-user") {
@@ -283,14 +285,16 @@ export default function LoginScreen() {
             rating: 5.0,
             tradeCount: 0,
             emailVerified: user.emailVerified,
+            termsAccepted: false,
+            profileComplete: false,
           });
         }
       } catch (firestoreError) {
         console.warn("Unable to create Firestore user doc:", firestoreError);
       }
 
-      // Navigate once signed in (Facebook accounts are already verified)
-      router.replace("/");
+      // Auth guard in _layout.tsx will handle routing based on user state
+      console.log('[Login] Facebook sign-in successful, auth guard will route');
     } catch (err: any) {
       let message = "Facebook sign-in failed. Please try again.";
       if (err.code === "auth/popup-closed-by-user") {
@@ -312,6 +316,8 @@ export default function LoginScreen() {
   const inputTextColor = "#000000";
   const iconGray = "#ADADAD";
   const primaryBrand = "#2F2F6F";
+
+  // Routing is now handled by the auth guard in _layout.tsx to avoid race conditions
 
   // --- Components ---
   function SocialButton({
@@ -380,7 +386,29 @@ export default function LoginScreen() {
         );
         return;
       }
-      router.replace("/");
+
+      // Ensure Firestore user doc exists (for users who signed up via email)
+      try {
+        const userDocRef = doc(db, "users", user.uid);
+        const userDoc = await getDoc(userDocRef);
+        if (!userDoc.exists()) {
+          await setDoc(userDocRef, {
+            email: user.email,
+            username: user.email?.split("@")[0],
+            createdAt: new Date().toISOString(),
+            rating: 5.0,
+            tradeCount: 0,
+            emailVerified: user.emailVerified,
+            termsAccepted: false,
+            profileComplete: false,
+          });
+        }
+      } catch (firestoreError) {
+        console.warn("Unable to create Firestore user doc:", firestoreError);
+      }
+
+      // Auth guard in _layout.tsx will handle routing based on user state
+      console.log('[Login] Email login successful, auth guard will route');
     } catch (err: any) {
       // inspect the Firebase error code and show a specific message
       let message = "The Gmail or Password you entered is incorrect.";

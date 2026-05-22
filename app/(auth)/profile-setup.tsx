@@ -4,46 +4,34 @@ import { router } from 'expo-router';
 import { doc, setDoc } from 'firebase/firestore';
 import React, { useCallback, useRef, useState } from 'react';
 import {
-    ActivityIndicator,
-    Alert,
-    Dimensions,
-    Image,
-    KeyboardAvoidingView,
-    Platform,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TextInput,
-    TouchableOpacity,
-    View,
+  ActivityIndicator,
+  Alert,
+  Dimensions,
+  Image,
+  KeyboardAvoidingView,
+  Platform,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
 } from 'react-native';
 import { auth, db } from '../../firebaseConfig';
-
-/**
- * Profile Setup Screen - Expo Router Route
- * Place this file at: app/(auth)/profile-setup.tsx
- *
- * Required packages:
- *   npx expo install expo-image-picker expo-image-manipulator
- *
- * Replace GOOGLE_PLACES_API_KEY with your key for live location suggestions.
- * Get one at: https://console.cloud.google.com → Places API
- */
 
 const GOOGLE_PLACES_API_KEY = 'YOUR_GOOGLE_PLACES_API_KEY';
 
 const { width } = Dimensions.get('window');
 const STEPS = ['Name', 'Photo', 'Phone', 'Location', 'Bio'];
 
-const RED  = '#B8202A';
-const BLUE = '#1C3B8C';
+const PRIMARY = '#2F2F6F';
+const SECONDARY = '#E74C3C';
 const BG   = '#F7F5F2';
 const CARD = '#FFFFFF';
 const BORDER = '#E0DDD8';
 const TEXT = '#1A1A1A';
 const MUTED = '#888888';
 
-// ─── Main screen (Expo Router page) ──────────────────────────────────────────
 export default function ProfileSetupScreen() {
   const [step, setStep] = useState(0);
 
@@ -63,14 +51,13 @@ export default function ProfileSetupScreen() {
 
   const locationDebounce = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // ── Validation ──────────────────────────────────────────────────────────
   const canProceed = () => {
     switch (step) {
       case 0: return firstName.trim().length > 0 && lastName.trim().length > 0;
       case 1: return photo !== null;
       case 2: return phone.length === 10;
       case 3: return location.trim().length > 0;
-      case 4: return true; // bio is optional
+      case 4: return true;
       default: return false;
     }
   };
@@ -103,6 +90,7 @@ export default function ProfileSetupScreen() {
         firstName,
         lastName,
         photo: photo || null,
+        avatarUrl: photo || null,
         phone: `+63${phone}`,
         location,
         locationPlaceId,
@@ -111,13 +99,14 @@ export default function ProfileSetupScreen() {
         rating: 5.0,
         tradeCount: 0,
         emailVerified: user.emailVerified,
+        profileComplete: true,  // ✅ mark profile as done
+        termsAccepted: true,    // ✅ preserve so Firestore doc stays consistent
       };
 
-      // Save to Firestore
-      await setDoc(doc(db, 'users', user.uid), profileData);
+      // ✅ merge: true so we don't wipe termsAccepted saved by the terms screen
+      await setDoc(doc(db, 'users', user.uid), profileData, { merge: true });
 
-      // Navigate to verification or home
-      router.replace('/(auth)/verify');
+      router.replace('/(tabs)');
     } catch (error: any) {
       console.error('Profile setup error:', error);
       Alert.alert('Error', error?.message || 'Failed to save profile. Please try again.');
@@ -126,13 +115,11 @@ export default function ProfileSetupScreen() {
     }
   };
 
-  // ── Phone ───────────────────────────────────────────────────────────────
   const handlePhoneChange = (text: string) => {
     const digits = text.replace(/\D/g, '');
     if (digits.length <= 10) setPhone(digits);
   };
 
-  // ── Image picker ────────────────────────────────────────────────────────
   const processImage = async (uri: string) => {
     setCropLoading(true);
     try {
@@ -142,41 +129,57 @@ export default function ProfileSetupScreen() {
         { compress: 0.85, format: ImageManipulator.SaveFormat.JPEG }
       );
       setPhoto(result.uri);
-    } catch {
+      setCropLoading(false);
+    } catch (error) {
+      console.error('Image processing error:', error);
       setPhoto(uri);
-    } finally {
       setCropLoading(false);
     }
   };
 
   const pickFromGallery = async () => {
-    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (status !== 'granted') return;
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
-      allowsEditing: true,
-      aspect: [1, 1],
-      quality: 0.85,
-    });
-    if (!result.canceled && result.assets?.[0]) {
-      await processImage(result.assets[0].uri);
+    try {
+      const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (status !== 'granted') {
+        Alert.alert('Permission required', 'Please enable media library access in settings.');
+        return;
+      }
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        allowsEditing: true,
+        aspect: [1, 1],
+        quality: 0.85,
+      });
+      if (!result.canceled && result.assets?.[0]) {
+        await processImage(result.assets[0].uri);
+      }
+    } catch (error) {
+      console.error('Gallery picker error:', error);
+      Alert.alert('Error', 'Failed to pick image from gallery.');
     }
   };
 
   const pickFromCamera = async () => {
-    const { status } = await ImagePicker.requestCameraPermissionsAsync();
-    if (status !== 'granted') return;
-    const result = await ImagePicker.launchCameraAsync({
-      allowsEditing: true,
-      aspect: [1, 1],
-      quality: 0.85,
-    });
-    if (!result.canceled && result.assets?.[0]) {
-      await processImage(result.assets[0].uri);
+    try {
+      const { status } = await ImagePicker.requestCameraPermissionsAsync();
+      if (status !== 'granted') {
+        Alert.alert('Permission required', 'Please enable camera access in settings.');
+        return;
+      }
+      const result = await ImagePicker.launchCameraAsync({
+        allowsEditing: true,
+        aspect: [1, 1],
+        quality: 0.85,
+      });
+      if (!result.canceled && result.assets?.[0]) {
+        await processImage(result.assets[0].uri);
+      }
+    } catch (error) {
+      console.error('Camera picker error:', error);
+      Alert.alert('Error', 'Failed to capture image from camera.');
     }
   };
 
-  // ── Location autocomplete ───────────────────────────────────────────────
   const fetchSuggestions = useCallback(async (text: string) => {
     if (text.length < 2) { setLocationSuggestions([]); return; }
     setLoadingLocations(true);
@@ -208,7 +211,6 @@ export default function ProfileSetupScreen() {
     setLocationSuggestions([]);
   };
 
-  // ── Step renderer ───────────────────────────────────────────────────────
   const renderStep = () => {
     switch (step) {
       case 0:
@@ -230,7 +232,7 @@ export default function ProfileSetupScreen() {
           <StepWrapper title="Add a profile photo" sub="Cropped to 1:1 square. You can change this later.">
             <View style={s.avatarRing}>
               {cropLoading
-                ? <ActivityIndicator size="large" color={RED} />
+                ? <ActivityIndicator size="large" color={PRIMARY} />
                 : photo
                   ? <Image source={{ uri: photo }} style={s.avatar} />
                   : <Text style={s.avatarIcon}>👤</Text>
@@ -299,7 +301,7 @@ export default function ProfileSetupScreen() {
                   onChangeText={handleLocationChange}
                   autoFocus
                 />
-                {loadingLocations && <ActivityIndicator size="small" color={RED} style={{ marginRight: 12 }} />}
+                {loadingLocations && <ActivityIndicator size="small" color={PRIMARY} style={{ marginRight: 12 }} />}
               </View>
 
               {locationSuggestions.length > 0 && (
@@ -351,11 +353,9 @@ export default function ProfileSetupScreen() {
     }
   };
 
-  // ── Layout ──────────────────────────────────────────────────────────────
   return (
     <KeyboardAvoidingView style={s.root} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
 
-      {/* Progress bar + back */}
       <View style={s.header}>
         {step > 0
           ? <TouchableOpacity onPress={goBack} style={s.backBtn}>
@@ -378,7 +378,6 @@ export default function ProfileSetupScreen() {
         {renderStep()}
       </ScrollView>
 
-      {/* Footer */}
       <View style={s.footer}>
         {step === 4 && (
           <TouchableOpacity onPress={handleFinish} style={s.skipBtn} disabled={isSaving}>
@@ -401,8 +400,6 @@ export default function ProfileSetupScreen() {
   );
 }
 
-// ─── Small helpers ────────────────────────────────────────────────────────────
-
 function StepWrapper({ title, sub, children }: { title: string; sub: string; children: React.ReactNode }) {
   return (
     <View style={s.stepWrap}>
@@ -422,7 +419,6 @@ function FieldGroup({ label, children }: { label: string; children: React.ReactN
   );
 }
 
-// ─── Styles ───────────────────────────────────────────────────────────────────
 const s = StyleSheet.create({
   root: { flex: 1, backgroundColor: BG },
 
@@ -443,7 +439,7 @@ const s = StyleSheet.create({
   backArrow: { fontSize: 18, color: TEXT },
   pills: { flex: 1, flexDirection: 'row', gap: 6 },
   pill:  { flex: 1, height: 4, borderRadius: 2 },
-  pillOn:  { backgroundColor: RED },
+  pillOn:  { backgroundColor: PRIMARY },
   pillOff: { backgroundColor: BORDER },
 
   scroll: { flexGrow: 1, paddingHorizontal: 24, paddingBottom: 24 },
@@ -466,13 +462,12 @@ const s = StyleSheet.create({
     fontSize: 16, color: TEXT,
   },
 
-  // Photo
   avatarRing: {
     alignSelf: 'center', width: 140, height: 140, borderRadius: 70,
-    backgroundColor: '#E8E4DF', borderWidth: 3, borderColor: RED,
+    backgroundColor: '#E8E4DF', borderWidth: 3, borderColor: PRIMARY,
     alignItems: 'center', justifyContent: 'center',
     marginBottom: 28, overflow: 'hidden',
-    shadowColor: RED, shadowOffset: { width: 0, height: 4 },
+    shadowColor: PRIMARY, shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.25, shadowRadius: 12, elevation: 8,
   },
   avatar:     { width: 140, height: 140, borderRadius: 70 },
@@ -486,7 +481,6 @@ const s = StyleSheet.create({
   photoBtnLabel: { fontSize: 14, fontWeight: '600', color: TEXT },
   cropNote: { fontSize: 12, color: MUTED, textAlign: 'center', lineHeight: 18 },
 
-  // Phone
   phoneRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   countryBadge: {
     flexDirection: 'row', alignItems: 'center', gap: 6,
@@ -498,14 +492,13 @@ const s = StyleSheet.create({
   phoneInput:  { flex: 1, letterSpacing: 1.5 },
   phoneHint:   { fontSize: 12, color: MUTED, marginTop: 6, marginLeft: 4 },
   previewBox: {
-    marginTop: 12, backgroundColor: `${BLUE}15`, borderRadius: 10,
+    marginTop: 12, backgroundColor: `${PRIMARY}15`, borderRadius: 10,
     paddingHorizontal: 14, paddingVertical: 10,
     flexDirection: 'row', alignItems: 'center',
   },
-  previewLabel: { fontSize: 12, color: BLUE, fontWeight: '600' },
-  previewValue: { fontSize: 15, color: BLUE, fontWeight: '800', letterSpacing: 1 },
+  previewLabel: { fontSize: 12, color: PRIMARY, fontWeight: '600' },
+  previewValue: { fontSize: 15, color: PRIMARY, fontWeight: '800', letterSpacing: 1 },
 
-  // Location
   locationRow: {
     flexDirection: 'row', alignItems: 'center',
     backgroundColor: CARD, borderWidth: 1.5, borderColor: BORDER,
@@ -525,11 +518,9 @@ const s = StyleSheet.create({
   suggestionSub:     { fontSize: 12, color: MUTED, marginTop: 2 },
   apiWarning:        { marginTop: 10, fontSize: 12, color: '#B8750A', lineHeight: 18 },
 
-  // Bio
   bioInput:   { height: 130, paddingTop: 14 },
   charCount:  { fontSize: 12, color: MUTED, textAlign: 'right', marginTop: 6 },
 
-  // Footer
   footer: {
     flexDirection: 'row', alignItems: 'center',
     paddingHorizontal: 24, paddingVertical: 16,
@@ -539,9 +530,9 @@ const s = StyleSheet.create({
   skipBtn:    { paddingHorizontal: 16, paddingVertical: 14 },
   skipText:   { fontSize: 15, color: MUTED, fontWeight: '600' },
   nextBtn: {
-    flex: 1, backgroundColor: RED, borderRadius: 14,
+    flex: 1, backgroundColor: PRIMARY, borderRadius: 14,
     paddingVertical: 16, alignItems: 'center',
-    shadowColor: RED, shadowOffset: { width: 0, height: 4 },
+    shadowColor: PRIMARY, shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.35, shadowRadius: 10, elevation: 6,
   },
   nextBtnOff: { backgroundColor: '#ccc', shadowOpacity: 0, elevation: 0 },

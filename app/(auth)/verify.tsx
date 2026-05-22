@@ -73,7 +73,7 @@ export default function VerifyEmailScreen() {
         ensureUserDoc(freshUser).catch((err) => console.warn('Failed to update user doc after verification:', err));
 
         Alert.alert('Verified!', 'Your email is confirmed. Welcome!');
-        router.replace('/');
+        router.replace('/(auth)/terms');
       } else {
         Alert.alert('Not Verified', 'We could not detect the verification yet. Please make sure you clicked the link and then return to the app.');
       }
@@ -94,7 +94,7 @@ export default function VerifyEmailScreen() {
       try {
         await user.reload();
         if (user.emailVerified) {
-          router.replace('/');
+          router.replace('/(auth)/terms');
           ensureUserDoc(user).catch((err) => console.warn('Failed to update user doc after periodic verification:', err));
         }
       } catch (err) {
@@ -110,7 +110,7 @@ export default function VerifyEmailScreen() {
         try {
           await user.reload();
           if (user.emailVerified) {
-            router.replace('/');
+            router.replace('/(auth)/terms');
             ensureUserDoc(user).catch((err) => console.warn('Failed to update user doc after AppState verification:', err));
           }
         } catch (err) {

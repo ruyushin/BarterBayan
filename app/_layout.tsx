@@ -28,15 +28,12 @@ export default function RootLayout() {
     if (isLoading) return;
 
     const inAuthGroup = segments[0] === '(auth)';
-    const authScreen = segments[1] || '';
 
     if (!user && !inAuthGroup) {
       router.replace('/login');
-    } else if (user && inAuthGroup && user.emailVerified) {
-      if (authScreen !== 'signup') {
-        router.replace('/');
-      }
     }
+    // Let the (auth)/_layout.tsx handle routing for authenticated users
+    // Don't redirect here - it will conflict with the auth guard
   }, [user, segments, isLoading, router]);
 
   if (isLoading) {
