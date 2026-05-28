@@ -4,34 +4,38 @@ import * as MediaLibrary from "expo-media-library";
 import { useRouter } from "expo-router";
 import React, { useEffect, useState } from "react";
 import {
-    ActivityIndicator,
-    Alert,
-    Dimensions,
-    FlatList,
-    Image,
-    ImageStyle,
-    Modal,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TextStyle,
-    TouchableOpacity,
-    View,
-    ViewStyle,
+  ActivityIndicator,
+  Alert,
+  Dimensions,
+  FlatList,
+  Image,
+  ImageStyle,
+  Modal,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextStyle,
+  TouchableOpacity,
+  View,
+  ViewStyle,
 } from "react-native";
 import { LongPressGestureHandler, State } from "react-native-gesture-handler";
 import { auth } from "../firebaseConfig";
 import { getUserInfo, updateItemLikes } from "../services/itemService";
 import { trackItemView, trackUserActivity } from "../services/trendingService";
+import { ProposeTradeModal } from "./ProposeTradeModal";
 
 const SCREEN_WIDTH = Dimensions.get("window").width;
+const NAVY = "#2f2f6f";
 
+// ─── Types ────────────────────────────────────────────────────────────────────
 interface ProductDetailModalProps {
   visible: boolean;
   item: any;
   onClose: () => void;
 }
 
+// ─── Component ────────────────────────────────────────────────────────────────
 export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
   visible,
   item,
@@ -49,11 +53,18 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
     number | null
   >(null);
 
+  // ── Trade proposal state ──────────────────────────────────────────────────
+  const [tradeModalVisible, setTradeModalVisible] = useState(false);
+  // ─────────────────────────────────────────────────────────────────────────
+
   const images = Array.isArray(item?.images)
     ? item.images
     : item?.image
       ? [item.image]
       : [];
+
+  // Is this item owned by the current user?
+  const isOwnItem = !!currentUser && currentUser === item?.ownerId;
 
   useEffect(() => {
     if (visible && item) {
@@ -163,6 +174,7 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
     }
   };
 
+  // ── Full-screen image viewer ───────────────────────────────────────────────
   const renderFullScreenImage = () => {
     if (fullScreenImageIndex === null) return null;
     const image = images[fullScreenImageIndex];
@@ -219,6 +231,7 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
     );
   };
 
+  // ── Image carousel ────────────────────────────────────────────────────────
   const renderImageCarousel = () => (
     <View style={styles.carouselContainer}>
       {images.length > 0 ? (
@@ -284,8 +297,10 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
     </View>
   );
 
+  // ── Main modal content ────────────────────────────────────────────────────
   const modalContent = (
     <View style={styles.container}>
+      {/* Header */}
       <View style={styles.header}>
         <TouchableOpacity onPress={onClose} style={styles.closeButton}>
           <Ionicons name="close" size={28} color="#2e2d7c" />
@@ -306,14 +321,15 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
         showsVerticalScrollIndicator={false}
         contentContainerStyle={styles.scrollContent}
       >
+        {/* Title */}
         <View style={styles.productInfo}>
           <Text style={styles.title}>{item?.title}</Text>
         </View>
 
+        {/* Details card */}
         <View style={styles.detailsSection}>
           <Text style={styles.detailsHeader}>Details</Text>
 
-          {/* FIX: use ternary instead of && to avoid rendering "" as a text node in View */}
           {item?.description ? (
             <View style={styles.descriptionContainer}>
               <Text style={styles.descriptionText}>
@@ -351,6 +367,7 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
           ) : null}
         </View>
 
+        {/* Owner card */}
         {ownerInfo ? (
           <View style={styles.ownerCard}>
             <View style={styles.ownerHeader}>
@@ -369,7 +386,6 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
                   <Text style={styles.rating}>
                     {ownerInfo.rating?.toFixed(1) || "N/A"}
                   </Text>
-                  {/* FIX: template literal so the parens/text don't leak as nodes */}
                   <Text style={styles.tradeCount}>
                     {`(${ownerInfo.tradeCount || 0} trades)`}
                   </Text>
@@ -382,6 +398,7 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
           </View>
         ) : null}
 
+        {/* Like button */}
         <TouchableOpacity
           style={[styles.likeButton, isLiked && styles.likeButtonActive]}
           onPress={handleLike}
@@ -396,7 +413,6 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
                 size={20}
                 color={isLiked ? "#fff" : "#2e2d7c"}
               />
-              {/* FIX: template literal avoids a raw space text node between expressions */}
               <Text
                 style={[
                   styles.likeButtonText,
@@ -409,13 +425,40 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
           )}
         </TouchableOpacity>
 
-        <TouchableOpacity
-          style={styles.messageButton}
-          onPress={handleSendMessage}
-        >
-          <Ionicons name="send" size={20} color="#fff" />
-          <Text style={styles.messageButtonText}>Send Owner a Message</Text>
-        </TouchableOpacity>
+        {/* ── Action buttons — only shown for items you DON'T own ── */}
+        {!isOwnItem ? (
+          <View style={styles.actionRow}>
+            {/* Message button */}
+            <TouchableOpacity
+              style={styles.messageButton}
+              onPress={handleSendMessage}
+              activeOpacity={0.85}
+            >
+              <Ionicons name="send" size={18} color="#fff" />
+              <Text style={styles.messageButtonText}>Message</Text>
+            </TouchableOpacity>
+
+            {/* Propose Trade button */}
+            <TouchableOpacity
+              style={styles.tradeButton}
+              onPress={() => setTradeModalVisible(true)}
+              activeOpacity={0.85}
+            >
+              <Ionicons name="swap-horizontal" size={18} color="#fff" />
+              <Text style={styles.tradeButtonText}>Propose Trade</Text>
+            </TouchableOpacity>
+          </View>
+        ) : (
+          /* Own item — show an "Edit / View" hint instead */
+          <View style={styles.ownItemBanner}>
+            <Ionicons
+              name="information-circle-outline"
+              size={16}
+              color="#888"
+            />
+            <Text style={styles.ownItemText}>This is your listing.</Text>
+          </View>
+        )}
       </ScrollView>
     </View>
   );
@@ -423,6 +466,7 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
   return (
     <>
       {renderFullScreenImage()}
+
       <Modal
         visible={visible}
         transparent
@@ -431,10 +475,23 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
       >
         <View style={styles.modalOverlay}>{modalContent}</View>
       </Modal>
+
+      {/* ── ProposeTradeModal AFTER the parent Modal so it layers on top ── */}
+      <ProposeTradeModal
+        visible={tradeModalVisible}
+        targetItem={item}
+        onClose={() => setTradeModalVisible(false)}
+        onSuccess={() => {
+          setTradeModalVisible(false);
+          // optionally also close the product modal so user lands on Trade tab:
+          // onClose();
+        }}
+      />
     </>
   );
 };
 
+// ─── Styles ───────────────────────────────────────────────────────────────────
 const styles = StyleSheet.create({
   modalOverlay: {
     flex: 1,
@@ -463,6 +520,8 @@ const styles = StyleSheet.create({
   } as TextStyle,
   closeButton: { padding: 8 } as ViewStyle,
   expandButton: { padding: 8 } as ViewStyle,
+
+  // Carousel
   carouselContainer: {
     height: 300,
     backgroundColor: "#F3F4F6",
@@ -503,6 +562,8 @@ const styles = StyleSheet.create({
     fontWeight: "600",
     marginLeft: 8,
   } as TextStyle,
+
+  // Full-screen viewer
   fullScreenContainer: {
     flex: 1,
     backgroundColor: "rgba(0, 0, 0, 0.95)",
@@ -547,6 +608,8 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: "600",
   } as TextStyle,
+
+  // Content
   content: { flex: 1 } as ViewStyle,
   scrollContent: {
     paddingHorizontal: 20,
@@ -559,17 +622,8 @@ const styles = StyleSheet.create({
     fontWeight: "700",
     color: "#111827",
   } as TextStyle,
-  category: {
-    fontSize: 14,
-    color: "#6B7280",
-    fontWeight: "500",
-  } as TextStyle,
-  description: {
-    fontSize: 14,
-    color: "#4B5563",
-    lineHeight: 20,
-    marginTop: 8,
-  } as TextStyle,
+
+  // Details card
   detailsSection: {
     backgroundColor: "#F9FAFB",
     borderRadius: 12,
@@ -619,6 +673,8 @@ const styles = StyleSheet.create({
     fontWeight: "600",
     color: "#2e2d7c",
   } as TextStyle,
+
+  // Owner card
   ownerCard: {
     backgroundColor: "#F9FAFB",
     borderRadius: 16,
@@ -661,6 +717,8 @@ const styles = StyleSheet.create({
     color: "#4B5563",
     lineHeight: 18,
   } as TextStyle,
+
+  // Like button
   likeButton: {
     flexDirection: "row",
     alignItems: "center",
@@ -677,19 +735,58 @@ const styles = StyleSheet.create({
     color: "#2e2d7c",
   } as TextStyle,
   likeButtonTextActive: { color: "#fff" } as TextStyle,
+
+  // ── Action row (Message + Propose Trade side by side) ──
+  actionRow: {
+    flexDirection: "row",
+    gap: 10,
+    marginBottom: 20,
+  } as ViewStyle,
   messageButton: {
+    flex: 1,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
     backgroundColor: "#2e2d7c",
     borderRadius: 12,
     paddingVertical: 14,
-    gap: 8,
-    marginBottom: 20,
+    gap: 6,
   } as ViewStyle,
   messageButtonText: {
-    fontSize: 16,
+    fontSize: 14,
     fontWeight: "600",
     color: "#fff",
+  } as TextStyle,
+  tradeButton: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#C9A227",
+    borderRadius: 12,
+    paddingVertical: 14,
+    gap: 6,
+  } as ViewStyle,
+  tradeButtonText: {
+    fontSize: 14,
+    fontWeight: "600",
+    color: "#fff",
+  } as TextStyle,
+
+  // Own item banner
+  ownItemBanner: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+    paddingVertical: 12,
+    marginBottom: 20,
+    backgroundColor: "#F3F4F6",
+    borderRadius: 12,
+  } as ViewStyle,
+  ownItemText: {
+    fontSize: 13,
+    color: "#888",
+    fontWeight: "500",
   } as TextStyle,
 });

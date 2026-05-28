@@ -97,8 +97,12 @@ const formatTime = (timestamp: any): string => {
 };
 
 const AVATAR_COLORS = [
-  "#e05c5c", "#e07a5c", "#5c7ae0",
-  "#5cb8e0", "#7a5ce0", "#5ce07a",
+  "#e05c5c",
+  "#e07a5c",
+  "#5c7ae0",
+  "#5cb8e0",
+  "#7a5ce0",
+  "#5ce07a",
 ];
 
 const letterAvatarColor = (name: string): string => {
@@ -108,10 +112,14 @@ const letterAvatarColor = (name: string): string => {
 
 const notifIcon = (type: NotifType): any => {
   switch (type) {
-    case "trade_offer":    return "swap-horizontal";
-    case "trade_accepted": return "checkmark-circle";
-    case "message":        return "mail";
-    default:               return "notifications";
+    case "trade_offer":
+      return "swap-horizontal";
+    case "trade_accepted":
+      return "checkmark-circle";
+    case "message":
+      return "mail";
+    default:
+      return "notifications";
   }
 };
 
@@ -167,8 +175,20 @@ function AvatarWithFallback({
     );
   }
   return (
-    <View style={[baseStyle, { backgroundColor: bg, justifyContent: "center", alignItems: "center" }, style]}>
-      <Text style={{ color: "#fff", fontSize: fallbackFontSize ?? size * 0.42, fontWeight: "700" }}>
+    <View
+      style={[
+        baseStyle,
+        { backgroundColor: bg, justifyContent: "center", alignItems: "center" },
+        style,
+      ]}
+    >
+      <Text
+        style={{
+          color: "#fff",
+          fontSize: fallbackFontSize ?? size * 0.42,
+          fontWeight: "700",
+        }}
+      >
         {initials}
       </Text>
     </View>
@@ -197,7 +217,12 @@ function NotifAvatarWithFallback({
     );
   }
   return (
-    <View style={[styles.notifIconCircle, { backgroundColor: letterAvatarColor(title) }]}>
+    <View
+      style={[
+        styles.notifIconCircle,
+        { backgroundColor: letterAvatarColor(title) },
+      ]}
+    >
       <Ionicons name={notifIcon(type)} size={20} color="#fff" />
     </View>
   );
@@ -216,15 +241,26 @@ function BottomSheet({
   onClose: () => void;
 }) {
   return (
-    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
+    <Modal
+      visible={visible}
+      transparent
+      animationType="slide"
+      onRequestClose={onClose}
+    >
       <Pressable style={sheet.overlay} onPress={onClose}>
         <Pressable style={sheet.panel}>
           {title ? <Text style={sheet.title}>{title}</Text> : null}
           {options.map((opt, i) => (
             <TouchableOpacity
               key={i}
-              style={[sheet.option, i < options.length - 1 && sheet.optionBorder]}
-              onPress={() => { onClose(); setTimeout(opt.onPress, 200); }}
+              style={[
+                sheet.option,
+                i < options.length - 1 && sheet.optionBorder,
+              ]}
+              onPress={() => {
+                onClose();
+                setTimeout(opt.onPress, 200);
+              }}
               activeOpacity={0.7}
             >
               <Ionicons
@@ -233,12 +269,21 @@ function BottomSheet({
                 color={opt.destructive ? "#ef4444" : NAVY}
                 style={sheet.optionIcon}
               />
-              <Text style={[sheet.optionLabel, opt.destructive && sheet.optionDestructive]}>
+              <Text
+                style={[
+                  sheet.optionLabel,
+                  opt.destructive && sheet.optionDestructive,
+                ]}
+              >
                 {opt.label}
               </Text>
             </TouchableOpacity>
           ))}
-          <TouchableOpacity style={sheet.cancelBtn} onPress={onClose} activeOpacity={0.7}>
+          <TouchableOpacity
+            style={sheet.cancelBtn}
+            onPress={onClose}
+            activeOpacity={0.7}
+          >
             <Text style={sheet.cancelLabel}>Cancel</Text>
           </TouchableOpacity>
         </Pressable>
@@ -249,31 +294,50 @@ function BottomSheet({
 
 const sheet = StyleSheet.create({
   overlay: {
-    flex: 1, backgroundColor: "rgba(0,0,0,0.35)", justifyContent: "flex-end",
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.35)",
+    justifyContent: "flex-end",
   },
   panel: {
-    backgroundColor: "#fff", borderTopLeftRadius: 20, borderTopRightRadius: 20,
-    paddingHorizontal: 16, paddingTop: 12, paddingBottom: 32,
+    backgroundColor: "#fff",
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    paddingHorizontal: 16,
+    paddingTop: 12,
+    paddingBottom: 32,
   },
   title: { fontSize: 13, color: "#999", textAlign: "center", marginBottom: 8 },
   option: { flexDirection: "row", alignItems: "center", paddingVertical: 15 },
-  optionBorder: { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: "#e5e5e5" },
+  optionBorder: {
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: "#e5e5e5",
+  },
   optionIcon: { marginRight: 14 },
   optionLabel: { fontSize: 16, color: "#111" },
   optionDestructive: { color: "#ef4444" },
-  cancelBtn: { marginTop: 8, backgroundColor: "#f2f2f7", borderRadius: 12, paddingVertical: 14, alignItems: "center" },
+  cancelBtn: {
+    marginTop: 8,
+    backgroundColor: "#f2f2f7",
+    borderRadius: 12,
+    paddingVertical: 14,
+    alignItems: "center",
+  },
   cancelLabel: { fontSize: 16, fontWeight: "600", color: "#333" },
 });
 
 // ─── Main Component ───────────────────────────────────────────────────────────
 export default function InboxScreen() {
-  const [activeTab, setActiveTab] = useState<"messages" | "archived" | "notifications">("messages");
+  const [activeTab, setActiveTab] = useState<
+    "messages" | "archived" | "notifications"
+  >("messages");
 
   // ── Messages state ──
   const [conversations, setConversations] = useState<any[]>([]);
   const [archivedConversations, setArchivedConversations] = useState<any[]>([]);
   const [convLoading, setConvLoading] = useState(false);
-  const [mutedConversations, setMutedConversations] = useState<{ [key: string]: Date }>({});
+  const [mutedConversations, setMutedConversations] = useState<{
+    [key: string]: Date;
+  }>({});
   const [searchQuery, setSearchQuery] = useState<string>("");
 
   // ── Bottom sheet ──
@@ -329,9 +393,14 @@ export default function InboxScreen() {
       const enriched = await Promise.all(
         convs.map(async (conv: any) => {
           try {
-            const otherUserId = getOtherUserInConversation(conv.id, currentUserId!);
+            const otherUserId = getOtherUserInConversation(
+              conv.id,
+              currentUserId!,
+            );
             if (!otherUserId) return conv;
-            const userInfo: any = await getUserInfo(otherUserId).catch(() => null);
+            const userInfo: any = await getUserInfo(otherUserId).catch(
+              () => null,
+            );
             const avatarUri = resolveAvatar(userInfo);
             return {
               ...conv,
@@ -407,7 +476,10 @@ export default function InboxScreen() {
 
   // ─── Notification press ───────────────────────────────────────────────────
   const handleNotifPress = async (item: Notification) => {
-    if (selectionMode) { toggleSelect(item.id); return; }
+    if (selectionMode) {
+      toggleSelect(item.id);
+      return;
+    }
     if (!item.read) {
       markNotificationRead(item.id).catch(console.error);
       setNotifications((prev) =>
@@ -418,11 +490,17 @@ export default function InboxScreen() {
       case "trade_offer":
       case "trade_accepted":
         if (item.tradeId)
-          router.push({ pathname: "/trade", params: { tradeId: item.tradeId } });
+          router.push({
+            pathname: "/trade",
+            params: { tradeId: item.tradeId },
+          });
         break;
       case "message":
         if (item.otherUserId)
-          router.push({ pathname: "/chat", params: { ownerUserId: item.otherUserId } });
+          router.push({
+            pathname: "/chat",
+            params: { ownerUserId: item.otherUserId },
+          });
         break;
     }
   };
@@ -435,15 +513,21 @@ export default function InboxScreen() {
   const toggleSelect = (id: string) => {
     setSelectedIds((prev) => {
       const next = new Set(prev);
-      if (next.has(id)) next.delete(id); else next.add(id);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
       if (next.size === 0) setSelectionMode(false);
       return next;
     });
   };
 
-  const cancelSelection = () => { setSelectionMode(false); setSelectedIds(new Set()); };
+  const cancelSelection = () => {
+    setSelectionMode(false);
+    setSelectedIds(new Set());
+  };
 
-  const handleDeleteSelected = () => { setDeleteModalVisible(true); };
+  const handleDeleteSelected = () => {
+    setDeleteModalVisible(true);
+  };
 
   const confirmDeleteSelected = async () => {
     try {
@@ -461,7 +545,8 @@ export default function InboxScreen() {
   const handleConversationMenu = (item: any) => {
     const isMuted = mutedConversations[item.id];
     const isMutedActive = isMuted && new Date() < isMuted;
-    const isRead = item.readBy?.includes(currentUserId!) || item.isRead === true;
+    const isRead =
+      item.readBy?.includes(currentUserId!) || item.isRead === true;
 
     const options: SheetOption[] = [
       {
@@ -475,7 +560,9 @@ export default function InboxScreen() {
               await markConversationAsRead(item.id, currentUserId!);
             }
             loadConversations();
-          } catch (err) { console.error(err); }
+          } catch (err) {
+            console.error(err);
+          }
         },
       },
     ];
@@ -492,7 +579,9 @@ export default function InboxScreen() {
               delete next[item.id];
               return next;
             });
-          } catch (err) { console.error(err); }
+          } catch (err) {
+            console.error(err);
+          }
         },
       });
     } else {
@@ -503,7 +592,8 @@ export default function InboxScreen() {
       });
     }
 
-    const isArchived = item.archivedBy && item.archivedBy.includes(currentUserId!);
+    const isArchived =
+      item.archivedBy && item.archivedBy.includes(currentUserId!);
     if (isArchived) {
       options.push({
         label: "Unarchive",
@@ -512,7 +602,9 @@ export default function InboxScreen() {
           try {
             await unarchiveConversation(item.id, currentUserId!);
             loadConversations();
-          } catch (err) { console.error(err); }
+          } catch (err) {
+            console.error(err);
+          }
         },
       });
     } else {
@@ -523,7 +615,9 @@ export default function InboxScreen() {
           try {
             await archiveConversation(item.id, currentUserId!);
             loadConversations();
-          } catch (err) { console.error(err); }
+          } catch (err) {
+            console.error(err);
+          }
         },
       });
     }
@@ -561,26 +655,50 @@ export default function InboxScreen() {
       try {
         await muteConversation(item.id, currentUserId!, muteUntil);
         setMutedConversations((prev) => ({ ...prev, [item.id]: muteUntil }));
-      } catch (err) { console.error(err); }
+      } catch (err) {
+        console.error(err);
+      }
     };
     openSheet("Mute notifications for...", [
-      { label: "15 minutes",        icon: "time-outline",     onPress: () => mute(15 * 60 * 1000) },
-      { label: "1 hour",            icon: "time-outline",     onPress: () => mute(60 * 60 * 1000) },
-      { label: "8 hours",           icon: "time-outline",     onPress: () => mute(8 * 60 * 60 * 1000) },
-      { label: "24 hours",          icon: "time-outline",     onPress: () => mute(24 * 60 * 60 * 1000) },
-      { label: "Until I change it", icon: "infinite-outline", onPress: () => mute(365 * 24 * 60 * 60 * 1000) },
+      {
+        label: "15 minutes",
+        icon: "time-outline",
+        onPress: () => mute(15 * 60 * 1000),
+      },
+      {
+        label: "1 hour",
+        icon: "time-outline",
+        onPress: () => mute(60 * 60 * 1000),
+      },
+      {
+        label: "8 hours",
+        icon: "time-outline",
+        onPress: () => mute(8 * 60 * 60 * 1000),
+      },
+      {
+        label: "24 hours",
+        icon: "time-outline",
+        onPress: () => mute(24 * 60 * 60 * 1000),
+      },
+      {
+        label: "Until I change it",
+        icon: "infinite-outline",
+        onPress: () => mute(365 * 24 * 60 * 60 * 1000),
+      },
     ]);
   };
 
   // ─── Search filtering ─────────────────────────────────────────────────────
-  const filteredConversations = conversations.filter((conv) =>
-    conv.userName?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    conv.lastMessage?.toLowerCase().includes(searchQuery.toLowerCase()),
+  const filteredConversations = conversations.filter(
+    (conv) =>
+      conv.userName?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      conv.lastMessage?.toLowerCase().includes(searchQuery.toLowerCase()),
   );
 
-  const filteredArchivedConversations = archivedConversations.filter((conv) =>
-    conv.userName?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    conv.lastMessage?.toLowerCase().includes(searchQuery.toLowerCase()),
+  const filteredArchivedConversations = archivedConversations.filter(
+    (conv) =>
+      conv.userName?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      conv.lastMessage?.toLowerCase().includes(searchQuery.toLowerCase()),
   );
 
   // ─── Pagination ───────────────────────────────────────────────────────────
@@ -593,23 +711,31 @@ export default function InboxScreen() {
   const renderMessage = ({ item }: any) => {
     const isMuted = mutedConversations[item.id];
     const isMutedActive = isMuted && new Date() < isMuted;
-    const isRead = item.readBy?.includes(currentUserId!) || item.isRead === true;
+    const isRead =
+      item.readBy?.includes(currentUserId!) || item.isRead === true;
     const name = item.userName || "User";
 
     // Build the last-message line — only include the dot separator if there's
     // both a message text AND a non-empty time string.
-    const timeStr = item.lastMessageTime ? formatTime(item.lastMessageTime) : "";
+    const timeStr = item.lastMessageTime
+      ? formatTime(item.lastMessageTime)
+      : "";
     const lastLine = timeStr
       ? `${item.lastMessage || "No messages"} · ${timeStr}`
-      : (item.lastMessage || "No messages");
+      : item.lastMessage || "No messages";
 
     return (
-      <View style={[styles.messageRowContainer, !isRead && styles.messageRowUnread]}>
+      <View
+        style={[styles.messageRowContainer, !isRead && styles.messageRowUnread]}
+      >
         <View style={[styles.messageRow, !isRead && styles.messageRowBgUnread]}>
           <TouchableOpacity
             style={{ flex: 1, flexDirection: "row", alignItems: "center" }}
             onPress={() =>
-              router.push({ pathname: "/chat", params: { ownerUserId: item.otherUserId } })
+              router.push({
+                pathname: "/chat",
+                params: { ownerUserId: item.otherUserId },
+              })
             }
             activeOpacity={0.75}
           >
@@ -626,15 +752,31 @@ export default function InboxScreen() {
 
             <View style={styles.messageInfo}>
               <View style={styles.messageNameRow}>
-                <Text style={[styles.messageName, !isRead && styles.messageNameUnread]}>
+                <Text
+                  style={[
+                    styles.messageName,
+                    !isRead && styles.messageNameUnread,
+                  ]}
+                >
                   {name}
                 </Text>
                 {isMutedActive && (
-                  <Ionicons name="notifications-off" size={13} color="#999" style={{ marginLeft: 4 }} />
+                  <Ionicons
+                    name="notifications-off"
+                    size={13}
+                    color="#999"
+                    style={{ marginLeft: 4 }}
+                  />
                 )}
               </View>
               {/* FIX #1: lastLine always shows the correct formatted time */}
-              <Text style={[styles.messageLast, !isRead && styles.messageLastUnread]} numberOfLines={1}>
+              <Text
+                style={[
+                  styles.messageLast,
+                  !isRead && styles.messageLastUnread,
+                ]}
+                numberOfLines={1}
+              >
                 {lastLine}
               </Text>
             </View>
@@ -645,7 +787,11 @@ export default function InboxScreen() {
           onPress={() => handleConversationMenu(item)}
           hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
         >
-          <Ionicons name="ellipsis-vertical" size={18} color={!isRead ? "#000" : NAVY} />
+          <Ionicons
+            name="ellipsis-vertical"
+            size={18}
+            color={!isRead ? "#000" : NAVY}
+          />
         </TouchableOpacity>
       </View>
     );
@@ -672,12 +818,20 @@ export default function InboxScreen() {
         )}
         <View style={styles.notifIconWrap}>
           {/* FIX #3: NotifAvatarWithFallback replaces bare <Image> */}
-          <NotifAvatarWithFallback uri={item.avatar} title={item.title} type={item.type} />
+          <NotifAvatarWithFallback
+            uri={item.avatar}
+            title={item.title}
+            type={item.type}
+          />
           {!item.read && <View style={styles.unreadBadge} />}
         </View>
         <View style={styles.notifContent}>
-          <Text style={styles.notifTitle} numberOfLines={1}>{item.title}</Text>
-          <Text style={styles.notifBody} numberOfLines={2}>{item.body}</Text>
+          <Text style={styles.notifTitle} numberOfLines={1}>
+            {item.title}
+          </Text>
+          <Text style={styles.notifBody} numberOfLines={2}>
+            {item.body}
+          </Text>
           {/* FIX #1: Only render time text when it's non-empty */}
           {formatTime(item.createdAt) ? (
             <Text style={styles.notifTime}>{formatTime(item.createdAt)}</Text>
@@ -692,7 +846,8 @@ export default function InboxScreen() {
     return (
       <TouchableOpacity style={styles.loadMoreBtn} onPress={loadMore}>
         <Text style={styles.loadMoreText}>
-          Show {Math.min(PAGE_SIZE, notifications.length - visibleCount)} older notifications
+          Show {Math.min(PAGE_SIZE, notifications.length - visibleCount)} older
+          notifications
         </Text>
       </TouchableOpacity>
     );
@@ -702,7 +857,6 @@ export default function InboxScreen() {
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.inner}>
-
         {/* ── Bottom Sheet ── */}
         <BottomSheet
           visible={sheetVisible}
@@ -733,7 +887,9 @@ export default function InboxScreen() {
                 <Ionicons name="trash-outline" size={36} color="#ef4444" />
               </View>
               <Text style={styles.modalTitle}>
-                {conversationToDelete ? "Delete Conversation" : "Delete Notifications"}
+                {conversationToDelete
+                  ? "Delete Conversation"
+                  : "Delete Notifications"}
               </Text>
               <Text style={styles.modalBody}>
                 {conversationToDelete
@@ -753,7 +909,11 @@ export default function InboxScreen() {
                 </TouchableOpacity>
                 <TouchableOpacity
                   style={styles.modalDeleteBtn}
-                  onPress={conversationToDelete ? confirmDeleteConversation : confirmDeleteSelected}
+                  onPress={
+                    conversationToDelete
+                      ? confirmDeleteConversation
+                      : confirmDeleteSelected
+                  }
                   activeOpacity={0.8}
                 >
                   <Text style={styles.modalDeleteText}>Delete</Text>
@@ -766,25 +926,57 @@ export default function InboxScreen() {
         {/* ── Sidebar ── */}
         <View style={styles.sidebar}>
           <TouchableOpacity
-            style={[styles.sideIcon, activeTab === "messages" && styles.sideIconActive]}
-            onPress={() => { setActiveTab("messages"); setSearchQuery(""); }}
+            style={[
+              styles.sideIcon,
+              activeTab === "messages" && styles.sideIconActive,
+            ]}
+            onPress={() => {
+              setActiveTab("messages");
+              setSearchQuery("");
+            }}
           >
-            <Ionicons name="mail" size={24} color={activeTab === "messages" ? "#fff" : "#999"} />
+            <Ionicons
+              name="mail"
+              size={24}
+              color={activeTab === "messages" ? "#fff" : "#999"}
+            />
           </TouchableOpacity>
           <TouchableOpacity
-            style={[styles.sideIcon, activeTab === "archived" && styles.sideIconActive]}
-            onPress={() => { setActiveTab("archived"); setSearchQuery(""); }}
+            style={[
+              styles.sideIcon,
+              activeTab === "archived" && styles.sideIconActive,
+            ]}
+            onPress={() => {
+              setActiveTab("archived");
+              setSearchQuery("");
+            }}
           >
-            <Ionicons name="archive" size={24} color={activeTab === "archived" ? "#fff" : "#999"} />
+            <Ionicons
+              name="archive"
+              size={24}
+              color={activeTab === "archived" ? "#fff" : "#999"}
+            />
           </TouchableOpacity>
           <TouchableOpacity
-            style={[styles.sideIcon, activeTab === "notifications" && styles.sideIconActive]}
-            onPress={() => { setActiveTab("notifications"); setSearchQuery(""); }}
+            style={[
+              styles.sideIcon,
+              activeTab === "notifications" && styles.sideIconActive,
+            ]}
+            onPress={() => {
+              setActiveTab("notifications");
+              setSearchQuery("");
+            }}
           >
-            <Ionicons name="notifications" size={24} color={activeTab === "notifications" ? "#fff" : "#999"} />
+            <Ionicons
+              name="notifications"
+              size={24}
+              color={activeTab === "notifications" ? "#fff" : "#999"}
+            />
             {unreadCount > 0 && (
               <View style={styles.badgePill}>
-                <Text style={styles.badgePillText}>{unreadCount > 9 ? "9+" : unreadCount}</Text>
+                <Text style={styles.badgePillText}>
+                  {unreadCount > 9 ? "9+" : unreadCount}
+                </Text>
               </View>
             )}
           </TouchableOpacity>
@@ -794,11 +986,22 @@ export default function InboxScreen() {
         <View style={styles.content}>
           {activeTab === "messages" || activeTab === "archived" ? (
             <>
-              <Text style={styles.heading}>{activeTab === "archived" ? "Archived" : "Messages"}</Text>
+              <Text style={styles.heading}>
+                {activeTab === "archived" ? "Archived" : "Messages"}
+              </Text>
               <View style={styles.searchContainer}>
-                <Ionicons name="search-outline" size={20} color="#5B5B7B" style={styles.searchIcon} />
+                <Ionicons
+                  name="search-outline"
+                  size={20}
+                  color="#5B5B7B"
+                  style={styles.searchIcon}
+                />
                 <TextInput
-                  placeholder={activeTab === "archived" ? "Search Archived..." : "Search Messages..."}
+                  placeholder={
+                    activeTab === "archived"
+                      ? "Search Archived..."
+                      : "Search Messages..."
+                  }
                   placeholderTextColor="#888"
                   style={styles.searchInput}
                   value={searchQuery}
@@ -814,7 +1017,9 @@ export default function InboxScreen() {
                   <View style={styles.centered}>
                     <Ionicons name="archive-outline" size={48} color="#999" />
                     <Text style={styles.emptyText}>
-                      {searchQuery ? "No archived conversations match" : "No archived conversations yet"}
+                      {searchQuery
+                        ? "No archived conversations match"
+                        : "No archived conversations yet"}
                     </Text>
                   </View>
                 ) : (
@@ -831,7 +1036,9 @@ export default function InboxScreen() {
                 <View style={styles.centered}>
                   <Ionicons name="chatbubbles-outline" size={48} color="#999" />
                   <Text style={styles.emptyText}>
-                    {searchQuery ? "No conversations match" : "No conversations yet"}
+                    {searchQuery
+                      ? "No conversations match"
+                      : "No conversations yet"}
                   </Text>
                 </View>
               ) : (
@@ -849,13 +1056,21 @@ export default function InboxScreen() {
             <>
               {selectionMode ? (
                 <View style={styles.selectionHeader}>
-                  <TouchableOpacity onPress={cancelSelection} style={styles.selectionCancelBtn}>
+                  <TouchableOpacity
+                    onPress={cancelSelection}
+                    style={styles.selectionCancelBtn}
+                  >
                     <Text style={styles.selectionCancelText}>Cancel</Text>
                   </TouchableOpacity>
-                  <Text style={styles.selectionCount}>{selectedIds.size} selected</Text>
+                  <Text style={styles.selectionCount}>
+                    {selectedIds.size} selected
+                  </Text>
                   <TouchableOpacity
                     onPress={handleDeleteSelected}
-                    style={[styles.deleteBtn, selectedIds.size === 0 && styles.deleteBtnDisabled]}
+                    style={[
+                      styles.deleteBtn,
+                      selectedIds.size === 0 && styles.deleteBtnDisabled,
+                    ]}
                     disabled={selectedIds.size === 0}
                   >
                     <Text style={styles.deleteBtnText}>Delete</Text>
@@ -866,7 +1081,10 @@ export default function InboxScreen() {
                   <Text style={styles.heading}>Notifications</Text>
                   {unreadCount > 0 && (
                     <TouchableOpacity
-                      style={[styles.markReadBtn, markingRead && styles.markReadBtnDisabled]}
+                      style={[
+                        styles.markReadBtn,
+                        markingRead && styles.markReadBtnDisabled,
+                      ]}
                       onPress={handleMarkAllRead}
                       disabled={markingRead}
                       activeOpacity={0.8}
@@ -924,57 +1142,94 @@ const styles = StyleSheet.create({
 
   sidebar: { width: 60, paddingTop: 16, alignItems: "center", gap: 10 },
   sideIcon: {
-    width: 46, height: 46, borderRadius: 10,
-    backgroundColor: "#ccc", justifyContent: "center",
-    alignItems: "center", position: "relative",
+    width: 46,
+    height: 46,
+    borderRadius: 10,
+    backgroundColor: "#ccc",
+    justifyContent: "center",
+    alignItems: "center",
+    position: "relative",
   },
   sideIconActive: { backgroundColor: NAVY },
   badgePill: {
-    position: "absolute", top: -4, right: -4,
-    backgroundColor: "#ef4444", borderRadius: 10,
-    minWidth: 18, height: 18, justifyContent: "center",
-    alignItems: "center", paddingHorizontal: 4,
-    borderWidth: 1.5, borderColor: "#e8e8f0",
+    position: "absolute",
+    top: -4,
+    right: -4,
+    backgroundColor: "#ef4444",
+    borderRadius: 10,
+    minWidth: 18,
+    height: 18,
+    justifyContent: "center",
+    alignItems: "center",
+    paddingHorizontal: 4,
+    borderWidth: 1.5,
+    borderColor: "#e8e8f0",
   },
   badgePillText: { color: "#fff", fontSize: 10, fontWeight: "700" },
 
   content: {
-    flex: 1, backgroundColor: "#f0f0f5",
-    borderRadius: 16, margin: 8, padding: 16,
+    flex: 1,
+    backgroundColor: "#f0f0f5",
+    borderRadius: 16,
+    margin: 8,
+    padding: 16,
   },
   heading: { fontSize: 24, fontWeight: "700", color: NAVY },
   centered: { flex: 1, justifyContent: "center", alignItems: "center", gap: 8 },
   emptyText: { fontSize: 14, color: "#999" },
 
   searchContainer: {
-    flexDirection: "row", alignItems: "center",
-    backgroundColor: "#F5F5F5", borderRadius: 14,
-    height: 48, borderWidth: 1, borderColor: "#E9E9E9",
-    paddingHorizontal: 14, marginVertical: 12,
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#F5F5F5",
+    borderRadius: 14,
+    height: 48,
+    borderWidth: 1,
+    borderColor: "#E9E9E9",
+    paddingHorizontal: 14,
+    marginVertical: 12,
   },
   searchIcon: { marginRight: 10 },
   searchInput: { flex: 1, fontSize: 15, color: "#242424", paddingVertical: 8 },
 
   // ── Message rows ────────────────────────────────────────────────────────────
-  messageRowContainer: { flexDirection: "row", alignItems: "center", marginBottom: 18 },
+  messageRowContainer: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginBottom: 18,
+  },
   messageRowUnread: {},
   messageRow: {
-    flexDirection: "row", alignItems: "center", flex: 1,
-    backgroundColor: "#f0f0f5", borderRadius: 12,
-    paddingHorizontal: 8, paddingVertical: 8,
+    flexDirection: "row",
+    alignItems: "center",
+    flex: 1,
+    backgroundColor: "#f0f0f5",
+    borderRadius: 12,
+    paddingHorizontal: 8,
+    paddingVertical: 8,
   },
   messageRowBgUnread: { backgroundColor: "#ffffff" },
 
   avatarWrap: { position: "relative", marginRight: 12 },
   statusDot: {
-    position: "absolute", bottom: 1, right: 1,
-    width: 12, height: 12, borderRadius: 6,
-    borderWidth: 2, borderColor: "#f0f0f5",
+    position: "absolute",
+    bottom: 1,
+    right: 1,
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+    borderWidth: 2,
+    borderColor: "#f0f0f5",
   },
 
   messageInfo: { flex: 1 },
   messageNameRow: { flexDirection: "row", alignItems: "center" },
-  messageName: { fontSize: 14, fontWeight: "600", color: "#111", marginBottom: 2 },
+  messageName: {
+    fontSize: 14,
+    fontWeight: "600",
+    color: "#111",
+    marginBottom: 2,
+  },
   messageNameUnread: { fontWeight: "700", color: "#000" },
   messageLast: { fontSize: 12, color: "#777" },
   messageLastUnread: { color: "#333", fontWeight: "500" },
@@ -982,55 +1237,92 @@ const styles = StyleSheet.create({
 
   // ── Delete modal ────────────────────────────────────────────────────────────
   modalOverlay: {
-    flex: 1, backgroundColor: "rgba(0,0,0,0.45)",
-    justifyContent: "center", alignItems: "center",
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.45)",
+    justifyContent: "center",
+    alignItems: "center",
   },
   modalPanel: {
-    backgroundColor: "#fff", borderRadius: 20,
-    padding: 24, width: "80%", alignItems: "center",
+    backgroundColor: "#fff",
+    borderRadius: 20,
+    padding: 24,
+    width: "80%",
+    alignItems: "center",
   },
   modalIconWrap: {
-    width: 64, height: 64, borderRadius: 32,
+    width: 64,
+    height: 64,
+    borderRadius: 32,
     backgroundColor: "#fff1f1",
-    justifyContent: "center", alignItems: "center", marginBottom: 14,
+    justifyContent: "center",
+    alignItems: "center",
+    marginBottom: 14,
   },
-  modalTitle: { fontSize: 17, fontWeight: "700", color: "#111", marginBottom: 8, textAlign: "center" },
-  modalBody: { fontSize: 14, color: "#666", textAlign: "center", lineHeight: 20, marginBottom: 20 },
+  modalTitle: {
+    fontSize: 17,
+    fontWeight: "700",
+    color: "#111",
+    marginBottom: 8,
+    textAlign: "center",
+  },
+  modalBody: {
+    fontSize: 14,
+    color: "#666",
+    textAlign: "center",
+    lineHeight: 20,
+    marginBottom: 20,
+  },
   modalActions: { flexDirection: "row", gap: 12, width: "100%" },
   modalCancelBtn: {
-    flex: 1, paddingVertical: 13, borderRadius: 12,
-    backgroundColor: "#f2f2f7", alignItems: "center",
+    flex: 1,
+    paddingVertical: 13,
+    borderRadius: 12,
+    backgroundColor: "#f2f2f7",
+    alignItems: "center",
   },
   modalCancelText: { fontWeight: "600", color: "#333", fontSize: 15 },
   modalDeleteBtn: {
-    flex: 1, paddingVertical: 13, borderRadius: 12,
-    backgroundColor: "#ef4444", alignItems: "center",
+    flex: 1,
+    paddingVertical: 13,
+    borderRadius: 12,
+    backgroundColor: "#ef4444",
+    alignItems: "center",
   },
   modalDeleteText: { fontWeight: "600", color: "#fff", fontSize: 15 },
 
   // ── Notifications ────────────────────────────────────────────────────────────
   notifHeader: {
-    flexDirection: "row", alignItems: "center",
-    justifyContent: "space-between", marginBottom: 4,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 4,
   },
   markReadBtn: {
-    flexDirection: "row", alignItems: "center", gap: 5,
-    backgroundColor: NAVY, borderRadius: 20,
-    paddingHorizontal: 12, paddingVertical: 6,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+    backgroundColor: NAVY,
+    borderRadius: 20,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
   },
   markReadBtnDisabled: { opacity: 0.6 },
   markReadText: { color: "#fff", fontSize: 12, fontWeight: "600" },
 
   selectionHeader: {
-    flexDirection: "row", alignItems: "center",
-    justifyContent: "space-between", marginBottom: 4,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 4,
   },
   selectionCancelBtn: { paddingVertical: 4, paddingRight: 8 },
   selectionCancelText: { color: NAVY, fontSize: 14, fontWeight: "600" },
   selectionCount: { fontSize: 14, fontWeight: "700", color: "#333" },
   deleteBtn: {
-    backgroundColor: "#ef4444", borderRadius: 16,
-    paddingHorizontal: 14, paddingVertical: 6,
+    backgroundColor: "#ef4444",
+    borderRadius: 16,
+    paddingHorizontal: 14,
+    paddingVertical: 6,
   },
   deleteBtnDisabled: { opacity: 0.4 },
   deleteBtnText: { color: "#fff", fontSize: 13, fontWeight: "700" },
@@ -1038,44 +1330,86 @@ const styles = StyleSheet.create({
   hintText: { fontSize: 11, color: "#aaa", marginBottom: 10, marginTop: 2 },
 
   notifRow: {
-    flexDirection: "row", alignItems: "flex-start",
-    backgroundColor: "#fff", borderRadius: 14,
-    padding: 12, marginBottom: 10,
-    shadowColor: "#000", shadowOpacity: 0.05,
-    shadowRadius: 4, shadowOffset: { width: 0, height: 1 }, elevation: 1,
+    flexDirection: "row",
+    alignItems: "flex-start",
+    backgroundColor: "#fff",
+    borderRadius: 14,
+    padding: 12,
+    marginBottom: 10,
+    shadowColor: "#000",
+    shadowOpacity: 0.05,
+    shadowRadius: 4,
+    shadowOffset: { width: 0, height: 1 },
+    elevation: 1,
   },
-  notifRowUnread: { backgroundColor: "#eef0ff", borderLeftWidth: 3, borderLeftColor: NAVY },
-  notifRowSelected: { backgroundColor: "#dde0ff", borderColor: NAVY, borderWidth: 1.5 },
+  notifRowUnread: {
+    backgroundColor: "#eef0ff",
+    borderLeftWidth: 3,
+    borderLeftColor: NAVY,
+  },
+  notifRowSelected: {
+    backgroundColor: "#dde0ff",
+    borderColor: NAVY,
+    borderWidth: 1.5,
+  },
 
   checkbox: {
-    width: 22, height: 22, borderRadius: 11,
-    borderWidth: 2, borderColor: "#bbb",
-    marginRight: 10, marginTop: 2,
-    justifyContent: "center", alignItems: "center",
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    borderWidth: 2,
+    borderColor: "#bbb",
+    marginRight: 10,
+    marginTop: 2,
+    justifyContent: "center",
+    alignItems: "center",
   },
   checkboxChecked: { backgroundColor: NAVY, borderColor: NAVY },
 
   notifIconWrap: { position: "relative", marginRight: 12 },
-  notifAvatar: { width: 44, height: 44, borderRadius: 22, backgroundColor: "#ddd" },
+  notifAvatar: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: "#ddd",
+  },
   notifIconCircle: {
-    width: 44, height: 44, borderRadius: 22,
-    justifyContent: "center", alignItems: "center",
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    justifyContent: "center",
+    alignItems: "center",
   },
   unreadBadge: {
-    position: "absolute", top: 0, right: 0,
-    width: 10, height: 10, borderRadius: 5,
-    backgroundColor: ACCENT, borderWidth: 1.5, borderColor: "#eef0ff",
+    position: "absolute",
+    top: 0,
+    right: 0,
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    backgroundColor: ACCENT,
+    borderWidth: 1.5,
+    borderColor: "#eef0ff",
   },
 
   notifContent: { flex: 1 },
-  notifTitle: { fontSize: 13, fontWeight: "700", color: "#111", marginBottom: 2 },
+  notifTitle: {
+    fontSize: 13,
+    fontWeight: "700",
+    color: "#111",
+    marginBottom: 2,
+  },
   notifBody: { fontSize: 12, color: "#555", lineHeight: 17 },
   notifTime: { fontSize: 11, color: "#aaa", marginTop: 4 },
 
   loadMoreBtn: {
-    marginTop: 4, marginBottom: 8, alignSelf: "center",
-    backgroundColor: "#e0e0ee", borderRadius: 20,
-    paddingHorizontal: 18, paddingVertical: 8,
+    marginTop: 4,
+    marginBottom: 8,
+    alignSelf: "center",
+    backgroundColor: "#e0e0ee",
+    borderRadius: 20,
+    paddingHorizontal: 18,
+    paddingVertical: 8,
   },
   loadMoreText: { fontSize: 13, color: NAVY, fontWeight: "600" },
 });

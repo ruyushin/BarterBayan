@@ -19,6 +19,7 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
+import { ProposeTradeModal } from "../../components/ProposeTradeModal";
 import { auth } from "../../firebaseConfig";
 import {
   addComment,
@@ -210,7 +211,6 @@ export default function Screen() {
 
 // ─── ItemCard ─────────────────────────────────────────────────────────────────
 function ItemCard({ item, onCommentAdded }: any) {
-  // PATCH: add router for profile navigation
   const router = useRouter();
 
   const [isLiked, setIsLiked] = useState(false);
@@ -230,10 +230,18 @@ function ItemCard({ item, onCommentAdded }: any) {
   const [deleteToastVisible, setDeleteToastVisible] = useState(false);
   const [deletedCommentData, setDeletedCommentData] = useState<any>(null);
   const deleteTimerRef = useRef<NodeJS.Timeout | null>(null);
+
+  // ── Trade proposal state ──────────────────────────────────────────────────
+  const [tradeModalVisible, setTradeModalVisible] = useState(false);
+  // ─────────────────────────────────────────────────────────────────────────
+
   const currentUser = auth.currentUser?.uid;
   const currentUserName = auth.currentUser?.displayName || "Anonymous";
   const currentUserPhotoURL =
     auth.currentUser?.photoURL || "https://i.pravatar.cc/150?img=1";
+
+  // Is this item owned by the current user?
+  const isOwnItem = !!currentUser && currentUser === item?.ownerId;
 
   const imagesList =
     Array.isArray(item?.images) && item.images.length > 0
@@ -298,7 +306,7 @@ function ItemCard({ item, onCommentAdded }: any) {
       Alert.alert("Please log in", "You must be logged in to send messages");
       return;
     }
-    if (currentUser === item.ownerId) {
+    if (isOwnItem) {
       Alert.alert("Cannot message", "You cannot message yourself");
       return;
     }
@@ -472,7 +480,14 @@ function ItemCard({ item, onCommentAdded }: any) {
 
   return (
     <View style={styles.card}>
-      {/* ── HEADER — PATCH: userInfo wrapped in TouchableOpacity for profile nav ── */}
+      {/* ── ProposeTradeModal — rendered last so it sits above everything ── */}
+      <ProposeTradeModal
+        visible={tradeModalVisible}
+        targetItem={item}
+        onClose={() => setTradeModalVisible(false)}
+      />
+
+      {/* ── HEADER ── */}
       <View style={styles.cardHeader}>
         <TouchableOpacity
           style={styles.userInfo}
@@ -576,17 +591,42 @@ function ItemCard({ item, onCommentAdded }: any) {
         <Text style={styles.description}>{item.description}</Text>
       </View>
 
-      {/* ACTION BUTTONS */}
-      <View style={styles.actionButtons}>
-        <TouchableOpacity
-          style={styles.actionBtn}
-          onPress={handleSendMessage}
-          disabled={commentsLoading}
-        >
-          <Ionicons name="send" size={14} color="#5D5FEF" />
-          <Text style={styles.actionBtnText}>Message</Text>
-        </TouchableOpacity>
-      </View>
+      {/* ── ACTION BUTTONS ── */}
+      {isOwnItem ? (
+        // Own item: show a neutral label instead
+        <View style={styles.ownItemBanner}>
+          <Ionicons
+            name="information-circle-outline"
+            size={14}
+            color="#AAAAAA"
+          />
+          <Text style={styles.ownItemText}>Your listing</Text>
+        </View>
+      ) : (
+        // Other's item: Message + Propose Trade
+        <View style={styles.actionButtons}>
+          <TouchableOpacity
+            style={styles.actionBtn}
+            onPress={handleSendMessage}
+            disabled={commentsLoading}
+            activeOpacity={0.8}
+          >
+            <Ionicons name="send" size={14} color="#5D5FEF" />
+            <Text style={styles.actionBtnText}>Message</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[styles.actionBtn, styles.actionBtnTrade]}
+            onPress={() => setTradeModalVisible(true)}
+            activeOpacity={0.8}
+          >
+            <Ionicons name="swap-horizontal" size={14} color="#C9A227" />
+            <Text style={[styles.actionBtnText, styles.actionBtnTextTrade]}>
+              Propose Trade
+            </Text>
+          </TouchableOpacity>
+        </View>
+      )}
 
       {/* FOOTER STATS */}
       <View style={styles.cardFooter}>
@@ -811,6 +851,8 @@ const styles = StyleSheet.create({
   dropdownItem: { paddingVertical: 12, paddingHorizontal: 15 },
   dropdownText: { fontSize: 13, color: "#333" },
   dropdownTextActive: { fontWeight: "700", color: "#5E3EA1" },
+
+  // Card
   card: {
     backgroundColor: "#FFFFFF",
     marginHorizontal: 12,
@@ -837,6 +879,8 @@ const styles = StyleSheet.create({
   username: { fontWeight: "700", fontSize: 14, color: "#1F1F1F" },
   date: { fontSize: 12, color: "#999", marginTop: 2 },
   badgeContainer: { padding: 6 },
+
+  // Image
   cardImage: { width: "100%", height: 220, backgroundColor: "#F5F5F5" },
   cardImageContainer: {
     position: "relative",
@@ -884,31 +928,61 @@ const styles = StyleSheet.create({
     textAlign: "center",
     flex: 1,
   },
+
+  // Content
   cardContent: { padding: 14 },
   title: { fontWeight: "700", fontSize: 16, color: "#1F1F1F", marginBottom: 6 },
   description: { fontSize: 13, color: "#666", lineHeight: 18 },
+
+  // ── Action buttons ──
   actionButtons: {
+    flexDirection: "row",
     paddingHorizontal: 14,
     paddingVertical: 10,
     borderTopWidth: 1,
     borderTopColor: "#F0F0F0",
+    gap: 10,
   },
   actionBtn: {
+    flex: 1,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
     backgroundColor: "#EFF1FF",
-    paddingVertical: 8,
-    paddingHorizontal: 12,
+    paddingVertical: 9,
+    paddingHorizontal: 10,
     borderRadius: 8,
-    alignSelf: "flex-start",
+    gap: 5,
+  },
+  actionBtnTrade: {
+    backgroundColor: "#FEF9EC",
+    borderWidth: 1,
+    borderColor: "#F0D98A",
   },
   actionBtnText: {
     fontSize: 12,
     fontWeight: "600",
     color: "#5D5FEF",
-    marginLeft: 6,
   },
+  actionBtnTextTrade: {
+    color: "#C9A227",
+  },
+
+  // Own item banner
+  ownItemBanner: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 5,
+    paddingVertical: 9,
+    paddingHorizontal: 14,
+    borderTopWidth: 1,
+    borderTopColor: "#F0F0F0",
+    backgroundColor: "#FAFAFA",
+  },
+  ownItemText: { fontSize: 12, color: "#AAAAAA", fontWeight: "500" },
+
+  // Footer
   cardFooter: {
     paddingHorizontal: 14,
     paddingVertical: 12,
@@ -918,6 +992,8 @@ const styles = StyleSheet.create({
   statRow: { flexDirection: "row", justifyContent: "space-around" },
   stat: { alignItems: "center", paddingHorizontal: 12 },
   statText: { fontSize: 12, color: "#666", marginTop: 4 },
+
+  // Comments
   commentsSection: {
     borderTopWidth: 1,
     borderTopColor: "#F0F0F0",
@@ -993,6 +1069,8 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
+
+  // Misc
   loaderContainer: { flex: 1, justifyContent: "center", alignItems: "center" },
   loadingText: { marginTop: 10, fontSize: 14, color: "#777" },
   emptyContainer: {
@@ -1002,15 +1080,6 @@ const styles = StyleSheet.create({
     marginVertical: 50,
   },
   emptyText: { fontSize: 14, color: "#777", textAlign: "center" },
-  nav: {
-    flexDirection: "row",
-    borderTopWidth: 1,
-    borderColor: "#DDD",
-    backgroundColor: "white",
-    paddingVertical: 8,
-  },
-  navItem: { flex: 1, alignItems: "center" },
-  navText: { fontSize: 10, color: "#777" },
   deleteToast: {
     position: "absolute",
     top: 20,
@@ -1037,44 +1106,4 @@ const styles = StyleSheet.create({
     color: "#5D5FEF",
     marginLeft: 12,
   },
-
-  // Unused legacy delete modal styles kept for reference
-  deleteModalOverlay: {
-    flex: 1,
-    backgroundColor: "rgba(0, 0, 0, 0.5)",
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  deleteModalContent: {
-    backgroundColor: "white",
-    borderRadius: 16,
-    padding: 24,
-    width: "80%",
-    alignItems: "center",
-  },
-  deleteModalHeader: { marginBottom: 16 },
-  deleteModalTitle: {
-    fontSize: 18,
-    fontWeight: "700",
-    color: "#1F1F1F",
-    marginBottom: 8,
-  },
-  deleteModalText: {
-    fontSize: 14,
-    color: "#666",
-    textAlign: "center",
-    marginBottom: 20,
-  },
-  deleteModalButtons: { flexDirection: "row", width: "100%", gap: 12 },
-  deleteModalBtn: {
-    flex: 1,
-    paddingVertical: 12,
-    borderRadius: 8,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  deleteModalBtnCancel: { backgroundColor: "#F0F0F0" },
-  deleteModalBtnDelete: { backgroundColor: "#FF6B6B" },
-  deleteModalBtnTextCancel: { fontSize: 14, fontWeight: "600", color: "#333" },
-  deleteModalBtnTextDelete: { fontSize: 14, fontWeight: "600", color: "white" },
 });
