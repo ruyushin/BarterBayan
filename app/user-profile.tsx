@@ -9,27 +9,27 @@
 import { Ionicons } from "@expo/vector-icons";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import {
-  collection,
-  doc,
-  getDoc,
-  getDocs,
-  limit,
-  orderBy,
-  query,
-  where,
+    collection,
+    doc,
+    getDoc,
+    getDocs,
+    limit,
+    orderBy,
+    query,
+    where,
 } from "firebase/firestore";
 import React, { useEffect, useRef, useState } from "react";
 import {
-  ActivityIndicator,
-  Animated,
-  Dimensions,
-  Image,
-  SafeAreaView,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TouchableOpacity,
-  View,
+    ActivityIndicator,
+    Animated,
+    Dimensions,
+    Image,
+    SafeAreaView,
+    ScrollView,
+    StyleSheet,
+    Text,
+    TouchableOpacity,
+    View,
 } from "react-native";
 import { ProductDetailModal } from "../components/ProductDetailModal";
 import { auth, db } from "../firebaseConfig";
@@ -71,6 +71,8 @@ const formatTime = (timestamp: any): string => {
 // ─── Types ────────────────────────────────────────────────────────────────────
 interface PublicUserData {
   username: string;
+  firstName?: string;
+  lastName?: string;
   bio?: string;
   avatarUrl?: string;
   rating: number;
@@ -280,6 +282,8 @@ export default function UserProfileScreen() {
       const d = snap.data();
       setUserData({
         username: d.username || d.displayName || "User",
+        firstName: d.firstName,
+        lastName: d.lastName,
         bio: d.bio || "",
         avatarUrl: d.avatarUrl || d.photoURL || null,
         rating:
@@ -404,7 +408,9 @@ export default function UserProfileScreen() {
           <Ionicons name="chevron-back" size={24} color="#fff" />
         </TouchableOpacity>
         <Text style={styles.headerTitle} numberOfLines={1}>
-          {userData.username}
+          {userData.firstName && userData.lastName
+            ? `${userData.firstName} ${userData.lastName}`
+            : userData.username}
         </Text>
         {!isOwnProfile ? (
           <TouchableOpacity
@@ -450,7 +456,11 @@ export default function UserProfileScreen() {
           {/* ── Identity ── */}
           <View style={styles.identityWrap}>
             <View style={styles.nameRow}>
-              <Text style={styles.username}>{userData.username}</Text>
+              <Text style={styles.username}>
+                {userData.firstName && userData.lastName
+                  ? `${userData.firstName} ${userData.lastName}`
+                  : userData.username}
+              </Text>
               {userData.isVerified && (
                 <View style={styles.verifiedBadge}>
                   <Ionicons name="checkmark" size={10} color="#fff" />

@@ -3,6 +3,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { initializeApp } from "firebase/app";
 import { FacebookAuthProvider, getAuth, GoogleAuthProvider, signInWithRedirect } from "firebase/auth";
 import { getFirestore } from "firebase/firestore";
+import { getFunctions } from "firebase/functions";
 import { Platform } from 'react-native';
 
 const firebaseConfig = {
@@ -25,6 +26,7 @@ export const auth = Platform.OS === 'web'
     });
 
 export const db = getFirestore(app);
+export const functions = getFunctions(app);
 export const googleProvider = new GoogleAuthProvider();
 export const facebookProvider = new FacebookAuthProvider();
 

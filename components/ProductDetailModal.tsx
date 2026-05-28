@@ -4,20 +4,20 @@ import * as MediaLibrary from "expo-media-library";
 import { useRouter } from "expo-router";
 import React, { useEffect, useState } from "react";
 import {
-  ActivityIndicator,
-  Alert,
-  Dimensions,
-  FlatList,
-  Image,
-  ImageStyle,
-  Modal,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextStyle,
-  TouchableOpacity,
-  View,
-  ViewStyle,
+    ActivityIndicator,
+    Alert,
+    Dimensions,
+    FlatList,
+    Image,
+    ImageStyle,
+    Modal,
+    ScrollView,
+    StyleSheet,
+    Text,
+    TextStyle,
+    TouchableOpacity,
+    View,
+    ViewStyle,
 } from "react-native";
 import { LongPressGestureHandler, State } from "react-native-gesture-handler";
 import { auth } from "../firebaseConfig";
@@ -359,7 +359,11 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
                 style={styles.ownerAvatar}
               />
               <View style={styles.ownerDetails}>
-                <Text style={styles.ownerName}>{ownerInfo.username}</Text>
+                <Text style={styles.ownerName}>
+                  {ownerInfo.firstName && ownerInfo.lastName
+                    ? `${ownerInfo.firstName} ${ownerInfo.lastName}`
+                    : ownerInfo.username || "Unknown User"}
+                </Text>
                 <View style={styles.ratingContainer}>
                   <Ionicons name="star" size={14} color="#FFB800" />
                   <Text style={styles.rating}>

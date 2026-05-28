@@ -313,7 +313,11 @@ export default function ProductDetailsScreen() {
                   style={styles.ownerAvatar}
                 />
                 <View style={styles.ownerDetails}>
-                  <Text style={styles.ownerName}>{ownerInfo.username}</Text>
+                  <Text style={styles.ownerName}>
+                    {ownerInfo.firstName && ownerInfo.lastName
+                      ? `${ownerInfo.firstName} ${ownerInfo.lastName}`
+                      : ownerInfo.username || 'Unknown User'}
+                  </Text>
                   <View style={styles.ratingContainer}>
                     <Ionicons name="star" size={14} color="#FFB800" />
                     <Text style={styles.rating}>

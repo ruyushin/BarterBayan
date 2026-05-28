@@ -1,232 +1,402 @@
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import { useRouter } from 'expo-router';
-import { onAuthStateChanged, sendEmailVerification, signOut } from 'firebase/auth';
-import { doc, getDoc, setDoc } from 'firebase/firestore';
-import React, { useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Alert, AppState, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
-import { auth, db } from '../../firebaseConfig';
+import { onAuthStateChanged, reload, sendEmailVerification } from 'firebase/auth';
+import React, { useEffect, useState } from 'react';
+import {
+  ActivityIndicator,
+  Alert,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
+} from 'react-native';
+import { auth } from '../../firebaseConfig';
 
 export default function VerifyEmailScreen() {
-  const [loading, setLoading] = useState(false);
-  const [resendLoading, setResendLoading] = useState(false);
-  const [currentUser, setCurrentUser] = useState<any | null>(auth.currentUser);
-  const [authReady, setAuthReady] = useState(false);
-  const [authChecking, setAuthChecking] = useState(true);
-  const appState = useRef(AppState.currentState);
-  
-  // --- Router ---
   const router = useRouter();
+  const [user, setUser] = useState<any>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isVerified, setIsVerified] = useState(false);
+  const [isSending, setIsSending] = useState(false);
+  const [resendCountdown, setResendCountdown] = useState(0);
 
+  // Check authentication and email verification status
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (user) => {
-      setCurrentUser(user);
-      setAuthReady(true);
-      setAuthChecking(false);
+    const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
+      if (!currentUser) {
+        router.replace('/(auth)/login');
+        return;
+      }
+
+      setUser(currentUser);
+
+      try {
+        await reload(currentUser);
+        if (currentUser.emailVerified) {
+          setIsVerified(true);
+        }
+      } catch (err) {
+        console.error('Error reloading user:', err);
+      }
+
+      setIsLoading(false);
     });
 
     return () => unsubscribe();
-  }, []);
-
-  const ensureUserDoc = async (user: any) => {
-    if (!user?.uid) return;
-    try {
-      const userRef = doc(db, 'users', user.uid);
-      const userSnap = await getDoc(userRef);
-
-      if (!userSnap.exists()) {
-        await setDoc(userRef, {
-          email: user.email,
-          username: user.email?.split('@')[0],
-          createdAt: new Date().toISOString(),
-          rating: 5.0,
-          tradeCount: 0,
-          emailVerified: true,
-        });
-      } else if (!userSnap.data()?.emailVerified) {
-        await setDoc(userRef, { emailVerified: true }, { merge: true });
-      }
-    } catch (err: any) {
-      console.warn('Unable to ensure Firestore user document:', err);
-    }
-  };
-
-  const checkVerification = async () => {
-    setLoading(true);
-    const user = auth.currentUser ?? currentUser;
-    if (!user) {
-      setLoading(false);
-      if (authReady) {
-        Alert.alert('Not signed in', 'Please sign in again.');
-        router.replace('/login');
-      } else {
-        Alert.alert('Please wait', 'Checking your sign-in state before verifying.');
-      }
-      return;
-    }
-
-    try {
-      // Force Firebase to refresh user data from server
-      await auth.currentUser?.reload();
-      const freshUser = auth.currentUser ?? user;
-      if (freshUser?.emailVerified) {
-        // Make sure we have a Firestore user document so the rest of the app can work
-        ensureUserDoc(freshUser).catch((err) => console.warn('Failed to update user doc after verification:', err));
-
-        Alert.alert('Verified!', 'Your email is confirmed. Welcome!');
-        router.replace('/(auth)/terms');
-      } else {
-        Alert.alert('Not Verified', 'We could not detect the verification yet. Please make sure you clicked the link and then return to the app.');
-      }
-    } catch (error: any) {
-      console.error('checkVerification error', error);
-      Alert.alert('Error', error?.message || 'Something went wrong. Please try again.');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  // On web and mobile: keep checking verification state automatically
-  useEffect(() => {
-    const checkOnInterval = setInterval(async () => {
-      const user = auth.currentUser;
-      if (!user) return;
-
-      try {
-        await user.reload();
-        if (user.emailVerified) {
-          router.replace('/(auth)/terms');
-          ensureUserDoc(user).catch((err) => console.warn('Failed to update user doc after periodic verification:', err));
-        }
-      } catch (err) {
-        console.error('Periodic verification check failed', err);
-      }
-    }, 4000);
-
-    const subscription = AppState.addEventListener?.('change', async (nextAppState) => {
-      if (appState.current.match(/inactive|background/) && nextAppState === 'active') {
-        const user = auth.currentUser;
-        if (!user) return;
-
-        try {
-          await user.reload();
-          if (user.emailVerified) {
-            router.replace('/(auth)/terms');
-            ensureUserDoc(user).catch((err) => console.warn('Failed to update user doc after AppState verification:', err));
-          }
-        } catch (err) {
-          console.error('AppState verification check failed', err);
-        }
-      }
-      appState.current = nextAppState;
-    });
-
-    return () => {
-      clearInterval(checkOnInterval);
-      if (subscription?.remove) subscription.remove();
-    };
   }, [router]);
 
-  const handleResend = async () => {
-    const user = auth.currentUser ?? currentUser;
-    if (!user) {
-      if (authReady) {
-        Alert.alert('Not signed in', 'Please sign in again to resend the verification email.');
-        router.replace('/login');
-      } else {
-        Alert.alert('Please wait', 'Checking your sign-in state before resending the verification email.');
+  // Auto-check verification every 3 seconds
+  useEffect(() => {
+    if (!user || isVerified) return;
+
+    const interval = setInterval(async () => {
+      try {
+        await reload(user);
+        if (user.emailVerified) {
+          setIsVerified(true);
+        }
+      } catch (err) {
+        console.error('Error checking verification:', err);
       }
-      return;
-    }
+    }, 3000);
 
-    setResendLoading(true);
+    return () => clearInterval(interval);
+  }, [user, isVerified]);
+
+  // Countdown timer for resend button
+  useEffect(() => {
+    if (resendCountdown <= 0) return;
+    const timer = setTimeout(() => setResendCountdown(resendCountdown - 1), 1000);
+    return () => clearTimeout(timer);
+  }, [resendCountdown]);
+
+  // Navigate after verified
+  useEffect(() => {
+    if (isVerified) {
+      const timer = setTimeout(() => {
+        router.replace('/(auth)/terms');
+      }, 1500);
+      return () => clearTimeout(timer);
+    }
+  }, [isVerified, router]);
+
+  const handleResendEmail = async () => {
+    if (!user) return;
+
+    setIsSending(true);
     try {
-      await user.reload();
       await sendEmailVerification(user);
-      Alert.alert("Sent!", "A new verification link has been sent to your Gmail.");
-    } catch (err: any) {
-      console.error('Resend verification error', err);
-      Alert.alert("Error", err?.message || "Could not resend email. Try again later.");
+      Alert.alert('Email Sent', 'Verification email sent! Check your inbox and spam folder.');
+      setResendCountdown(60);
+    } catch (error: any) {
+      console.error('Resend error:', error);
+      if (error?.code === 'auth/too-many-requests') {
+        Alert.alert(
+          'Too Many Attempts',
+          'Firebase has temporarily blocked email sending. Please wait a few minutes before trying again.'
+        );
+        setResendCountdown(120);
+      } else {
+        Alert.alert('Error', error?.message || 'Failed to send verification email.');
+      }
     } finally {
-      setResendLoading(false);
+      setIsSending(false);
     }
   };
 
-  const handleSignOut = async () => {
-    await signOut(auth);
-    router.replace('/login');
+  const handleCheckNow = async () => {
+    if (!user) return;
+
+    setIsLoading(true);
+    try {
+      await reload(user);
+      if (user.emailVerified) {
+        setIsVerified(true);
+      } else {
+        Alert.alert(
+          'Not Verified Yet',
+          'Please check your email and click the verification link, then try again.'
+        );
+      }
+    } catch (err) {
+      console.error('Error:', err);
+      Alert.alert('Error', 'Unable to check verification status. Please try again.');
+    } finally {
+      setIsLoading(false);
+    }
   };
+
+  if (isLoading) {
+    return (
+      <View style={styles.loadingContainer}>
+        <ActivityIndicator size="large" color="#2F2F6F" />
+      </View>
+    );
+  }
+
+  if (isVerified) {
+    return (
+      <View style={styles.container}>
+        <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+          <View style={styles.successContainer}>
+            <MaterialIcons name="check-circle" size={80} color="#5CB85C" />
+            <Text style={styles.successTitle}>Email Verified!</Text>
+            <Text style={styles.successMessage}>
+              Your email address has been successfully verified.
+            </Text>
+            <Text style={styles.redirectText}>Proceeding to next step...</Text>
+          </View>
+        </ScrollView>
+      </View>
+    );
+  }
 
   return (
     <View style={styles.container}>
-      <View style={styles.iconContainer}>
-        <MaterialIcons name="mark-email-read" size={80} color="#2F2F6F" />
-      </View>
+      <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+        <View style={styles.content}>
 
-      <Text style={styles.title}>Check your Gmail!</Text>
-      <Text style={styles.text}>
-        <Text>We sent a verification link to:</Text>
-        <Text>{"\n"}</Text>
-        <Text style={styles.emailText}>{currentUser?.email ?? (authChecking ? 'Loading...' : 'your email')}</Text>
-      </Text>
-      
-      <TouchableOpacity 
-        style={[styles.button, (loading || !currentUser || authChecking) && styles.buttonDisabled]} 
-        onPress={checkVerification}
-        disabled={loading || !currentUser || authChecking}
-      >
-        {loading ? (
-          <ActivityIndicator color="#fff" />
-        ) : (
-          <Text style={styles.buttonText}>I&apos;ve Clicked the Link</Text>
-        )}
-      </TouchableOpacity>
+          {/* Header */}
+          <View style={styles.header}>
+            <MaterialIcons name="mail-outline" size={80} color="#2F2F6F" />
+            <Text style={styles.title}>Verify Your Email</Text>
+            <Text style={styles.subtitle}>We've sent a verification link to:</Text>
+            <Text style={styles.email}>{user?.email}</Text>
+          </View>
 
-      <TouchableOpacity onPress={handleResend} disabled={resendLoading || authChecking}>
-        <Text style={[styles.resendText, (resendLoading || authChecking) && styles.resendDisabled]}>
-          {resendLoading ? 'Sending...' : 'Didn\'t get an email? '}
-          <Text style={styles.resendLink}>{resendLoading || authChecking ? '' : 'Resend'}</Text>
-        </Text>
-      </TouchableOpacity>
+          {/* Instructions */}
+          <View style={styles.instructionsContainer}>
+            <View style={styles.instructionStep}>
+              <View style={styles.stepNumber}>
+                <Text style={styles.stepNumberText}>1</Text>
+              </View>
+              <View style={styles.stepContent}>
+                <Text style={styles.stepTitle}>Check Your Email</Text>
+                <Text style={styles.stepText}>
+                  Look for the verification email from BarterBayan in your inbox or spam folder.
+                </Text>
+              </View>
+            </View>
 
-      <TouchableOpacity style={styles.cancelButton} onPress={handleSignOut}>
-        <Text style={styles.cancelText}>Cancel / Back to Login</Text>
-      </TouchableOpacity>
+            <View style={styles.instructionStep}>
+              <View style={styles.stepNumber}>
+                <Text style={styles.stepNumberText}>2</Text>
+              </View>
+              <View style={styles.stepContent}>
+                <Text style={styles.stepTitle}>Click the Link</Text>
+                <Text style={styles.stepText}>
+                  Click the verification link in the email.
+                </Text>
+              </View>
+            </View>
+
+            <View style={styles.instructionStep}>
+              <View style={styles.stepNumber}>
+                <Text style={styles.stepNumberText}>3</Text>
+              </View>
+              <View style={styles.stepContent}>
+                <Text style={styles.stepTitle}>Continue</Text>
+                <Text style={styles.stepText}>
+                  Return to the app and tap "I've Verified My Email" below.
+                </Text>
+              </View>
+            </View>
+          </View>
+
+          {/* Check Button */}
+          <TouchableOpacity
+            style={[styles.button, styles.primaryButton]}
+            onPress={handleCheckNow}
+            disabled={isLoading}
+          >
+            {isLoading ? (
+              <ActivityIndicator size="small" color="#FFFFFF" />
+            ) : (
+              <Text style={styles.buttonText}>I've Verified My Email</Text>
+            )}
+          </TouchableOpacity>
+
+          {/* Resend Button */}
+          <TouchableOpacity
+            style={[
+              styles.button,
+              styles.secondaryButton,
+              (isSending || resendCountdown > 0) ? styles.buttonDisabled : null,
+            ]}
+            onPress={handleResendEmail}
+            disabled={isSending || resendCountdown > 0}
+          >
+            {isSending ? (
+              <ActivityIndicator size="small" color="#2F2F6F" />
+            ) : (
+              <Text style={[styles.secondaryButtonText, resendCountdown > 0 ? styles.buttonTextDisabled : null]}>
+                {resendCountdown > 0
+                  ? `Resend Email in ${resendCountdown}s`
+                  : 'Resend Verification Email'}
+              </Text>
+            )}
+          </TouchableOpacity>
+
+          {/* Footer */}
+          <View style={styles.footer}>
+            <Text style={styles.footerText}>
+              Didn't receive the email? Check your spam or junk folder.
+            </Text>
+          </View>
+
+        </View>
+      </ScrollView>
     </View>
   );
-} // <--- THIS WAS THE MISSING BRACE THAT CAUSED THE RED LINES
+}
 
 const styles = StyleSheet.create({
-  container: { 
-    flex: 1, 
-    justifyContent: 'center', 
-    alignItems: 'center', 
-    padding: 25, 
-    backgroundColor: '#ffffff' 
+  container: {
+    flex: 1,
+    backgroundColor: '#FFFFFF',
   },
-  iconContainer: {
-    marginBottom: 30,
-    backgroundColor: '#f0f0f0',
-    padding: 20,
-    borderRadius: 100,
-  },
-  title: { fontSize: 28, fontWeight: 'bold', color: '#000000', marginBottom: 15 },
-  text: { textAlign: 'center', marginBottom: 40, color: '#333333', fontSize: 16, lineHeight: 24 },
-  emailText: { color: '#2F2F6F', fontWeight: 'bold' },
-  button: { 
-    backgroundColor: '#2F2F6F', 
-    padding: 18, 
-    borderRadius: 12, 
-    width: '100%', 
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
     alignItems: 'center',
-    marginBottom: 20
+    backgroundColor: '#FFFFFF',
+  },
+  scrollContent: {
+    flexGrow: 1,
+    paddingVertical: 40,
+  },
+  content: {
+    paddingHorizontal: 20,
+    paddingBottom: 30,
+  },
+  header: {
+    alignItems: 'center',
+    marginBottom: 40,
+  },
+  title: {
+    fontSize: 28,
+    fontWeight: 'bold',
+    color: '#2F2F6F',
+    marginTop: 20,
+    marginBottom: 10,
+  },
+  subtitle: {
+    fontSize: 14,
+    color: '#666666',
+    marginTop: 10,
+  },
+  email: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#2F2F6F',
+    marginTop: 8,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    backgroundColor: '#F0F0F0',
+    borderRadius: 8,
+    marginBottom: 12,
+  },
+  instructionsContainer: {
+    marginBottom: 30,
+  },
+  instructionStep: {
+    flexDirection: 'row',
+    marginBottom: 20,
+    paddingHorizontal: 10,
+  },
+  stepNumber: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: '#2F2F6F',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 15,
+    marginTop: 2,
+  },
+  stepNumberText: {
+    color: '#FFFFFF',
+    fontSize: 18,
+    fontWeight: 'bold',
+  },
+  stepContent: {
+    flex: 1,
+  },
+  stepTitle: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#1A1A1A',
+    marginBottom: 4,
+  },
+  stepText: {
+    fontSize: 13,
+    color: '#666666',
+    lineHeight: 18,
+  },
+  button: {
+    height: 55,
+    borderRadius: 12,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  primaryButton: {
+    backgroundColor: '#2F2F6F',
+  },
+  secondaryButton: {
+    backgroundColor: '#F0F0F0',
+    borderWidth: 1,
+    borderColor: '#2F2F6F',
   },
   buttonDisabled: {
+    opacity: 0.6,
+  },
+  buttonText: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  secondaryButtonText: {
+    color: '#2F2F6F',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  buttonTextDisabled: {
     opacity: 0.7,
   },
-  buttonText: { color: '#fff', fontWeight: 'bold', fontSize: 16 },
-  resendText: { color: '#333333', fontSize: 14 },
-  resendLink: { color: '#2F2F6F', fontWeight: '700' },
-  cancelButton: { marginTop: 50 },
-  cancelText: { color: '#2F2F6F', fontWeight: '600', fontSize: 14 },
-  resendDisabled: { opacity: 0.6 },
+  footer: {
+    marginTop: 20,
+    paddingHorizontal: 10,
+  },
+  footerText: {
+    fontSize: 12,
+    color: '#999999',
+    textAlign: 'center',
+    lineHeight: 16,
+  },
+  successContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+  },
+  successTitle: {
+    fontSize: 28,
+    fontWeight: 'bold',
+    color: '#2F2F6F',
+    marginTop: 20,
+    marginBottom: 10,
+  },
+  successMessage: {
+    fontSize: 16,
+    color: '#666666',
+    textAlign: 'center',
+    marginBottom: 20,
+  },
+  redirectText: {
+    fontSize: 14,
+    color: '#999999',
+    fontStyle: 'italic',
+  },
 });

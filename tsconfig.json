@@ -3,7 +3,7 @@
   "compilerOptions": {
     "strict": true,
     "jsx": "react-native",
-     "allowImportingTsExtensions": true,
+    "allowImportingTsExtensions": true,
     "noEmit": true,
     "paths": {
       "@/*": [
@@ -15,6 +15,7 @@
     "**/*.ts",
     "**/*.tsx",
     ".expo/types/**/*.ts",
-    "expo-env.d.ts"
-, "firebaseConfig.ts"  ]
+    "expo-env.d.ts",
+    "firebaseConfig.ts"
+  ]
 }

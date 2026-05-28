@@ -1,39 +1,35 @@
-//edit-profile.tsx
+import { Ionicons } from "@expo/vector-icons";
 import * as ImagePicker from "expo-image-picker";
 import { useRouter } from "expo-router";
 import {
-    onAuthStateChanged,
-    sendPasswordResetEmail,
-    updateProfile,
-    User,
+  deleteUser,
+  onAuthStateChanged,
+  sendPasswordResetEmail,
+  updateProfile,
+  User,
 } from "firebase/auth";
-import { doc, getDoc, updateDoc } from "firebase/firestore";
+import { deleteDoc, doc, getDoc, updateDoc } from "firebase/firestore";
 import React, { useEffect, useRef, useState } from "react";
 import {
-    ActivityIndicator,
-    Alert,
-    Animated,
-    Image,
-    KeyboardAvoidingView,
-    Linking,
-    Platform,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TextInput,
-    TouchableOpacity,
-    View,
+  ActivityIndicator,
+  Alert,
+  Animated,
+  Image,
+  KeyboardAvoidingView,
+  Linking,
+  Platform,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
 } from "react-native";
 import { auth, db } from "../firebaseConfig";
 
 // ─── Cloudinary Config ────────────────────────────────────────────────────────
-// Make sure these are set in your .env file:
-//   EXPO_PUBLIC_CLOUDINARY_CLOUD_NAME=your_cloud_name
-//   EXPO_PUBLIC_CLOUDINARY_UPLOAD_PRESET=barterbayan_avatars
-const CLOUDINARY_CLOUD_NAME =
-  process.env.EXPO_PUBLIC_CLOUDINARY_CLOUD_NAME ?? "";
-const CLOUDINARY_UPLOAD_PRESET =
-  process.env.EXPO_PUBLIC_CLOUDINARY_UPLOAD_PRESET ?? "";
+const CLOUDINARY_CLOUD_NAME = process.env.EXPO_PUBLIC_CLOUDINARY_CLOUD_NAME ?? "";
+const CLOUDINARY_UPLOAD_PRESET = process.env.EXPO_PUBLIC_CLOUDINARY_UPLOAD_PRESET ?? "";
 const CLOUDINARY_UPLOAD_URL = `https://api.cloudinary.com/v1_1/${CLOUDINARY_CLOUD_NAME}/image/upload`;
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -46,53 +42,92 @@ const SUCCESS_GREEN = "#065F46";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 interface FormState {
-  username: string;
+  firstName: string;
+  middleName: string;
+  lastName: string;
   phone: string;
   bio: string;
-  location: string;
 }
 
 interface FormErrors {
-  username?: string;
+  firstName?: string;
+  lastName?: string;
   phone?: string;
+}
+
+// ─── Cross-platform Modal ─────────────────────────────────────────────────────
+// React Native's <Modal> is not supported on Expo Web; this renders an
+// absolutely-positioned overlay that works on web + iOS + Android.
+function AppModal({
+  visible,
+  onRequestClose,
+  children,
+}: {
+  visible: boolean;
+  onRequestClose?: () => void;
+  children: React.ReactNode;
+}) {
+  if (!visible) return null;
+  return (
+    <View
+      style={{
+        position: "absolute",
+        top: 0,
+        left: 0,
+        right: 0,
+        bottom: 0,
+        zIndex: 9999,
+        elevation: 99,
+      }}
+    >
+      {children}
+    </View>
+  );
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 function validateForm(values: FormState): FormErrors {
   const errors: FormErrors = {};
 
-  if (!values.username.trim()) {
-    errors.username = "Username is required.";
-  } else if (values.username.trim().length < 3) {
-    errors.username = "Username must be at least 3 characters.";
-  } else if (values.username.trim().length > 30) {
-    errors.username = "Username must be 30 characters or fewer.";
-  } else if (!/^[a-zA-Z0-9_. ]+$/.test(values.username.trim())) {
-    errors.username = "Only letters, numbers, spaces, underscores, and dots.";
+  if (!values.firstName.trim()) {
+    errors.firstName = "First name is required.";
+  } else if (values.firstName.trim().length < 2) {
+    errors.firstName = "First name must be at least 2 characters.";
+  } else if (!/^[a-zA-ZÀ-ÖØ-öø-ÿÑñ\s\-'.]+$/.test(values.firstName.trim())) {
+    errors.firstName = "Only letters, spaces, hyphens, and apostrophes.";
   }
 
-  if (
-    values.phone.trim() &&
-    !/^\+?[0-9\s\-().]{7,20}$/.test(values.phone.trim())
-  ) {
-    errors.phone = "Please enter a valid phone number.";
+  if (!values.lastName.trim()) {
+    errors.lastName = "Last name is required.";
+  } else if (values.lastName.trim().length < 2) {
+    errors.lastName = "Last name must be at least 2 characters.";
+  } else if (!/^[a-zA-ZÀ-ÖØ-öø-ÿÑñ\s\-'.]+$/.test(values.lastName.trim())) {
+    errors.lastName = "Only letters, spaces, hyphens, and apostrophes.";
+  }
+
+  if (values.phone.trim()) {
+    let digits = values.phone.trim().replace(/\D/g, "");
+    if (digits.startsWith("63")) digits = digits.slice(2);
+    else if (digits.startsWith("0")) digits = digits.slice(1);
+    if (digits.length !== 10) {
+      errors.phone = "Enter a valid 10-digit Philippine mobile number.";
+    }
   }
 
   return errors;
 }
 
-// ─── Upload avatar to Cloudinary ──────────────────────────────────────────────
+// ─── Upload to Cloudinary ─────────────────────────────────────────────────────
 async function uploadAvatarToCloudinary(
   localUri: string,
   onProgress: (pct: number) => void,
 ): Promise<string> {
   if (!CLOUDINARY_CLOUD_NAME || !CLOUDINARY_UPLOAD_PRESET) {
     throw new Error(
-      "Cloudinary is not configured. Set EXPO_PUBLIC_CLOUDINARY_CLOUD_NAME and EXPO_PUBLIC_CLOUDINARY_UPLOAD_PRESET in your .env file.",
+      "Cloudinary is not configured. Set EXPO_PUBLIC_CLOUDINARY_CLOUD_NAME and EXPO_PUBLIC_CLOUDINARY_UPLOAD_PRESET.",
     );
   }
 
-  // Read the file as a blob via XHR (reliable in React Native)
   const blob: Blob = await new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
     xhr.onload = () => resolve(xhr.response as Blob);
@@ -102,42 +137,31 @@ async function uploadAvatarToCloudinary(
     xhr.send(null);
   });
 
-  // Build the multipart form body
   const formData = new FormData();
   formData.append("file", blob as any);
   formData.append("upload_preset", CLOUDINARY_UPLOAD_PRESET);
   formData.append("folder", "avatars");
 
-  // Upload with progress tracking via XHR
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
-
     xhr.upload.onprogress = (event) => {
       if (event.lengthComputable) {
         onProgress(Math.round((event.loaded / event.total) * 100));
       }
     };
-
     xhr.onload = () => {
       if (xhr.status >= 200 && xhr.status < 300) {
         try {
           const response = JSON.parse(xhr.responseText);
-          // Use secure_url — the permanent HTTPS URL Cloudinary gives us
           resolve(response.secure_url as string);
         } catch {
           reject(new Error("Invalid response from Cloudinary."));
         }
       } else {
-        reject(
-          new Error(
-            `Upload failed with status ${xhr.status}: ${xhr.responseText}`,
-          ),
-        );
+        reject(new Error(`Upload failed with status ${xhr.status}: ${xhr.responseText}`));
       }
     };
-
     xhr.onerror = () => reject(new Error("Network error during upload."));
-
     xhr.open("POST", CLOUDINARY_UPLOAD_URL, true);
     xhr.send(formData);
   });
@@ -174,27 +198,16 @@ function FloatingInput({
 
   const onFocus = () => {
     setFocused(true);
-    Animated.spring(borderAnim, {
-      toValue: 1,
-      useNativeDriver: false,
-      tension: 120,
-    }).start();
+    Animated.spring(borderAnim, { toValue: 1, useNativeDriver: false, tension: 120 }).start();
   };
   const onBlur = () => {
     setFocused(false);
-    Animated.spring(borderAnim, {
-      toValue: 0,
-      useNativeDriver: false,
-      tension: 120,
-    }).start();
+    Animated.spring(borderAnim, { toValue: 0, useNativeDriver: false, tension: 120 }).start();
   };
 
   const borderColor = borderAnim.interpolate({
     inputRange: [0, 1],
-    outputRange: [
-      error ? ACCENT_RED : "#E0E0E0",
-      error ? ACCENT_RED : DARK_BLUE,
-    ],
+    outputRange: [error ? ACCENT_RED : "#E0E0E0", error ? ACCENT_RED : DARK_BLUE],
   });
 
   const hasValue = value.length > 0;
@@ -219,7 +232,6 @@ function FloatingInput({
         >
           {label}
         </Text>
-
         <TextInput
           style={[
             inputStyles.input,
@@ -240,19 +252,111 @@ function FloatingInput({
           placeholderTextColor="transparent"
           placeholder=" "
         />
-
-        {maxLength && focused && (
-          <Text style={inputStyles.counter}>
-            {value.length}/{maxLength}
-          </Text>
+        {maxLength && focused && !multiline && (
+          <Text style={inputStyles.counter}>{value.length}/{maxLength}</Text>
         )}
       </Animated.View>
 
       {error ? (
-        <Text style={inputStyles.errorText}>⚠ {error}</Text>
+        <View style={inputStyles.errorContainer}>
+          <Ionicons name="alert-circle" size={14} color={ACCENT_RED} style={{ marginTop: 1 }} />
+          <Text style={inputStyles.errorText}>{error}</Text>
+        </View>
       ) : hint ? (
         <Text style={inputStyles.hintText}>{hint}</Text>
       ) : null}
+    </View>
+  );
+}
+
+// ─── Phone Input ──────────────────────────────────────────────────────────────
+function PhoneInput({
+  value,
+  onChangeText,
+  error,
+  editable = true,
+}: {
+  value: string;
+  onChangeText: (text: string) => void;
+  error?: string;
+  editable?: boolean;
+}) {
+  const [focused, setFocused] = useState(false);
+  const borderAnim = useRef(new Animated.Value(0)).current;
+
+  const onFocus = () => {
+    setFocused(true);
+    Animated.spring(borderAnim, { toValue: 1, useNativeDriver: false, tension: 120 }).start();
+  };
+  const onBlur = () => {
+    setFocused(false);
+    Animated.spring(borderAnim, { toValue: 0, useNativeDriver: false, tension: 120 }).start();
+  };
+
+  const borderColor = borderAnim.interpolate({
+    inputRange: [0, 1],
+    outputRange: [error ? ACCENT_RED : "#E0E0E0", error ? ACCENT_RED : DARK_BLUE],
+  });
+
+  let displayValue = value.replace(/^\+63/, "").replace(/\D/g, "");
+  if (displayValue.startsWith("0")) displayValue = displayValue.slice(1);
+
+  const hasValue = displayValue.length > 0;
+  const labelActive = focused || hasValue;
+
+  return (
+    <View style={inputStyles.wrapper}>
+      <Animated.View
+        style={[
+          inputStyles.container,
+          inputStyles.cleanPhoneContainer,
+          { borderColor },
+          !editable && inputStyles.containerDisabled,
+        ]}
+      >
+        <Text
+          style={[
+            inputStyles.label,
+            labelActive && inputStyles.labelActive,
+            focused && inputStyles.labelFocused,
+            error && inputStyles.labelError,
+          ]}
+        >
+          Mobile Number
+        </Text>
+        <View style={inputStyles.phonePrefixInputRow}>
+          <View style={inputStyles.phonePrefixBox}>
+            <Ionicons name="phone-portrait-outline" size={14} color={DARK_BLUE} />
+            <Text style={inputStyles.phonePrefix}>+63</Text>
+          </View>
+          <View style={inputStyles.phoneDivider} />
+          <TextInput
+            style={[inputStyles.phoneTextInput, !editable && inputStyles.inputDisabled]}
+            value={displayValue}
+            onChangeText={(text) => {
+              const digits = text.replace(/\D/g, "").slice(0, 10);
+              onChangeText(digits ? `+63${digits}` : "");
+            }}
+            onFocus={onFocus}
+            onBlur={onBlur}
+            keyboardType="number-pad"
+            maxLength={10}
+            editable={editable}
+            placeholder="9XXXXXXXXX"
+            placeholderTextColor="#CCCCCC"
+          />
+          <Text style={inputStyles.phoneCounter}>{displayValue.length}/10</Text>
+        </View>
+      </Animated.View>
+
+      {error ? (
+        <View style={inputStyles.errorContainer}>
+          <Ionicons name="alert-circle" size={14} color={ACCENT_RED} style={{ marginTop: 1 }} />
+          <Text style={inputStyles.errorText}>{error}</Text>
+        </View>
+      ) : (
+        <Text style={inputStyles.hintText}>Philippine mobile number starting with 9</Text>
+      )}
     </View>
   );
 }
@@ -270,7 +374,6 @@ function SaveButton({
   disabled: boolean;
 }) {
   const scale = useRef(new Animated.Value(1)).current;
-
   const handlePressIn = () =>
     Animated.spring(scale, { toValue: 0.97, useNativeDriver: true }).start();
   const handlePressOut = () =>
@@ -282,11 +385,7 @@ function SaveButton({
   return (
     <Animated.View style={{ transform: [{ scale }] }}>
       <TouchableOpacity
-        style={[
-          saveStyles.btn,
-          { backgroundColor: bgColor },
-          disabled && saveStyles.btnDisabled,
-        ]}
+        style={[saveStyles.btn, { backgroundColor: bgColor }, disabled && saveStyles.btnDisabled]}
         onPress={onPress}
         onPressIn={handlePressIn}
         onPressOut={handlePressOut}
@@ -296,11 +395,12 @@ function SaveButton({
         {saving ? (
           <ActivityIndicator color="#fff" size="small" />
         ) : saved ? (
-          <Text style={[saveStyles.text, { color: textColor }]}>✓ Saved!</Text>
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+            <Ionicons name="checkmark-circle" size={18} color={textColor} />
+            <Text style={[saveStyles.text, { color: textColor }]}>Saved!</Text>
+          </View>
         ) : (
-          <Text style={[saveStyles.text, { color: textColor }]}>
-            Save Changes
-          </Text>
+          <Text style={[saveStyles.text, { color: textColor }]}>Save Changes</Text>
         )}
       </TouchableOpacity>
     </Animated.View>
@@ -310,15 +410,9 @@ function SaveButton({
 // ─── Upload Progress Bar ──────────────────────────────────────────────────────
 function UploadProgress({ progress }: { progress: number }) {
   const widthAnim = useRef(new Animated.Value(0)).current;
-
   useEffect(() => {
-    Animated.timing(widthAnim, {
-      toValue: progress,
-      duration: 200,
-      useNativeDriver: false,
-    }).start();
+    Animated.timing(widthAnim, { toValue: progress, duration: 200, useNativeDriver: false }).start();
   }, [progress]);
-
   return (
     <View style={uploadStyles.track}>
       <Animated.View
@@ -345,62 +439,45 @@ function SectionHeader({ title }: { title: string }) {
 export default function EditProfileScreen() {
   const router = useRouter();
 
-  // Auth
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [authReady, setAuthReady] = useState(false);
 
-  // Form
   const [form, setForm] = useState<FormState>({
-    username: "",
+    firstName: "",
+    middleName: "",
+    lastName: "",
     phone: "",
     bio: "",
-    location: "",
   });
   const [errors, setErrors] = useState<FormErrors>({});
   const [originalForm, setOriginalForm] = useState<FormState | null>(null);
 
-  // Avatar
   const [avatarUri, setAvatarUri] = useState<string | null>(null);
-  const [originalAvatarUri, setOriginalAvatarUri] = useState<string | null>(
-    null,
-  );
+  const [originalAvatarUri, setOriginalAvatarUri] = useState<string | null>(null);
   const [uploadProgress, setUploadProgress] = useState<number>(0);
   const [uploading, setUploading] = useState(false);
 
-  // Email (read-only)
   const [email, setEmail] = useState("");
-
-  // Page state
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [showSaveModal, setShowSaveModal] = useState(false);
+  const [showDiscardModal, setShowDiscardModal] = useState(false);
 
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const slideAnim = useRef(new Animated.Value(24)).current;
 
   const animateIn = () => {
     Animated.parallel([
-      Animated.timing(fadeAnim, {
-        toValue: 1,
-        duration: 350,
-        useNativeDriver: true,
-      }),
-      Animated.spring(slideAnim, {
-        toValue: 0,
-        useNativeDriver: true,
-        tension: 80,
-      }),
+      Animated.timing(fadeAnim, { toValue: 1, duration: 350, useNativeDriver: true }),
+      Animated.spring(slideAnim, { toValue: 0, useNativeDriver: true, tension: 80 }),
     ]).start();
   };
 
   const handleBackPress = () => {
-    try {
-      if (router.canGoBack?.()) {
-        router.back();
-      } else {
-        router.replace("/(tabs)/profile");
-      }
-    } catch {
+    if (router.canGoBack?.()) {
+      router.back();
+    } else {
       router.replace("/(tabs)/profile");
     }
   };
@@ -409,10 +486,7 @@ export default function EditProfileScreen() {
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, async (user) => {
       setAuthReady(true);
-      if (!user) {
-        router.replace("/login");
-        return;
-      }
+      if (!user) { router.replace("/login"); return; }
       setCurrentUser(user);
       setEmail(user.email ?? "");
 
@@ -421,20 +495,38 @@ export default function EditProfileScreen() {
         const docSnap = await getDoc(docRef);
         if (docSnap.exists()) {
           const data = docSnap.data();
+
+          let firstName = data.firstName ?? "";
+          let middleName = data.middleName ?? "";
+          let lastName = data.lastName ?? "";
+
+          if (!firstName && !lastName && data.username) {
+            const parts = data.username.trim().split(" ");
+            firstName = parts[0] ?? "";
+            lastName = parts.slice(1).join(" ") ?? "";
+          }
+          if (!firstName && !lastName && user.displayName) {
+            const parts = user.displayName.trim().split(" ");
+            firstName = parts[0] ?? "";
+            lastName = parts.slice(1).join(" ") ?? "";
+          }
+
           const loaded: FormState = {
-            username: data.username ?? user.displayName ?? "",
+            firstName,
+            middleName,
+            lastName,
             phone: data.phone ?? "",
             bio: data.bio ?? "",
-            location: data.location ?? "",
           };
           setForm(loaded);
           setOriginalForm(loaded);
-          const av: string | null = data.avatarUrl ?? null;
+          const av: string | null = data.avatarUrl ?? data.photo ?? null;
           setAvatarUri(av);
           setOriginalAvatarUri(av);
         }
       } catch (err) {
         console.error("Failed to load profile:", err);
+        Alert.alert("Load Error", "Failed to load your profile. Please try again.");
       } finally {
         setLoading(false);
         animateIn();
@@ -460,24 +552,18 @@ export default function EditProfileScreen() {
   const handlePickAvatar = async () => {
     const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (status !== "granted") {
-      Alert.alert(
-        "Permission required",
-        "Please allow access to your photo library in Settings.",
-        [
-          { text: "Cancel", style: "cancel" },
-          { text: "Open Settings", onPress: () => Linking.openSettings() },
-        ],
-      );
+      Alert.alert("Permission required", "Please allow access to your photo library.", [
+        { text: "Cancel", style: "cancel" },
+        { text: "Open Settings", onPress: () => Linking.openSettings() },
+      ]);
       return;
     }
-
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ImagePicker.MediaTypeOptions.Images,
       allowsEditing: true,
       aspect: [1, 1],
       quality: 0.75,
     });
-
     if (!result.canceled && result.assets.length > 0) {
       setAvatarUri(result.assets[0].uri);
       setSaved(false);
@@ -486,7 +572,7 @@ export default function EditProfileScreen() {
 
   const handleRemoveAvatar = () => {
     Alert.alert(
-      "Remove photo",
+      "Remove Photo",
       "Are you sure you want to remove your profile photo?",
       [
         { text: "Cancel", style: "cancel" },
@@ -507,16 +593,16 @@ export default function EditProfileScreen() {
     const validationErrors = validateForm(form);
     if (Object.keys(validationErrors).length > 0) {
       setErrors(validationErrors);
+      setShowSaveModal(false);
       return;
     }
-
     if (!currentUser) return;
     setSaving(true);
+    setShowSaveModal(false);
 
     try {
       let finalAvatarUrl: string | null = originalAvatarUri;
 
-      // Upload new avatar to Cloudinary if it changed
       if (avatarUri && avatarUri !== originalAvatarUri) {
         setUploading(true);
         setUploadProgress(0);
@@ -529,33 +615,40 @@ export default function EditProfileScreen() {
           setUploadProgress(0);
         }
       } else if (!avatarUri) {
-        // User removed their avatar
         finalAvatarUrl = null;
       }
 
-      // Update Firestore document
+      const nameParts = [
+        form.firstName.trim(),
+        form.middleName.trim(),
+        form.lastName.trim(),
+      ].filter(Boolean);
+      const fullName = nameParts.join(" ");
+
       const docRef = doc(db, "users", currentUser.uid);
       await updateDoc(docRef, {
-        username: form.username.trim(),
+        firstName: form.firstName.trim(),
+        middleName: form.middleName.trim() || null,
+        lastName: form.lastName.trim(),
+        username: fullName,
         phone: form.phone.trim(),
         bio: form.bio.trim(),
-        location: form.location.trim(),
         avatarUrl: finalAvatarUrl ?? "",
+        photo: finalAvatarUrl ?? "",
         updatedAt: new Date(),
       });
 
-      // Sync Firebase Auth display name & photo
       await updateProfile(currentUser, {
-        displayName: form.username.trim(),
+        displayName: fullName,
         photoURL: finalAvatarUrl ?? "",
       });
 
-      // Commit new originals so isDirty resets to false
       const committed: FormState = {
-        username: form.username.trim(),
+        firstName: form.firstName.trim(),
+        middleName: form.middleName.trim(),
+        lastName: form.lastName.trim(),
         phone: form.phone.trim(),
         bio: form.bio.trim(),
-        location: form.location.trim(),
       };
       setOriginalForm(committed);
       setOriginalAvatarUri(finalAvatarUrl);
@@ -563,45 +656,34 @@ export default function EditProfileScreen() {
       setForm(committed);
 
       setSaved(true);
-      setTimeout(() => setSaved(false), 2500);
+      setTimeout(() => {
+        setSaved(false);
+        setTimeout(() => handleBackPress(), 500);
+      }, 1500);
     } catch (err: any) {
       console.error("Save error:", err);
-      Alert.alert(
-        "Save failed",
-        err?.message ?? "Something went wrong. Please try again.",
-      );
+      Alert.alert("Save failed", err?.message ?? "Something went wrong. Please try again.");
     } finally {
       setSaving(false);
     }
   };
 
   // ── Discard ──
-  const handleDiscard = () => {
-    Alert.alert("Discard changes?", "Your unsaved changes will be lost.", [
-      { text: "Keep editing", style: "cancel" },
-      {
-        text: "Discard",
-        style: "destructive",
-        onPress: () => {
-          if (originalForm) setForm(originalForm);
-          setAvatarUri(originalAvatarUri);
-          setErrors({});
-          setSaved(false);
-        },
-      },
-    ]);
+  const confirmDiscard = () => {
+    setShowDiscardModal(false);
+    if (originalForm) setForm(originalForm);
+    setAvatarUri(originalAvatarUri);
+    setErrors({});
+    setSaved(false);
+    setTimeout(() => handleBackPress(), 150);
   };
 
-  // ── Loading ──
   if (!authReady || loading) {
     return (
       <View style={styles.container}>
         <View style={styles.header}>
-          <TouchableOpacity
-            style={styles.backButton}
-            onPress={handleBackPress}
-          >
-            <Text style={styles.backIcon}>‹</Text>
+          <TouchableOpacity style={styles.backButton} onPress={handleBackPress}>
+            <Ionicons name="chevron-back" size={24} color="#fff" />
           </TouchableOpacity>
           <Text style={styles.headerTitle}>Edit Profile</Text>
           <View style={styles.headerSpacer} />
@@ -614,7 +696,7 @@ export default function EditProfileScreen() {
     );
   }
 
-  const initial = (form.username?.trim()[0] ?? "U").toUpperCase();
+  const initial = (form.firstName?.trim()[0] ?? form.lastName?.trim()[0] ?? "U").toUpperCase();
 
   return (
     <KeyboardAvoidingView
@@ -622,20 +704,84 @@ export default function EditProfileScreen() {
       behavior={Platform.OS === "ios" ? "padding" : undefined}
       keyboardVerticalOffset={0}
     >
+      {/* ── Discard Changes Modal ── */}
+      <AppModal visible={showDiscardModal} onRequestClose={() => setShowDiscardModal(false)}>
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <View style={styles.modalIconRow}>
+              <View style={styles.modalIconBox}>
+                <Ionicons name="arrow-undo-outline" size={22} color={ACCENT_RED} />
+              </View>
+            </View>
+            <Text style={styles.modalTitle}>Discard Changes?</Text>
+            <Text style={styles.modalMessage}>
+              All unsaved changes will be lost. This cannot be undone.
+            </Text>
+            <View style={styles.modalButtonsRow}>
+              <TouchableOpacity
+                style={[styles.modalBtn, styles.modalBtnCancel]}
+                onPress={() => setShowDiscardModal(false)}
+                activeOpacity={0.7}
+              >
+                <Text style={styles.modalBtnCancelText}>Keep Editing</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.modalBtn, styles.modalBtnDelete]}
+                onPress={confirmDiscard}
+                activeOpacity={0.7}
+              >
+                <Text style={styles.modalBtnDeleteText}>Discard</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </AppModal>
+
+      {/* ── Save Changes Modal ── */}
+      <AppModal visible={showSaveModal} onRequestClose={() => setShowSaveModal(false)}>
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <View style={styles.modalIconRow}>
+              <View style={[styles.modalIconBox, { backgroundColor: "#EEF0FB" }]}>
+                <Ionicons name="checkmark-done-outline" size={22} color={DARK_BLUE} />
+              </View>
+            </View>
+            <Text style={styles.modalTitle}>Save Changes?</Text>
+            <Text style={styles.modalMessage}>
+              Your profile will be updated with the new information.
+            </Text>
+            <View style={styles.modalButtonsRow}>
+              <TouchableOpacity
+                style={[styles.modalBtn, styles.modalBtnCancel]}
+                onPress={() => setShowSaveModal(false)}
+                activeOpacity={0.7}
+              >
+                <Text style={styles.modalBtnCancelText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.modalBtn, styles.modalBtnSave]}
+                onPress={handleSave}
+                disabled={saving}
+                activeOpacity={0.7}
+              >
+                {saving ? (
+                  <ActivityIndicator color="#fff" size="small" />
+                ) : (
+                  <Text style={styles.modalBtnSaveText}>Save</Text>
+                )}
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </AppModal>
+
       {/* ── Header ── */}
       <View style={styles.header}>
         <TouchableOpacity
           style={styles.backButton}
           onPress={() => {
             if (isDirty) {
-              Alert.alert("Discard changes?", "You have unsaved changes.", [
-                { text: "Keep editing", style: "cancel" },
-                {
-                  text: "Leave",
-                  style: "destructive",
-                  onPress: () => handleBackPress(),
-                },
-              ]);
+              setShowDiscardModal(true);
             } else {
               handleBackPress();
             }
@@ -643,14 +789,14 @@ export default function EditProfileScreen() {
           activeOpacity={0.75}
           hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
         >
-          <Text style={styles.backIcon}>‹</Text>
+          <Ionicons name="chevron-back" size={24} color="#fff" />
         </TouchableOpacity>
 
         <Text style={styles.headerTitle}>Edit Profile</Text>
 
         {isDirty ? (
           <TouchableOpacity
-            onPress={handleDiscard}
+            onPress={() => setShowDiscardModal(true)}
             hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
           >
             <Text style={styles.discardText}>Discard</Text>
@@ -665,9 +811,8 @@ export default function EditProfileScreen() {
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
       >
-        <Animated.View
-          style={{ opacity: fadeAnim, transform: [{ translateY: slideAnim }] }}
-        >
+        <Animated.View style={{ opacity: fadeAnim, transform: [{ translateY: slideAnim }] }}>
+
           {/* ── Avatar Section ── */}
           <View style={styles.avatarSection}>
             <View style={styles.avatarOuter}>
@@ -678,17 +823,11 @@ export default function EditProfileScreen() {
                   <Text style={styles.avatarInitial}>{initial}</Text>
                 </View>
               )}
-
-              <TouchableOpacity
-                style={styles.cameraBadge}
-                onPress={handlePickAvatar}
-                activeOpacity={0.8}
-              >
-                <Text style={styles.cameraIcon}>📷</Text>
+              <TouchableOpacity style={styles.cameraBadge} onPress={handlePickAvatar} activeOpacity={0.8}>
+                <Ionicons name="camera" size={18} color="#fff" />
               </TouchableOpacity>
             </View>
 
-            {/* Upload progress — shown while Cloudinary upload is in flight */}
             {uploading && (
               <View style={styles.uploadProgressWrapper}>
                 <UploadProgress progress={uploadProgress} />
@@ -699,61 +838,75 @@ export default function EditProfileScreen() {
             )}
 
             <View style={styles.avatarActions}>
-              <TouchableOpacity
-                style={styles.avatarActionBtn}
-                onPress={handlePickAvatar}
-                activeOpacity={0.75}
-              >
+              <TouchableOpacity style={styles.avatarActionBtn} onPress={handlePickAvatar} activeOpacity={0.75}>
+                <Ionicons name="image-outline" size={14} color={DARK_BLUE} />
                 <Text style={styles.avatarActionText}>Change Photo</Text>
               </TouchableOpacity>
-
               {avatarUri && (
                 <TouchableOpacity
                   style={[styles.avatarActionBtn, styles.avatarActionBtnDanger]}
                   onPress={handleRemoveAvatar}
                   activeOpacity={0.75}
                 >
-                  <Text
-                    style={[
-                      styles.avatarActionText,
-                      styles.avatarActionTextDanger,
-                    ]}
-                  >
-                    Remove
-                  </Text>
+                  <Ionicons name="trash-outline" size={14} color={ACCENT_RED} />
+                  <Text style={[styles.avatarActionText, styles.avatarActionTextDanger]}>Remove</Text>
                 </TouchableOpacity>
               )}
             </View>
           </View>
 
-          {/* ── Public Info ── */}
-          <SectionHeader title="Public Info" />
+          {/* ── Name ── */}
+          <SectionHeader title="Your Name" />
           <View style={styles.card}>
             <FloatingInput
-              label="Username"
-              value={form.username}
-              onChangeText={setField("username")}
-              error={errors.username}
-              hint="This is how others will find you."
-              maxLength={30}
-              autoCapitalize="none"
+              label="First Name *"
+              value={form.firstName}
+              onChangeText={setField("firstName")}
+              error={errors.firstName}
+              maxLength={40}
+              autoCapitalize="words"
             />
+            <FloatingInput
+              label="Middle Name (Optional)"
+              value={form.middleName}
+              onChangeText={setField("middleName")}
+              maxLength={40}
+              autoCapitalize="words"
+              hint="Leave blank if not applicable."
+            />
+            <FloatingInput
+              label="Last Name *"
+              value={form.lastName}
+              onChangeText={setField("lastName")}
+              error={errors.lastName}
+              maxLength={40}
+              autoCapitalize="words"
+            />
+
+            {(form.firstName || form.lastName) && (
+              <View style={styles.namePreview}>
+                <Ionicons name="person-outline" size={13} color={DARK_BLUE} />
+                <Text style={styles.namePreviewLabel}>Displays as: </Text>
+                <Text style={styles.namePreviewValue}>
+                  {[form.firstName.trim(), form.middleName.trim(), form.lastName.trim()]
+                    .filter(Boolean)
+                    .join(" ")}
+                </Text>
+              </View>
+            )}
+          </View>
+
+          {/* ── About You ── */}
+          <SectionHeader title="About You" />
+          <View style={styles.card}>
             <FloatingInput
               label="Bio"
               value={form.bio}
               onChangeText={setField("bio")}
               hint="Tell traders a little about yourself."
-              maxLength={120}
+              maxLength={160}
               multiline
               numberOfLines={3}
-            />
-            <FloatingInput
-              label="Location"
-              value={form.location}
-              onChangeText={setField("location")}
-              hint="City or region — helps local traders find you."
-              maxLength={60}
-              autoCapitalize="words"
             />
           </View>
 
@@ -769,13 +922,10 @@ export default function EditProfileScreen() {
               keyboardType="email-address"
               autoCapitalize="none"
             />
-            <FloatingInput
-              label="Phone number"
+            <PhoneInput
               value={form.phone}
               onChangeText={setField("phone")}
               error={errors.phone}
-              hint="Optional. Visible only to your trade partners."
-              keyboardType="phone-pad"
             />
           </View>
 
@@ -796,15 +946,9 @@ export default function EditProfileScreen() {
                       onPress: async () => {
                         try {
                           await sendPasswordResetEmail(auth, email);
-                          Alert.alert(
-                            "Email sent",
-                            "Check your inbox to reset your password.",
-                          );
+                          Alert.alert("Email sent", "Check your inbox to reset your password.");
                         } catch (e: any) {
-                          Alert.alert(
-                            "Error",
-                            e?.message ?? "Failed to send reset email.",
-                          );
+                          Alert.alert("Error", e?.message ?? "Failed to send reset email.");
                         }
                       },
                     },
@@ -812,13 +956,16 @@ export default function EditProfileScreen() {
                 )
               }
             >
-              <View>
-                <Text style={styles.dangerRowLabel}>Change Password</Text>
-                <Text style={styles.dangerRowSub}>
-                  Send a reset link to your email
-                </Text>
+              <View style={styles.dangerRowLeft}>
+                <View style={styles.dangerIconBox}>
+                  <Ionicons name="lock-closed-outline" size={18} color={DARK_BLUE} />
+                </View>
+                <View>
+                  <Text style={styles.dangerRowLabel}>Change Password</Text>
+                  <Text style={styles.dangerRowSub}>Send a reset link to your email</Text>
+                </View>
               </View>
-              <Text style={styles.dangerChevron}>›</Text>
+              <Ionicons name="chevron-forward" size={16} color="#CCCCCC" />
             </TouchableOpacity>
 
             <View style={styles.dangerDivider} />
@@ -826,44 +973,87 @@ export default function EditProfileScreen() {
             <TouchableOpacity
               style={styles.dangerRow}
               activeOpacity={0.7}
-              onPress={() =>
+              onPress={() => {
                 Alert.alert(
-                  "Delete Account",
-                  "This is permanent. All your listings, trades, and data will be erased.",
+                  "Delete Account?",
+                  "This action cannot be undone. All your listings, trades, messages, and data will be permanently erased.\n\nYou will need to log in again if you proceed.",
                   [
                     { text: "Cancel", style: "cancel" },
                     {
                       text: "Delete my account",
                       style: "destructive",
-                      onPress: () => {
-                        Alert.alert(
-                          "Contact support",
-                          "Please email support@barterbayan.com to complete account deletion.",
-                        );
+                      onPress: async () => {
+                        try {
+                          setSaving(true);
+                          if (!currentUser) {
+                            Alert.alert("Error", "Not logged in. Please log in again.");
+                            setSaving(false);
+                            return;
+                          }
+                          try {
+                            await deleteDoc(doc(db, "users", currentUser.uid));
+                          } catch (dbErr: any) {
+                            console.error("Firestore delete error:", dbErr);
+                          }
+                          try {
+                            await deleteUser(currentUser);
+                          } catch (authErr: any) {
+                            console.error("Auth delete error:", authErr);
+                            if (authErr.code === "auth/requires-recent-login") {
+                              Alert.alert(
+                                "Re-authentication Required",
+                                "For security, please log out and log back in, then delete your account again.",
+                                [{ text: "OK", onPress: () => router.replace("/(auth)/login") }],
+                              );
+                              setSaving(false);
+                              return;
+                            }
+                            throw authErr;
+                          }
+                          Alert.alert(
+                            "Account Deleted",
+                            "Your account and all data have been permanently deleted.",
+                            [{ text: "OK", onPress: () => router.replace("/(auth)/login") }],
+                          );
+                        } catch (err: any) {
+                          console.error("Delete account error:", err);
+                          Alert.alert(
+                            "Error",
+                            err?.message ?? "Failed to delete account. Please try again or contact support.",
+                          );
+                        } finally {
+                          setSaving(false);
+                        }
                       },
                     },
                   ],
-                )
-              }
+                );
+              }}
             >
-              <View>
-                <Text style={[styles.dangerRowLabel, { color: ACCENT_RED }]}>
-                  Delete Account
-                </Text>
-                <Text style={styles.dangerRowSub}>
-                  Permanently erase all your data
-                </Text>
+              <View style={styles.dangerRowLeft}>
+                <View style={[styles.dangerIconBox, { backgroundColor: "#FEE2E2" }]}>
+                  <Ionicons name="trash-outline" size={18} color={ACCENT_RED} />
+                </View>
+                <View>
+                  <Text style={[styles.dangerRowLabel, { color: ACCENT_RED }]}>Delete Account</Text>
+                  <Text style={styles.dangerRowSub}>Permanently erase all your data</Text>
+                </View>
               </View>
-              <Text style={[styles.dangerChevron, { color: ACCENT_RED }]}>
-                ›
-              </Text>
+              <Ionicons name="chevron-forward" size={16} color={ACCENT_RED} />
             </TouchableOpacity>
           </View>
 
           {/* ── Save Button ── */}
           <View style={styles.saveWrapper}>
             <SaveButton
-              onPress={handleSave}
+              onPress={() => {
+                const validationErrors = validateForm(form);
+                if (Object.keys(validationErrors).length > 0) {
+                  setErrors(validationErrors);
+                  return;
+                }
+                setShowSaveModal(true);
+              }}
               saving={saving}
               saved={saved}
               disabled={!isDirty || saving}
@@ -880,10 +1070,7 @@ export default function EditProfileScreen() {
 
 // ─── Styles ───────────────────────────────────────────────────────────────────
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: LIGHT_BG,
-  },
+  container: { flex: 1, backgroundColor: LIGHT_BG },
   header: {
     backgroundColor: HEADER_BG,
     flexDirection: "row",
@@ -894,47 +1081,27 @@ const styles = StyleSheet.create({
     paddingBottom: 15,
   },
   backButton: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: "rgba(255,255,255,0.15)",
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: "rgba(255,255,255,0.25)",
     justifyContent: "center",
     alignItems: "center",
   },
-  backIcon: {
-    color: "#fff",
-    fontSize: 28,
-    fontWeight: "300",
-    lineHeight: 32,
-    marginTop: -2,
-  },
-  headerTitle: {
-    color: "#fff",
-    fontSize: 22,
-    fontWeight: "800",
-    letterSpacing: 0.4,
-  },
-  headerSpacer: { width: 60 },
+  headerTitle: { color: "#fff", fontSize: 22, fontWeight: "800", letterSpacing: 0.4 },
+  headerSpacer: { width: 60, minWidth: 60 },
   discardText: {
-    color: "rgba(255,255,255,0.7)",
-    fontSize: 14,
-    fontWeight: "600",
-    width: 60,
+    color: "rgba(255,255,255,0.9)",
+    fontSize: 13,
+    fontWeight: "700",
+    paddingHorizontal: 12,
+    paddingVertical: 6,
     textAlign: "right",
   },
-  loadingContainer: {
-    flex: 1,
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  loadingText: {
-    marginTop: 12,
-    fontSize: 14,
-    color: "#888",
-  },
-  scrollContent: {
-    paddingBottom: 56,
-  },
+  loadingContainer: { flex: 1, justifyContent: "center", alignItems: "center" },
+  loadingText: { marginTop: 12, fontSize: 14, color: "#888" },
+  scrollContent: { paddingBottom: 56 },
+
   avatarSection: {
     alignItems: "center",
     paddingVertical: 32,
@@ -943,18 +1110,8 @@ const styles = StyleSheet.create({
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: "#ECECEC",
   },
-  avatarOuter: {
-    position: "relative",
-    width: 100,
-    height: 100,
-    marginBottom: 14,
-  },
-  avatar: {
-    width: 100,
-    height: 100,
-    borderRadius: 50,
-    backgroundColor: "#ddd",
-  },
+  avatarOuter: { position: "relative", width: 100, height: 100, marginBottom: 14 },
+  avatar: { width: 100, height: 100, borderRadius: 50, backgroundColor: "#ddd" },
   avatarPlaceholder: {
     width: 100,
     height: 100,
@@ -963,11 +1120,7 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     alignItems: "center",
   },
-  avatarInitial: {
-    color: "#fff",
-    fontSize: 38,
-    fontWeight: "800",
-  },
+  avatarInitial: { color: "#fff", fontSize: 38, fontWeight: "800" },
   cameraBadge: {
     position: "absolute",
     bottom: 0,
@@ -986,23 +1139,13 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.2,
     shadowRadius: 4,
   },
-  cameraIcon: { fontSize: 14 },
-  uploadProgressWrapper: {
-    width: "60%",
+  uploadProgressWrapper: { width: "60%", alignItems: "center", gap: 6, marginBottom: 8 },
+  uploadProgressText: { fontSize: 12, color: "#888", fontWeight: "500" },
+  avatarActions: { flexDirection: "row", gap: 10 },
+  avatarActionBtn: {
+    flexDirection: "row",
     alignItems: "center",
     gap: 6,
-    marginBottom: 8,
-  },
-  uploadProgressText: {
-    fontSize: 12,
-    color: "#888",
-    fontWeight: "500",
-  },
-  avatarActions: {
-    flexDirection: "row",
-    gap: 10,
-  },
-  avatarActionBtn: {
     paddingVertical: 7,
     paddingHorizontal: 16,
     borderRadius: 20,
@@ -1010,18 +1153,10 @@ const styles = StyleSheet.create({
     borderColor: DARK_BLUE,
     backgroundColor: "#ECEDF8",
   },
-  avatarActionBtnDanger: {
-    borderColor: ACCENT_RED,
-    backgroundColor: "#FEE2E2",
-  },
-  avatarActionText: {
-    fontSize: 13,
-    fontWeight: "700",
-    color: DARK_BLUE,
-  },
-  avatarActionTextDanger: {
-    color: ACCENT_RED,
-  },
+  avatarActionBtnDanger: { borderColor: ACCENT_RED, backgroundColor: "#FEE2E2" },
+  avatarActionText: { fontSize: 13, fontWeight: "700", color: DARK_BLUE },
+  avatarActionTextDanger: { color: ACCENT_RED },
+
   card: {
     marginHorizontal: 16,
     marginBottom: 6,
@@ -1035,55 +1170,114 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.06,
     shadowRadius: 4,
   },
-  dangerCard: {
-    paddingHorizontal: 0,
-    paddingVertical: 0,
-    overflow: "hidden",
-  },
+  dangerCard: { paddingHorizontal: 0, paddingVertical: 0, overflow: "hidden" },
   dangerRow: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
-    paddingHorizontal: 18,
+    paddingHorizontal: 16,
     paddingVertical: 15,
   },
-  dangerRowLabel: {
-    fontSize: 15,
-    fontWeight: "600",
-    color: "#1A1A2E",
-  },
-  dangerRowSub: {
-    fontSize: 12,
-    color: "#AAAAAA",
-    marginTop: 2,
-  },
-  dangerChevron: {
-    fontSize: 22,
-    color: "#CCCCCC",
-  },
-  dangerDivider: {
-    height: StyleSheet.hairlineWidth,
-    backgroundColor: "#ECECEC",
-    marginHorizontal: 18,
-  },
-  saveWrapper: {
-    marginHorizontal: 16,
-    marginTop: 24,
+  dangerRowLeft: { flexDirection: "row", alignItems: "center", gap: 12 },
+  dangerIconBox: {
+    width: 34,
+    height: 34,
+    borderRadius: 10,
+    backgroundColor: "#EEF0FB",
+    justifyContent: "center",
     alignItems: "center",
+  },
+  dangerRowLabel: { fontSize: 15, fontWeight: "600", color: "#1A1A2E" },
+  dangerRowSub: { fontSize: 12, color: "#AAAAAA", marginTop: 2 },
+  dangerDivider: { height: StyleSheet.hairlineWidth, backgroundColor: "#ECECEC", marginHorizontal: 16 },
+
+  namePreview: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#F0F1FB",
+    borderRadius: 10,
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    marginTop: 4,
+    marginBottom: 8,
+    gap: 6,
+  },
+  namePreviewLabel: { fontSize: 12, color: "#888", fontWeight: "600" },
+  namePreviewValue: { fontSize: 14, color: DARK_BLUE, fontWeight: "700", flex: 1 },
+
+  saveWrapper: { marginHorizontal: 16, marginTop: 24, alignItems: "center", gap: 10 },
+  noChangesText: { fontSize: 12, color: "#BBBBBB", fontWeight: "500" },
+
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.5)",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  modalContent: {
+    backgroundColor: "#fff",
+    borderRadius: 20,
+    padding: 24,
+    width: "82%",
+    maxWidth: 340,
+    elevation: 8,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.2,
+    shadowRadius: 12,
+    alignItems: "center",
+  },
+  modalIconRow: { marginBottom: 14 },
+  modalIconBox: {
+    width: 52,
+    height: 52,
+    borderRadius: 26,
+    backgroundColor: "#FEE2E2",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  modalTitle: {
+    fontSize: 18,
+    fontWeight: "800",
+    color: "#1A1A2E",
+    marginBottom: 8,
+    textAlign: "center",
+  },
+  modalMessage: {
+    fontSize: 14,
+    color: "#666",
+    marginBottom: 24,
+    lineHeight: 20,
+    textAlign: "center",
+  },
+  modalButtonsRow: {
+    flexDirection: "row",
     gap: 10,
+    width: "100%",
   },
-  noChangesText: {
-    fontSize: 12,
-    color: "#BBBBBB",
-    fontWeight: "500",
+  modalBtn: {
+    flex: 1,
+    paddingVertical: 12,
+    borderRadius: 10,
+    justifyContent: "center",
+    alignItems: "center",
+    minHeight: 44,
   },
+  modalBtnCancel: {
+    backgroundColor: "#F0F0F0",
+    borderWidth: 1,
+    borderColor: "#E0E0E0",
+  },
+  modalBtnCancelText: { fontSize: 14, fontWeight: "600", color: "#555" },
+  modalBtnDelete: { backgroundColor: ACCENT_RED },
+  modalBtnDeleteText: { fontSize: 14, fontWeight: "700", color: "#fff" },
+  modalBtnSave: { backgroundColor: DARK_BLUE },
+  modalBtnSaveText: { fontSize: 14, fontWeight: "700", color: "#fff" },
 });
 
 // ─── Input Styles ─────────────────────────────────────────────────────────────
 const inputStyles = StyleSheet.create({
-  wrapper: {
-    marginVertical: 10,
-  },
+  wrapper: { marginVertical: 10 },
   container: {
     borderWidth: 1.5,
     borderRadius: 12,
@@ -1093,9 +1287,21 @@ const inputStyles = StyleSheet.create({
     backgroundColor: "#FAFAFA",
     position: "relative",
   },
-  containerDisabled: {
-    backgroundColor: "#F0F0F0",
+  containerDisabled: { backgroundColor: "#F0F0F0" },
+  cleanPhoneContainer: { flexDirection: "column", paddingTop: 20, paddingBottom: 10 },
+  phonePrefixInputRow: { flexDirection: "row", alignItems: "center", gap: 0, marginTop: 8 },
+  phonePrefixBox: { flexDirection: "row", alignItems: "center", gap: 6 },
+  phonePrefix: { fontSize: 15, fontWeight: "700", color: "#1A1A2E" },
+  phoneDivider: { width: 1, height: 28, backgroundColor: "#E0E0E0", marginHorizontal: 12 },
+  phoneTextInput: {
+    flex: 1,
+    fontSize: 15,
+    color: "#1A1A2E",
+    fontWeight: "500",
+    padding: 0,
+    minHeight: 28,
   },
+  phoneCounter: { fontSize: 10, color: "#CCCCCC", fontWeight: "600", paddingLeft: 8 },
   label: {
     position: "absolute",
     left: 14,
@@ -1106,19 +1312,15 @@ const inputStyles = StyleSheet.create({
     zIndex: 1,
   },
   labelActive: {
-    top: 6,
+    top: 4,
     fontSize: 11,
     fontWeight: "700",
     textTransform: "uppercase",
     letterSpacing: 0.6,
     color: "#888",
   },
-  labelFocused: {
-    color: DARK_BLUE,
-  },
-  labelError: {
-    color: ACCENT_RED,
-  },
+  labelFocused: { color: DARK_BLUE },
+  labelError: { color: ACCENT_RED },
   input: {
     fontSize: 15,
     color: "#1A1A2E",
@@ -1127,42 +1329,22 @@ const inputStyles = StyleSheet.create({
     paddingBottom: 0,
     minHeight: 28,
   },
-  inputMultiline: {
-    minHeight: 64,
-    paddingTop: 4,
-  },
-  inputDisabled: {
-    color: "#AAAAAA",
-  },
-  counter: {
-    position: "absolute",
-    right: 12,
-    bottom: 8,
-    fontSize: 10,
-    color: "#CCCCCC",
-    fontWeight: "600",
-  },
-  errorText: {
-    fontSize: 12,
-    color: ACCENT_RED,
-    fontWeight: "500",
-    marginTop: 4,
-    marginLeft: 4,
-  },
-  hintText: {
-    fontSize: 11.5,
-    color: "#BBBBBB",
-    marginTop: 4,
-    marginLeft: 4,
-    fontStyle: "italic",
-  },
+  inputMultiline: { minHeight: 64, paddingTop: 4 },
+  inputDisabled: { color: "#AAAAAA" },
+  counter: { position: "absolute", right: 12, bottom: 8, fontSize: 10, color: "#CCCCCC", fontWeight: "600" },
+  errorText: { fontSize: 12, color: ACCENT_RED, fontWeight: "500", marginLeft: 4 },
+  errorContainer: { flexDirection: "row", alignItems: "center", marginTop: 6, marginLeft: 4, gap: 6 },
+  hintText: { fontSize: 11.5, color: "#BBBBBB", marginTop: 4, marginLeft: 4, fontStyle: "italic" },
+  phoneInputWrapper: { flexDirection: "row", alignItems: "center", gap: 6 },
+  phoneInput: { flex: 1 },
 });
 
 // ─── Save Button Styles ───────────────────────────────────────────────────────
 const saveStyles = StyleSheet.create({
   btn: {
     width: "100%",
-    paddingVertical: 16,
+    paddingVertical: 14,
+    paddingHorizontal: 24,
     borderRadius: 14,
     alignItems: "center",
     justifyContent: "center",
@@ -1172,32 +1354,14 @@ const saveStyles = StyleSheet.create({
     shadowOpacity: 0.25,
     shadowRadius: 6,
   },
-  btnDisabled: {
-    opacity: 0.45,
-    elevation: 0,
-    shadowOpacity: 0,
-  },
-  text: {
-    fontSize: 16,
-    fontWeight: "800",
-    letterSpacing: 0.3,
-  },
+  btnDisabled: { opacity: 0.45, elevation: 0, shadowOpacity: 0 },
+  text: { fontSize: 15, fontWeight: "600", letterSpacing: 0.2 },
 });
 
 // ─── Upload Progress Styles ───────────────────────────────────────────────────
 const uploadStyles = StyleSheet.create({
-  track: {
-    width: "100%",
-    height: 4,
-    backgroundColor: "#E0E0E0",
-    borderRadius: 2,
-    overflow: "hidden",
-  },
-  fill: {
-    height: "100%",
-    backgroundColor: DARK_BLUE,
-    borderRadius: 2,
-  },
+  track: { width: "100%", height: 4, backgroundColor: "#E0E0E0", borderRadius: 2, overflow: "hidden" },
+  fill: { height: "100%", backgroundColor: DARK_BLUE, borderRadius: 2 },
 });
 
 // ─── Section Header Styles ────────────────────────────────────────────────────

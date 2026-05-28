@@ -1,8 +1,9 @@
+import Ionicons from '@expo/vector-icons/Ionicons';
 import * as ImageManipulator from 'expo-image-manipulator';
 import * as ImagePicker from 'expo-image-picker';
 import { router } from 'expo-router';
 import { doc, setDoc } from 'firebase/firestore';
-import React, { useCallback, useRef, useState } from 'react';
+import React, { useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -15,52 +16,63 @@ import {
   Text,
   TextInput,
   TouchableOpacity,
-  View,
+  View
 } from 'react-native';
 import { auth, db } from '../../firebaseConfig';
 
-const GOOGLE_PLACES_API_KEY = 'YOUR_GOOGLE_PLACES_API_KEY';
+
+// Load Google Places API key from environment or use empty string (disables autocomplete)
+const GOOGLE_PLACES_API_KEY = process.env.EXPO_PUBLIC_GOOGLE_PLACES_API_KEY || '';
 
 const { width } = Dimensions.get('window');
-const STEPS = ['Name', 'Photo', 'Phone', 'Location', 'Bio'];
+const STEPS = ['Name', 'Photo', 'Phone', 'Bio'];
+const HAS_LOCATION_API = false;
 
-const PRIMARY = '#2F2F6F';
+const PRIMARY   = '#2F2F6F';
 const SECONDARY = '#E74C3C';
-const BG   = '#F7F5F2';
-const CARD = '#FFFFFF';
-const BORDER = '#E0DDD8';
-const TEXT = '#1A1A1A';
-const MUTED = '#888888';
+const BG        = '#F7F5F2';
+const CARD      = '#FFFFFF';
+const BORDER    = '#E0DDD8';
+const TEXT      = '#1A1A1A';
+const MUTED     = '#888888';
+
+// ─── FIX 1: letters-only helper (supports accented / Filipino characters) ─────
+const lettersOnly = (text: string) =>
+  text.replace(/[^a-zA-ZÀ-ÖØ-öø-ÿÑñ\s\-'.]/g, '');
 
 export default function ProfileSetupScreen() {
   const [step, setStep] = useState(0);
 
-  const [firstName, setFirstName]         = useState('');
-  const [lastName,  setLastName]          = useState('');
-  const [photo,     setPhoto]             = useState<string | null>(null);
-  const [phone,     setPhone]             = useState('');
-  const [location,  setLocation]          = useState('');
-  const [locationPlaceId, setLocationPlaceId] = useState<string | null>(null);
-  const [bio,       setBio]               = useState('');
+  const [firstName,  setFirstName]  = useState('');
+  const [middleName, setMiddleName] = useState('');
+  const [lastName,   setLastName]   = useState('');
+  const [photo,      setPhoto]      = useState<string | null>(null);
+  const [phone, setPhone] = useState('');
+  const [bio, setBio] = useState('');
 
-  const [locationQuery,       setLocationQuery]       = useState('');
-  const [locationSuggestions, setLocationSuggestions] = useState<any[]>([]);
-  const [loadingLocations,    setLoadingLocations]    = useState(false);
-  const [cropLoading,         setCropLoading]         = useState(false);
-  const [isSaving, setIsSaving] = useState(false);
+  // ─── FIX 2: cropLoading kept only for processImage; crop modal state removed ─
+  const [cropLoading, setCropLoading] = useState(false);
+  const [isSaving,    setIsSaving]    = useState(false);
 
-  const locationDebounce = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+
+  // ─────────────────────────────────────────────────────────────────────────────
   const canProceed = () => {
     switch (step) {
       case 0: return firstName.trim().length > 0 && lastName.trim().length > 0;
       case 1: return photo !== null;
       case 2: return phone.length === 10;
-      case 3: return location.trim().length > 0;
-      case 4: return true;
+      case 3: return true;
       default: return false;
     }
   };
+
+  const isValidPhoneNumber = (phoneNum: string): boolean => {
+    const phoneRegex = /^9\d{9}$/;
+    return phoneRegex.test(phoneNum);
+  };
+
+
 
   const goNext = () => {
     if (step < STEPS.length - 1) {
@@ -86,26 +98,21 @@ export default function ProfileSetupScreen() {
       const user = auth.currentUser;
       const profileData = {
         email: user.email,
-        username: user.email?.split('@')[0],
         firstName,
+        middleName: middleName || null,
         lastName,
         photo: photo || null,
         avatarUrl: photo || null,
         phone: `+63${phone}`,
-        location,
-        locationPlaceId,
         bio,
         createdAt: new Date().toISOString(),
         rating: 5.0,
         tradeCount: 0,
         emailVerified: user.emailVerified,
-        profileComplete: true,  // ✅ mark profile as done
-        termsAccepted: true,    // ✅ preserve so Firestore doc stays consistent
+        profileComplete: true,
       };
 
-      // ✅ merge: true so we don't wipe termsAccepted saved by the terms screen
       await setDoc(doc(db, 'users', user.uid), profileData, { merge: true });
-
       router.replace('/(tabs)');
     } catch (error: any) {
       console.error('Profile setup error:', error);
@@ -129,14 +136,15 @@ export default function ProfileSetupScreen() {
         { compress: 0.85, format: ImageManipulator.SaveFormat.JPEG }
       );
       setPhoto(result.uri);
-      setCropLoading(false);
     } catch (error) {
       console.error('Image processing error:', error);
       setPhoto(uri);
+    } finally {
       setCropLoading(false);
     }
   };
 
+  // ─── FIX 2: allowsEditing + aspect gives native pan/zoom/crop UI ─────────────
   const pickFromGallery = async () => {
     try {
       const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
@@ -145,10 +153,10 @@ export default function ProfileSetupScreen() {
         return;
       }
       const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ImagePicker.MediaTypeOptions.Images,
-        allowsEditing: true,
-        aspect: [1, 1],
-        quality: 0.85,
+        mediaTypes: ['images'],
+        allowsEditing: true,   // ← native crop / pan / zoom UI
+        aspect: [1, 1],        // ← square lock
+        quality: 0.9,
       });
       if (!result.canceled && result.assets?.[0]) {
         await processImage(result.assets[0].uri);
@@ -159,57 +167,9 @@ export default function ProfileSetupScreen() {
     }
   };
 
-  const pickFromCamera = async () => {
-    try {
-      const { status } = await ImagePicker.requestCameraPermissionsAsync();
-      if (status !== 'granted') {
-        Alert.alert('Permission required', 'Please enable camera access in settings.');
-        return;
-      }
-      const result = await ImagePicker.launchCameraAsync({
-        allowsEditing: true,
-        aspect: [1, 1],
-        quality: 0.85,
-      });
-      if (!result.canceled && result.assets?.[0]) {
-        await processImage(result.assets[0].uri);
-      }
-    } catch (error) {
-      console.error('Camera picker error:', error);
-      Alert.alert('Error', 'Failed to capture image from camera.');
-    }
-  };
 
-  const fetchSuggestions = useCallback(async (text: string) => {
-    if (text.length < 2) { setLocationSuggestions([]); return; }
-    setLoadingLocations(true);
-    try {
-      const url = `https://maps.googleapis.com/maps/api/place/autocomplete/json?input=${encodeURIComponent(text)}&components=country:ph&key=${GOOGLE_PLACES_API_KEY}`;
-      const res  = await fetch(url);
-      const data = await res.json();
-      setLocationSuggestions(data.predictions || []);
-    } catch {
-      setLocationSuggestions([]);
-    } finally {
-      setLoadingLocations(false);
-    }
-  }, []);
 
-  const handleLocationChange = (text: string) => {
-    setLocationQuery(text);
-    setLocation(text);
-    setLocationPlaceId(null);
-    if (locationDebounce.current) clearTimeout(locationDebounce.current);
-    locationDebounce.current = setTimeout(() => fetchSuggestions(text), 350);
-  };
 
-  const selectLocation = (prediction: any) => {
-    const desc = prediction.description;
-    setLocation(desc);
-    setLocationQuery(desc);
-    setLocationPlaceId(prediction.place_id);
-    setLocationSuggestions([]);
-  };
 
   const renderStep = () => {
     switch (step) {
@@ -217,12 +177,38 @@ export default function ProfileSetupScreen() {
         return (
           <StepWrapper title="What's your name?" sub="This is how others will see you.">
             <FieldGroup label="First Name">
-              <TextInput style={s.input} placeholder="e.g. Juan" placeholderTextColor={MUTED}
-                value={firstName} onChangeText={setFirstName} autoCapitalize="words" autoFocus />
+              <TextInput
+                style={s.input}
+                placeholder="e.g. Juan"
+                placeholderTextColor={MUTED}
+                value={firstName}
+                // ─── FIX 1 ───
+                onChangeText={t => setFirstName(lettersOnly(t))}
+                autoCapitalize="words"
+                autoFocus
+              />
+            </FieldGroup>
+            <FieldGroup label="Middle Name (Optional)">
+              <TextInput
+                style={s.input}
+                placeholder="e.g. Santos"
+                placeholderTextColor={MUTED}
+                value={middleName}
+                // ─── FIX 1 ───
+                onChangeText={t => setMiddleName(lettersOnly(t))}
+                autoCapitalize="words"
+              />
             </FieldGroup>
             <FieldGroup label="Last Name">
-              <TextInput style={s.input} placeholder="e.g. dela Cruz" placeholderTextColor={MUTED}
-                value={lastName} onChangeText={setLastName} autoCapitalize="words" />
+              <TextInput
+                style={s.input}
+                placeholder="e.g. dela Cruz"
+                placeholderTextColor={MUTED}
+                value={lastName}
+                // ─── FIX 1 ───
+                onChangeText={t => setLastName(lettersOnly(t))}
+                autoCapitalize="words"
+              />
             </FieldGroup>
           </StepWrapper>
         );
@@ -235,32 +221,26 @@ export default function ProfileSetupScreen() {
                 ? <ActivityIndicator size="large" color={PRIMARY} />
                 : photo
                   ? <Image source={{ uri: photo }} style={s.avatar} />
-                  : <Text style={s.avatarIcon}>👤</Text>
+                  : <Ionicons name="person-circle" size={60} color={PRIMARY} />
               }
             </View>
-            <View style={s.photoRow}>
-              <TouchableOpacity style={s.photoBtn} onPress={pickFromGallery} activeOpacity={0.8}>
-                <Text style={s.photoBtnIcon}>🖼️</Text>
-                <Text style={s.photoBtnLabel}>Gallery</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={s.photoBtn} onPress={pickFromCamera} activeOpacity={0.8}>
-                <Text style={s.photoBtnIcon}>📷</Text>
-                <Text style={s.photoBtnLabel}>Camera</Text>
-              </TouchableOpacity>
-            </View>
+            <TouchableOpacity style={s.photoBtnFull} onPress={pickFromGallery} activeOpacity={0.8}>
+              <Ionicons name="image" size={26} color={PRIMARY} />
+              <Text style={s.photoBtnLabel}>Choose from Gallery</Text>
+            </TouchableOpacity>
             <Text style={s.cropNote}>
-              Use the crop tool that appears after selecting to frame your shot.
+              Drag and pinch to reposition your photo after selecting.
             </Text>
           </StepWrapper>
         );
 
       case 2:
         return (
-          <StepWrapper title="Your phone number" sub="Used for verification and account recovery.">
+          <StepWrapper title="What's your phone number?" sub="For account recovery and important notifications.">
             <FieldGroup label="Mobile Number">
               <View style={s.phoneRow}>
                 <View style={s.countryBadge}>
-                  <Text style={s.countryFlag}>🇵🇭</Text>
+                  <Ionicons name="globe" size={18} color={PRIMARY} />
                   <Text style={s.countryCode}>+63</Text>
                 </View>
                 <TextInput
@@ -289,50 +269,6 @@ export default function ProfileSetupScreen() {
 
       case 3:
         return (
-          <StepWrapper title="Where are you located?" sub="Helps you connect with people nearby.">
-            <FieldGroup label="City / Area">
-              <View style={s.locationRow}>
-                <Text style={s.locationPin}>📍</Text>
-                <TextInput
-                  style={[s.input, s.locationInput]}
-                  placeholder="Search city or barangay..."
-                  placeholderTextColor={MUTED}
-                  value={locationQuery}
-                  onChangeText={handleLocationChange}
-                  autoFocus
-                />
-                {loadingLocations && <ActivityIndicator size="small" color={PRIMARY} style={{ marginRight: 12 }} />}
-              </View>
-
-              {locationSuggestions.length > 0 && (
-                <View style={s.suggestionBox}>
-                  {locationSuggestions.map((item, idx) => (
-                    <TouchableOpacity
-                      key={item.place_id}
-                      style={[s.suggestionItem, idx < locationSuggestions.length - 1 && s.suggestionDivider]}
-                      onPress={() => selectLocation(item)}
-                      activeOpacity={0.75}
-                    >
-                      <Text style={s.suggestionMain}>
-                        {item.structured_formatting?.main_text || item.description}
-                      </Text>
-                      {item.structured_formatting?.secondary_text
-                        ? <Text style={s.suggestionSub}>{item.structured_formatting.secondary_text}</Text>
-                        : null}
-                    </TouchableOpacity>
-                  ))}
-                </View>
-              )}
-
-              {GOOGLE_PLACES_API_KEY === 'YOUR_GOOGLE_PLACES_API_KEY' && (
-                <Text style={s.apiWarning}>⚠️ Add your Google Places API key for live suggestions.</Text>
-              )}
-            </FieldGroup>
-          </StepWrapper>
-        );
-
-      case 4:
-        return (
           <StepWrapper title="Tell us about yourself" sub="Optional — shown on your public profile.">
             <FieldGroup label="Bio">
               <TextInput
@@ -359,7 +295,7 @@ export default function ProfileSetupScreen() {
       <View style={s.header}>
         {step > 0
           ? <TouchableOpacity onPress={goBack} style={s.backBtn}>
-              <Text style={s.backArrow}>←</Text>
+              <Ionicons name="chevron-back" size={22} color={TEXT} />
             </TouchableOpacity>
           : <View style={{ width: 36 }} />
         }
@@ -379,11 +315,9 @@ export default function ProfileSetupScreen() {
       </ScrollView>
 
       <View style={s.footer}>
-        {step === 4 && (
-          <TouchableOpacity onPress={handleFinish} style={s.skipBtn} disabled={isSaving}>
-            <Text style={s.skipText}>Skip</Text>
-          </TouchableOpacity>
-        )}
+        <TouchableOpacity onPress={handleFinish} style={s.skipBtn} disabled={isSaving}>
+          <Text style={s.skipText}>Skip</Text>
+        </TouchableOpacity>
         <TouchableOpacity
           style={[s.nextBtn, (!canProceed() || isSaving) && s.nextBtnOff]}
           onPress={goNext}
@@ -396,9 +330,13 @@ export default function ProfileSetupScreen() {
         </TouchableOpacity>
       </View>
 
+
+
     </KeyboardAvoidingView>
   );
 }
+
+// ─── Sub-components ───────────────────────────────────────────────────────────
 
 function StepWrapper({ title, sub, children }: { title: string; sub: string; children: React.ReactNode }) {
   return (
@@ -419,6 +357,8 @@ function FieldGroup({ label, children }: { label: string; children: React.ReactN
   );
 }
 
+// ─── Styles ───────────────────────────────────────────────────────────────────
+
 const s = StyleSheet.create({
   root: { flex: 1, backgroundColor: BG },
 
@@ -436,7 +376,6 @@ const s = StyleSheet.create({
     backgroundColor: CARD, borderWidth: 1, borderColor: BORDER,
     alignItems: 'center', justifyContent: 'center',
   },
-  backArrow: { fontSize: 18, color: TEXT },
   pills: { flex: 1, flexDirection: 'row', gap: 6 },
   pill:  { flex: 1, height: 4, borderRadius: 2 },
   pillOn:  { backgroundColor: PRIMARY },
@@ -471,13 +410,15 @@ const s = StyleSheet.create({
     shadowOpacity: 0.25, shadowRadius: 12, elevation: 8,
   },
   avatar:     { width: 140, height: 140, borderRadius: 70 },
-  avatarIcon: { fontSize: 56 },
   photoRow:   { flexDirection: 'row', gap: 16, marginBottom: 16 },
   photoBtn: {
     flex: 1, backgroundColor: CARD, borderWidth: 1.5, borderColor: BORDER,
     borderRadius: 14, paddingVertical: 18, alignItems: 'center', gap: 6,
   },
-  photoBtnIcon:  { fontSize: 26 },
+  photoBtnFull: {
+    backgroundColor: CARD, borderWidth: 1.5, borderColor: BORDER,
+    borderRadius: 14, paddingVertical: 18, alignItems: 'center', gap: 6, marginBottom: 16,
+  },
   photoBtnLabel: { fontSize: 14, fontWeight: '600', color: TEXT },
   cropNote: { fontSize: 12, color: MUTED, textAlign: 'center', lineHeight: 18 },
 
@@ -487,7 +428,6 @@ const s = StyleSheet.create({
     backgroundColor: CARD, borderWidth: 1.5, borderColor: BORDER,
     borderRadius: 14, paddingHorizontal: 14, paddingVertical: 14,
   },
-  countryFlag: { fontSize: 20 },
   countryCode: { fontSize: 16, fontWeight: '700', color: TEXT },
   phoneInput:  { flex: 1, letterSpacing: 1.5 },
   phoneHint:   { fontSize: 12, color: MUTED, marginTop: 6, marginLeft: 4 },
@@ -498,25 +438,6 @@ const s = StyleSheet.create({
   },
   previewLabel: { fontSize: 12, color: PRIMARY, fontWeight: '600' },
   previewValue: { fontSize: 15, color: PRIMARY, fontWeight: '800', letterSpacing: 1 },
-
-  locationRow: {
-    flexDirection: 'row', alignItems: 'center',
-    backgroundColor: CARD, borderWidth: 1.5, borderColor: BORDER,
-    borderRadius: 14, paddingLeft: 14,
-  },
-  locationPin:   { fontSize: 18, marginRight: 4 },
-  locationInput: { flex: 1, borderWidth: 0, borderRadius: 0, paddingLeft: 4 },
-  suggestionBox: {
-    backgroundColor: CARD, borderWidth: 1.5, borderColor: BORDER,
-    borderRadius: 14, marginTop: 6, overflow: 'hidden',
-    shadowColor: '#000', shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.08, shadowRadius: 12, elevation: 4,
-  },
-  suggestionItem:    { paddingHorizontal: 16, paddingVertical: 12 },
-  suggestionDivider: { borderBottomWidth: 1, borderBottomColor: BORDER },
-  suggestionMain:    { fontSize: 14, fontWeight: '600', color: TEXT },
-  suggestionSub:     { fontSize: 12, color: MUTED, marginTop: 2 },
-  apiWarning:        { marginTop: 10, fontSize: 12, color: '#B8750A', lineHeight: 18 },
 
   bioInput:   { height: 130, paddingTop: 14 },
   charCount:  { fontSize: 12, color: MUTED, textAlign: 'right', marginTop: 6 },

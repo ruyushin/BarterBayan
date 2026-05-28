@@ -56,29 +56,41 @@ export default function AuthLayout() {
           }
 
           // Don't redirect if already on the correct screen
+          // Priority: Terms → Profile Setup → Home
+          
+          // 1. If terms not accepted, must show terms screen (don't show profile-setup yet)
           if (!data?.termsAccepted && currentRoute !== 'terms') {
             console.log('[AuthLayout] Redirecting to terms - termsAccepted is false/undefined');
             navigationInProgressRef.current = true;
-            router.replace('/(auth)/terms');
-          } else if (!data?.profileComplete && data?.termsAccepted && currentRoute !== 'profile-setup') {
+            await router.replace('/(auth)/terms');
+            setTimeout(() => { navigationInProgressRef.current = false; }, 800);
+          } 
+          // 2. If terms accepted but profile not complete, show profile-setup
+          else if (data?.termsAccepted && !data?.profileComplete && currentRoute !== 'profile-setup') {
             console.log('[AuthLayout] Redirecting to profile-setup - profileComplete is false/undefined');
             navigationInProgressRef.current = true;
-            router.replace('/(auth)/profile-setup');
-          } else if (data?.profileComplete && data?.termsAccepted) {
+            await router.replace('/(auth)/profile-setup');
+            setTimeout(() => { navigationInProgressRef.current = false; }, 800);
+          } 
+          // 3. If both complete, go home
+          else if (data?.profileComplete && data?.termsAccepted) {
             console.log('[AuthLayout] Redirecting to home - both flags true');
             navigationInProgressRef.current = true;
-            router.replace('/');
+            await router.replace('/');
+            setTimeout(() => { navigationInProgressRef.current = false; }, 800);
           } else {
             console.log('[AuthLayout] No redirect needed, already on correct screen');
+            navigationInProgressRef.current = false;
           }
         } catch (err) {
           console.warn('[AuthLayout] Guard error:', err);
+          navigationInProgressRef.current = false;
         }
       }
     });
 
     return () => unsubscribe();
-  }, [segments]);
+  }, [segments, router]);
 
   return <Stack screenOptions={{ headerShown: false }} />;
 }
