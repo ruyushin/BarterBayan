@@ -15,14 +15,14 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
+import { TradeChatModal } from "../../components/TradeChatModal";
+import { TradeOffersModal } from "../../components/TradeOffersModal";
 import { auth } from "../../firebaseConfig";
 import { getAllItems } from "../../services/itemService";
 import {
   TradeOffer,
   cancelTradeOffer,
-  getOffersForItem,
   subscribeToSentOffers,
-  updateTradeStatus,
 } from "../../services/tradeService";
 
 const FILTER_CATEGORIES = [
@@ -52,30 +52,29 @@ export default function TradeScreen() {
   const [userItems, setUserItems] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
 
-  // ── Trade offer state ────────────────────────────────────────────────────
+  // ── Sent offers ──────────────────────────────────────────────────────────
   const [sentOffers, setSentOffers] = useState<TradeOffer[]>([]);
   const [cancellingOfferId, setCancellingOfferId] = useState<string | null>(
     null,
   );
   const [confirmCancelId, setConfirmCancelId] = useState<string | null>(null);
 
-  // See Offers modal (incoming offers on YOUR item)
+  // ── See Offers modal (TradeOffersModal) ──────────────────────────────────
   const [offersModalVisible, setOffersModalVisible] = useState(false);
   const [selectedItemForOffers, setSelectedItemForOffers] = useState<any>(null);
-  const [incomingOffers, setIncomingOffers] = useState<TradeOffer[]>([]);
-  const [loadingIncoming, setLoadingIncoming] = useState(false);
-  const [updatingOfferId, setUpdatingOfferId] = useState<string | null>(null);
 
-  // See Status modal (detail view for a single sent offer)
+  // ── Status detail modal (sent offer detail) ──────────────────────────────
   const [statusModalVisible, setStatusModalVisible] = useState(false);
   const [selectedOffer, setSelectedOffer] = useState<TradeOffer | null>(null);
-  // ─────────────────────────────────────────────────────────────────────────
+
+  // ── Chat modal (opened from status detail for sent offers) ───────────────
+  const [chatModalVisible, setChatModalVisible] = useState(false);
 
   const router = useRouter();
   const fadeAnim = useRef(new Animated.Value(1)).current;
   const addButtonScale = useRef(new Animated.Value(1)).current;
 
-  // ── Fetch user's own items (one-time, pull-to-refresh only) ──────────────
+  // ── Fetch user's own items ───────────────────────────────────────────────
   useEffect(() => {
     fetchUserItems();
   }, []);
@@ -111,42 +110,15 @@ export default function TradeScreen() {
       });
     });
 
-    return unsubscribe; // Cleans up the listener when the component unmounts
+    return unsubscribe;
   }, []);
 
   // ── Handlers ─────────────────────────────────────────────────────────────
-  const handleSeeOffers = async (item: any) => {
+  const handleSeeOffers = (item: any) => {
     setSelectedItemForOffers(item);
     setOffersModalVisible(true);
-    setLoadingIncoming(true);
-    try {
-      const offers = await getOffersForItem(item.id);
-      setIncomingOffers(offers);
-    } catch {
-      setIncomingOffers([]);
-    } finally {
-      setLoadingIncoming(false);
-    }
   };
 
-  const handleRespondToOffer = async (
-    offerId: string,
-    response: "accepted" | "declined",
-  ) => {
-    setUpdatingOfferId(offerId);
-    try {
-      await updateTradeStatus(offerId, response);
-      setIncomingOffers((prev) =>
-        prev.map((o) => (o.id === offerId ? { ...o, status: response } : o)),
-      );
-    } catch {
-      /* noop */
-    } finally {
-      setUpdatingOfferId(null);
-    }
-  };
-
-  // Pure action — called directly from the inline card confirmation
   const executeCancelOffer = async (offerId: string) => {
     setConfirmCancelId(null);
     setCancellingOfferId(offerId);
@@ -167,7 +139,6 @@ export default function TradeScreen() {
     }
   };
 
-  // Alert-based confirmation — used only from the status detail modal
   const handleCancelFromModal = (offer: TradeOffer) => {
     Alert.alert(
       "Cancel Trade Offer",
@@ -248,15 +219,13 @@ export default function TradeScreen() {
       return 0;
     });
 
-  const filteredSentOffers = sentOffers.filter((offer) => {
-    return (
+  const filteredSentOffers = sentOffers.filter(
+    (offer) =>
       search.length === 0 ||
       offer.offeredItemTitle.toLowerCase().includes(search.toLowerCase()) ||
-      offer.requestedItemTitle.toLowerCase().includes(search.toLowerCase())
-    );
-  });
+      offer.requestedItemTitle.toLowerCase().includes(search.toLowerCase()),
+  );
 
-  // Pending count excludes cancelled offers
   const pendingCount = sentOffers.filter((o) => o.status === "pending").length;
 
   // ── Renderers ─────────────────────────────────────────────────────────────
@@ -287,9 +256,8 @@ export default function TradeScreen() {
     const isPending = offer.status === "pending";
 
     return (
-      // Outer View — not touchable, so the cancel button gets its own responder
       <View style={styles.offerCard}>
-        {/* Tappable area: badge + items → opens status modal */}
+        {/* Tappable area → opens status detail modal */}
         <TouchableOpacity
           onPress={() => {
             setSelectedOffer(offer);
@@ -297,7 +265,6 @@ export default function TradeScreen() {
           }}
           activeOpacity={0.8}
         >
-          {/* Status badge */}
           <View
             style={[styles.statusBadge, { backgroundColor: statusStyle.bg }]}
           >
@@ -306,9 +273,7 @@ export default function TradeScreen() {
             </Text>
           </View>
 
-          {/* Items row */}
           <View style={styles.offerItemsRow}>
-            {/* Your offered item */}
             <View style={styles.offerSide}>
               <Image
                 source={{
@@ -321,13 +286,9 @@ export default function TradeScreen() {
                 {offer.offeredItemTitle}
               </Text>
             </View>
-
-            {/* Arrow */}
             <View style={styles.offerArrow}>
               <Ionicons name="swap-horizontal" size={22} color={NAVY} />
             </View>
-
-            {/* Requested item */}
             <View style={styles.offerSide}>
               <Image
                 source={{
@@ -344,7 +305,7 @@ export default function TradeScreen() {
           </View>
         </TouchableOpacity>
 
-        {/* Cancel / inline confirm — no Alert, works reliably in FlatList */}
+        {/* Cancel / inline confirm */}
         {isPending &&
           (isCancelling ? (
             <View style={styles.cancelOfferBtn}>
@@ -352,7 +313,6 @@ export default function TradeScreen() {
               <Text style={styles.cancelOfferBtnText}>Cancelling…</Text>
             </View>
           ) : confirmCancelId === offer.id ? (
-            // Step 2: inline confirmation row
             <View style={styles.cancelConfirmRow}>
               <Text style={styles.cancelConfirmText}>Cancel this offer?</Text>
               <TouchableOpacity
@@ -369,7 +329,6 @@ export default function TradeScreen() {
               </TouchableOpacity>
             </View>
           ) : (
-            // Step 1: tap to reveal confirm row
             <TouchableOpacity
               style={styles.cancelOfferBtn}
               onPress={() => setConfirmCancelId(offer.id)}
@@ -426,7 +385,6 @@ export default function TradeScreen() {
           >
             Your Offers
           </Text>
-          {/* Live badge — updates instantly via onSnapshot */}
           {pendingCount > 0 && (
             <View style={styles.tabBadge}>
               <Text style={styles.tabBadgeText}>{pendingCount}</Text>
@@ -435,7 +393,7 @@ export default function TradeScreen() {
         </TouchableOpacity>
       </View>
 
-      {/* Sort + Filter (only on trades tab) */}
+      {/* Sort + Filter */}
       {activeTab === "trades" && (
         <>
           <View style={styles.row}>
@@ -451,7 +409,6 @@ export default function TradeScreen() {
               <Text style={styles.smallText}>Filter ({filterCategory})</Text>
             </TouchableOpacity>
           </View>
-
           {isFilterOpen && (
             <View style={styles.filterDropdown}>
               {FILTER_CATEGORIES.map((category) => (
@@ -502,7 +459,6 @@ export default function TradeScreen() {
             keyExtractor={(offer) => offer.id}
             showsVerticalScrollIndicator={false}
             contentContainerStyle={{ paddingBottom: 80, paddingHorizontal: 16 }}
-            // No onRefresh needed — updates are real-time via onSnapshot
             ListEmptyComponent={
               <View style={styles.emptyContainer}>
                 <Ionicons
@@ -525,138 +481,18 @@ export default function TradeScreen() {
         </TouchableOpacity>
       </Animated.View>
 
-      {/* ── See Offers Modal (incoming offers on your item) ───────────────── */}
-      <Modal
+      {/* ── TradeOffersModal — incoming offers on your item ─────────────── */}
+      <TradeOffersModal
         visible={offersModalVisible}
-        transparent
-        animationType="slide"
-        onRequestClose={() => setOffersModalVisible(false)}
-      >
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalSheet}>
-            <View style={styles.sheetHandle} />
-            <Text style={styles.modalTitle}>Offers on</Text>
-            <Text style={styles.modalItemName} numberOfLines={1}>
-              {selectedItemForOffers?.title}
-            </Text>
+        itemId={selectedItemForOffers?.id ?? null}
+        itemTitle={selectedItemForOffers?.title ?? ""}
+        onClose={() => {
+          setOffersModalVisible(false);
+          setSelectedItemForOffers(null);
+        }}
+      />
 
-            {loadingIncoming ? (
-              <View style={styles.modalLoader}>
-                <ActivityIndicator size="large" color={NAVY} />
-              </View>
-            ) : incomingOffers.length === 0 ? (
-              <View style={styles.modalEmpty}>
-                <Ionicons name="inbox-outline" size={48} color="#ccc" />
-                <Text style={styles.modalEmptyText}>No offers yet</Text>
-              </View>
-            ) : (
-              <FlatList
-                data={incomingOffers}
-                keyExtractor={(o) => o.id}
-                showsVerticalScrollIndicator={false}
-                contentContainerStyle={{ paddingBottom: 16 }}
-                renderItem={({ item: offer }) => {
-                  const statusStyle =
-                    STATUS_COLORS[offer.status] || STATUS_COLORS.pending;
-                  const isUpdating = updatingOfferId === offer.id;
-                  return (
-                    <View style={styles.incomingOfferCard}>
-                      <View style={styles.incomingOffererRow}>
-                        <Image
-                          source={{
-                            uri:
-                              offer.offererAvatar ||
-                              "https://i.pravatar.cc/150?img=1",
-                          }}
-                          style={styles.incomingOffererAvatar}
-                        />
-                        <Text style={styles.incomingOffererName}>
-                          {offer.offererName}
-                        </Text>
-                        <View
-                          style={[
-                            styles.statusBadge,
-                            { backgroundColor: statusStyle.bg },
-                          ]}
-                        >
-                          <Text
-                            style={[
-                              styles.statusBadgeText,
-                              { color: statusStyle.text },
-                            ]}
-                          >
-                            {offer.status.charAt(0).toUpperCase() +
-                              offer.status.slice(1)}
-                          </Text>
-                        </View>
-                      </View>
-
-                      <View style={styles.incomingItemRow}>
-                        <Image
-                          source={{
-                            uri:
-                              offer.offeredItemImage ||
-                              "https://via.placeholder.com/80",
-                          }}
-                          style={styles.incomingItemImage}
-                        />
-                        <View style={{ flex: 1 }}>
-                          <Text style={styles.incomingItemLabel}>
-                            They're offering:
-                          </Text>
-                          <Text style={styles.incomingItemTitle}>
-                            {offer.offeredItemTitle}
-                          </Text>
-                        </View>
-                      </View>
-
-                      {offer.status === "pending" && (
-                        <View style={styles.incomingActions}>
-                          <TouchableOpacity
-                            style={styles.declineBtn}
-                            onPress={() =>
-                              handleRespondToOffer(offer.id, "declined")
-                            }
-                            disabled={isUpdating}
-                          >
-                            {isUpdating ? (
-                              <ActivityIndicator size="small" color="#E11D48" />
-                            ) : (
-                              <Text style={styles.declineBtnText}>Decline</Text>
-                            )}
-                          </TouchableOpacity>
-                          <TouchableOpacity
-                            style={styles.acceptBtn}
-                            onPress={() =>
-                              handleRespondToOffer(offer.id, "accepted")
-                            }
-                            disabled={isUpdating}
-                          >
-                            {isUpdating ? (
-                              <ActivityIndicator size="small" color="#fff" />
-                            ) : (
-                              <Text style={styles.acceptBtnText}>Accept</Text>
-                            )}
-                          </TouchableOpacity>
-                        </View>
-                      )}
-                    </View>
-                  );
-                }}
-              />
-            )}
-
-            <TouchableOpacity
-              style={styles.modalCloseBtn}
-              onPress={() => setOffersModalVisible(false)}
-            >
-              <Text style={styles.modalCloseBtnText}>Close</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      </Modal>
-
-      {/* ── Status Detail Modal (for a single sent offer) ────────────────── */}
+      {/* ── Status Detail Modal — sent offer detail + chat entry ────────── */}
       <Modal
         visible={statusModalVisible}
         transparent
@@ -674,6 +510,9 @@ export default function TradeScreen() {
                   STATUS_COLORS[selectedOffer.status] || STATUS_COLORS.pending;
                 const isPending = selectedOffer.status === "pending";
                 const isCancelling = cancellingOfferId === selectedOffer.id;
+                const canChat =
+                  selectedOffer.status === "pending" ||
+                  selectedOffer.status === "accepted";
 
                 return (
                   <>
@@ -732,7 +571,7 @@ export default function TradeScreen() {
                         {selectedOffer.status === "pending" &&
                           "⏳ Waiting for owner's response"}
                         {selectedOffer.status === "accepted" &&
-                          "✅ Trade accepted! Contact the owner."}
+                          "✅ Trade accepted! Message the owner to coordinate."}
                         {selectedOffer.status === "declined" &&
                           "❌ Offer was declined"}
                         {selectedOffer.status === "cancelled" &&
@@ -740,7 +579,27 @@ export default function TradeScreen() {
                       </Text>
                     </View>
 
-                    {/* Cancel button — only visible when pending */}
+                    {/* ── Message button — visible when pending or accepted ── */}
+                    {canChat && (
+                      <TouchableOpacity
+                        style={styles.chatBtn}
+                        onPress={() => setChatModalVisible(true)}
+                        activeOpacity={0.85}
+                      >
+                        <Ionicons
+                          name="chatbubble-ellipses-outline"
+                          size={16}
+                          color="#fff"
+                        />
+                        <Text style={styles.chatBtnText}>
+                          {selectedOffer.status === "accepted"
+                            ? "Message to Coordinate"
+                            : "Message Owner"}
+                        </Text>
+                      </TouchableOpacity>
+                    )}
+
+                    {/* ── Cancel — only when pending ── */}
                     {isPending && (
                       <TouchableOpacity
                         style={styles.cancelOfferBtnModal}
@@ -777,6 +636,14 @@ export default function TradeScreen() {
           </View>
         </View>
       </Modal>
+
+      {/* ── TradeChatModal — opened from status detail modal ────────────── */}
+      <TradeChatModal
+        visible={chatModalVisible}
+        trade={selectedOffer}
+        isOwner={false} // This user is the offerer, not the owner
+        onClose={() => setChatModalVisible(false)}
+      />
     </SafeAreaView>
   );
 }
@@ -895,7 +762,7 @@ const styles = StyleSheet.create({
   offerItemsRow: {
     flexDirection: "row",
     alignItems: "center",
-    marginTop: 28, // space for the absolute-positioned status badge
+    marginTop: 28,
   },
   offerSide: { flex: 1, alignItems: "center", gap: 6 },
   offerArrow: { paddingHorizontal: 8 },
@@ -921,7 +788,6 @@ const styles = StyleSheet.create({
   },
   statusBadgeText: { fontSize: 11, fontWeight: "700" },
 
-  // Cancel offer button (inline in list card)
   cancelOfferBtn: {
     flexDirection: "row",
     alignItems: "center",
@@ -934,13 +800,7 @@ const styles = StyleSheet.create({
     borderColor: "#FECDD3",
     backgroundColor: "#FFF1F2",
   },
-  cancelOfferBtnText: {
-    fontSize: 12,
-    fontWeight: "600",
-    color: "#E11D48",
-  },
-
-  // Inline cancel confirmation row
+  cancelOfferBtnText: { fontSize: 12, fontWeight: "600", color: "#E11D48" },
   cancelConfirmRow: {
     flexDirection: "row",
     alignItems: "center",
@@ -959,11 +819,7 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     backgroundColor: "#F3F4F6",
   },
-  cancelConfirmNoText: {
-    fontSize: 12,
-    fontWeight: "600",
-    color: "#374151",
-  },
+  cancelConfirmNoText: { fontSize: 12, fontWeight: "600", color: "#374151" },
   cancelConfirmYes: {
     paddingHorizontal: 14,
     paddingVertical: 7,
@@ -972,32 +828,8 @@ const styles = StyleSheet.create({
     borderWidth: 1.5,
     borderColor: "#FECDD3",
   },
-  cancelConfirmYesText: {
-    fontSize: 12,
-    fontWeight: "700",
-    color: "#E11D48",
-  },
+  cancelConfirmYesText: { fontSize: 12, fontWeight: "700", color: "#E11D48" },
 
-  // Cancel offer button (inside status modal)
-  cancelOfferBtnModal: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 6,
-    paddingVertical: 13,
-    borderRadius: 12,
-    borderWidth: 1.5,
-    borderColor: "#FECDD3",
-    backgroundColor: "#FFF1F2",
-    marginBottom: 10,
-  },
-  cancelOfferBtnModalText: {
-    fontSize: 14,
-    fontWeight: "700",
-    color: "#E11D48",
-  },
-
-  // Empty states
   emptyContainer: {
     flex: 1,
     justifyContent: "center",
@@ -1007,7 +839,6 @@ const styles = StyleSheet.create({
   },
   emptyText: { color: "#999", fontSize: 16 },
 
-  // Add button
   addButton: {
     position: "absolute",
     bottom: 20,
@@ -1050,75 +881,6 @@ const styles = StyleSheet.create({
     color: "#111827",
     marginBottom: 4,
   },
-  modalItemName: {
-    fontSize: 15,
-    fontWeight: "600",
-    color: NAVY,
-    marginBottom: 16,
-  },
-  modalLoader: { alignItems: "center", paddingVertical: 40 },
-  modalEmpty: { alignItems: "center", paddingVertical: 40, gap: 12 },
-  modalEmptyText: { fontSize: 14, color: "#6B7280" },
-  modalCloseBtn: {
-    marginTop: 16,
-    backgroundColor: "#F3F4F6",
-    paddingVertical: 14,
-    borderRadius: 12,
-    alignItems: "center",
-  },
-  modalCloseBtnText: { fontSize: 15, fontWeight: "600", color: "#374151" },
-
-  // Incoming offer cards
-  incomingOfferCard: {
-    backgroundColor: "#F9FAFB",
-    borderRadius: 12,
-    padding: 14,
-    marginBottom: 12,
-    gap: 10,
-  },
-  incomingOffererRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-  },
-  incomingOffererAvatar: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-  },
-  incomingOffererName: {
-    flex: 1,
-    fontSize: 14,
-    fontWeight: "700",
-    color: "#111827",
-  },
-  incomingItemRow: { flexDirection: "row", alignItems: "center", gap: 12 },
-  incomingItemImage: {
-    width: 60,
-    height: 60,
-    borderRadius: 8,
-    backgroundColor: "#E5E7EB",
-  },
-  incomingItemLabel: { fontSize: 11, color: "#6B7280", marginBottom: 2 },
-  incomingItemTitle: { fontSize: 13, fontWeight: "600", color: "#111827" },
-  incomingActions: { flexDirection: "row", gap: 10, marginTop: 4 },
-  declineBtn: {
-    flex: 1,
-    paddingVertical: 10,
-    borderRadius: 8,
-    borderWidth: 1.5,
-    borderColor: "#E11D48",
-    alignItems: "center",
-  },
-  declineBtnText: { fontSize: 13, fontWeight: "600", color: "#E11D48" },
-  acceptBtn: {
-    flex: 2,
-    paddingVertical: 10,
-    borderRadius: 8,
-    backgroundColor: "#16A34A",
-    alignItems: "center",
-  },
-  acceptBtnText: { fontSize: 13, fontWeight: "600", color: "#fff" },
 
   // Status detail modal
   statusDetailRow: {
@@ -1145,11 +907,52 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     padding: 14,
     alignItems: "center",
-    marginBottom: 8,
+    marginBottom: 12,
   },
   statusDetailBadgeText: {
     fontSize: 15,
     fontWeight: "700",
     textAlign: "center",
   },
+
+  // Chat button
+  chatBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    backgroundColor: NAVY,
+    paddingVertical: 13,
+    borderRadius: 12,
+    marginBottom: 10,
+  },
+  chatBtnText: { fontSize: 14, fontWeight: "700", color: "#fff" },
+
+  // Cancel offer button (inside modal)
+  cancelOfferBtnModal: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+    paddingVertical: 13,
+    borderRadius: 12,
+    borderWidth: 1.5,
+    borderColor: "#FECDD3",
+    backgroundColor: "#FFF1F2",
+    marginBottom: 10,
+  },
+  cancelOfferBtnModalText: {
+    fontSize: 14,
+    fontWeight: "700",
+    color: "#E11D48",
+  },
+
+  modalCloseBtn: {
+    marginTop: 4,
+    backgroundColor: "#F3F4F6",
+    paddingVertical: 14,
+    borderRadius: 12,
+    alignItems: "center",
+  },
+  modalCloseBtnText: { fontSize: 15, fontWeight: "600", color: "#374151" },
 });
