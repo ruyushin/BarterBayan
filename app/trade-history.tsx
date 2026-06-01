@@ -31,23 +31,25 @@ const ACCENT_RED = "#C0392B";
 const GOLD = "#C9A227";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
-export type TradeStatus = "pending" | "completed" | "cancelled" | "declined";
+// FIX: added "accepted" — tradeService.ts writes this status when a trade is accepted
+export type TradeStatus =
+  | "pending"
+  | "accepted"
+  | "completed"
+  | "cancelled"
+  | "declined";
 
 export interface TradeRecord {
   id: string;
-  // The other party
   counterpartUid: string;
   counterpartUsername: string;
   counterpartAvatarUrl?: string;
-  // What was offered / requested
   offeredItemTitle: string;
   requestedItemTitle: string;
-  // Meta
   status: TradeStatus;
   initiatedByMe: boolean;
   createdAt: Date;
   updatedAt: Date;
-  // Optional note attached to the proposal
   note?: string;
 }
 
@@ -56,17 +58,30 @@ type FilterTab = "all" | TradeStatus;
 const FILTER_TABS: { key: FilterTab; label: string }[] = [
   { key: "all", label: "All" },
   { key: "pending", label: "Pending" },
+  { key: "accepted", label: "Accepted" },
   { key: "completed", label: "Completed" },
   { key: "cancelled", label: "Cancelled" },
   { key: "declined", label: "Declined" },
 ];
 
 // ─── Status config ────────────────────────────────────────────────────────────
+// FIX: "accepted" entry added so STATUS_CONFIG[trade.status] is never undefined
 const STATUS_CONFIG: Record<
   TradeStatus,
   { label: string; color: string; bg: string; icon: string }
 > = {
-  pending: { label: "Pending", color: "#B45309", bg: "#FEF3C7", icon: "time" },
+  pending: {
+    label: "Pending",
+    color: "#B45309",
+    bg: "#FEF3C7",
+    icon: "time",
+  },
+  accepted: {
+    label: "Accepted",
+    color: "#065F46",
+    bg: "#D1FAE5",
+    icon: "checkmark-circle",
+  },
   completed: {
     label: "Completed",
     color: "#065F46",
@@ -85,6 +100,14 @@ const STATUS_CONFIG: Record<
     bg: "#FEE2E2",
     icon: "close-circle",
   },
+};
+
+// FIX: fallback config used when a trade carries an unrecognised status string
+const FALLBACK_STATUS_CONFIG = {
+  label: "Unknown",
+  color: "#6B7280",
+  bg: "#F3F4F6",
+  icon: "help-circle",
 };
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -110,7 +133,9 @@ function avatarInitial(name: string): string {
 // ─── Trade Card ───────────────────────────────────────────────────────────────
 function TradeCard({ trade }: { trade: TradeRecord }) {
   const scale = useRef(new Animated.Value(1)).current;
-  const cfg = STATUS_CONFIG[trade.status];
+
+  // FIX: fall back to FALLBACK_STATUS_CONFIG so .bg / .color never throw
+  const cfg = STATUS_CONFIG[trade.status] ?? FALLBACK_STATUS_CONFIG;
 
   const handlePressIn = () =>
     Animated.spring(scale, { toValue: 0.97, useNativeDriver: true }).start();
@@ -124,8 +149,6 @@ function TradeCard({ trade }: { trade: TradeRecord }) {
         activeOpacity={0.85}
         onPressIn={handlePressIn}
         onPressOut={handlePressOut}
-        // TODO: navigate to trade detail screen
-        // onPress={() => router.push(`/trade/${trade.id}`)}
       >
         {/* Left: Avatar */}
         <View style={cardStyles.avatarWrapper}>
@@ -134,7 +157,6 @@ function TradeCard({ trade }: { trade: TradeRecord }) {
               {avatarInitial(trade.counterpartUsername)}
             </Text>
           </View>
-          {/* Direction indicator */}
           <View
             style={[
               cardStyles.directionBadge,
@@ -158,7 +180,6 @@ function TradeCard({ trade }: { trade: TradeRecord }) {
             </Text>
           </View>
 
-          {/* Items exchange row */}
           <View style={cardStyles.itemsRow}>
             <Text style={cardStyles.itemLabel} numberOfLines={1}>
               {trade.offeredItemTitle}
@@ -175,7 +196,6 @@ function TradeCard({ trade }: { trade: TradeRecord }) {
             </Text>
           ) : null}
 
-          {/* Status pill */}
           <View style={[cardStyles.statusPill, { backgroundColor: cfg.bg }]}>
             <Ionicons name={cfg.icon as any} size={16} color={cfg.color} />
             <Text style={[cardStyles.statusLabel, { color: cfg.color }]}>
@@ -205,6 +225,11 @@ function EmptyState({ filter }: { filter: FilterTab }) {
       title: "No pending trades",
       subtitle: "Trades waiting for a response will show up here.",
     },
+    accepted: {
+      icon: "checkmark-circle",
+      title: "No accepted trades",
+      subtitle: "Trades that have been accepted will appear here.",
+    },
     completed: {
       icon: "checkmark-circle",
       title: "No completed trades",
@@ -222,7 +247,7 @@ function EmptyState({ filter }: { filter: FilterTab }) {
     },
   };
 
-  const msg = messages[filter];
+  const msg = messages[filter] ?? messages["all"];
 
   return (
     <View style={emptyStyles.container}>
@@ -231,25 +256,16 @@ function EmptyState({ filter }: { filter: FilterTab }) {
       </View>
       <Text style={emptyStyles.title}>{msg.title}</Text>
       <Text style={emptyStyles.subtitle}>{msg.subtitle}</Text>
-
-      {/* Coming soon callout */}
-      <View style={emptyStyles.comingSoonBox}>
-        <Ionicons name="build" size={32} color={DARK_BLUE} />
-        <Text style={emptyStyles.comingSoonTitle}>
-          Trade module coming soon
-        </Text>
-        <Text style={emptyStyles.comingSoonText}>
-          We're still building out the trade engine. Once it's live, all your
-          trade activity will be tracked and displayed right here.
-        </Text>
-      </View>
     </View>
   );
 }
 
 // ─── Summary Bar ─────────────────────────────────────────────────────────────
 function SummaryBar({ trades }: { trades: TradeRecord[] }) {
-  const completed = trades.filter((t) => t.status === "completed").length;
+  // FIX: count "accepted" as completed-equivalent for the summary
+  const completed = trades.filter(
+    (t) => t.status === "completed" || t.status === "accepted",
+  ).length;
   const pending = trades.filter((t) => t.status === "pending").length;
   const total = trades.length;
 
@@ -264,7 +280,7 @@ function SummaryBar({ trades }: { trades: TradeRecord[] }) {
         <Text style={[summaryStyles.statNum, { color: "#065F46" }]}>
           {completed}
         </Text>
-        <Text style={summaryStyles.statLabel}>Completed</Text>
+        <Text style={summaryStyles.statLabel}>Accepted</Text>
       </View>
       <View style={summaryStyles.divider} />
       <View style={summaryStyles.stat}>
@@ -317,7 +333,7 @@ export default function TradeHistoryScreen() {
     }
   };
 
-  // ── Auth + Firestore listener ──
+  // ── Auth listener ──────────────────────────────────────────────────────────
   useEffect(() => {
     const unsubscribeAuth = onAuthStateChanged(auth, (user) => {
       if (!user) {
@@ -329,16 +345,13 @@ export default function TradeHistoryScreen() {
     return () => unsubscribeAuth();
   }, [router]);
 
+  // ── Firestore real-time listener ───────────────────────────────────────────
   useEffect(() => {
     if (!currentUser) return;
 
     setLoading(true);
     setError(null);
 
-    // ── Firestore query ──
-    // Trades where the current user is either the initiator or the receiver.
-    // NOTE: This requires a composite index on (participants, createdAt desc).
-    // Adjust the collection name / field paths to match your schema.
     const tradesRef = collection(db, "trades");
     const q = query(
       tradesRef,
@@ -352,18 +365,51 @@ export default function TradeHistoryScreen() {
       (snapshot) => {
         const fetched: TradeRecord[] = snapshot.docs.map((docSnap) => {
           const d = docSnap.data();
+
+          // FIX: resolve counterpart name + uid from tradeService fields
+          // tradeService stores: offererId, ownerId, offererName
+          // we derive counterpart from whichever side is NOT the current user
+          const isOfferer = d.offererId === currentUser.uid;
+          const counterpartUid = isOfferer ? d.ownerId : d.offererId;
+          const counterpartUsername = isOfferer
+            ? (d.ownerName ?? d.counterpartUsername ?? "Unknown")
+            : (d.offererName ?? d.counterpartUsername ?? "Unknown");
+          const counterpartAvatarUrl = isOfferer
+            ? (d.ownerAvatar ?? d.counterpartAvatarUrl)
+            : (d.offererAvatar ?? d.counterpartAvatarUrl);
+
+          // FIX: map tradeService field names → TradeRecord field names
+          const offeredItemTitle =
+            d.offeredItemTitle ?? d.offeredItem ?? "Unknown item";
+          const requestedItemTitle =
+            d.requestedItemTitle ?? d.requestedItem ?? "Unknown item";
+
+          // FIX: coerce unrecognised status strings to "pending" so the
+          //      fallback config handles them gracefully rather than crashing
+          const rawStatus = d.status ?? "pending";
+          const knownStatuses: TradeStatus[] = [
+            "pending",
+            "accepted",
+            "completed",
+            "cancelled",
+            "declined",
+          ];
+          const status: TradeStatus = knownStatuses.includes(rawStatus)
+            ? rawStatus
+            : "pending";
+
           return {
             id: docSnap.id,
-            counterpartUid: d.counterpartUid ?? "",
-            counterpartUsername: d.counterpartUsername ?? "Unknown",
-            counterpartAvatarUrl: d.counterpartAvatarUrl,
-            offeredItemTitle: d.offeredItemTitle ?? "Unknown item",
-            requestedItemTitle: d.requestedItemTitle ?? "Unknown item",
-            status: d.status ?? "pending",
-            initiatedByMe: d.initiatorUid === currentUser.uid,
+            counterpartUid,
+            counterpartUsername,
+            counterpartAvatarUrl,
+            offeredItemTitle,
+            requestedItemTitle,
+            status,
+            initiatedByMe: isOfferer,
             createdAt: d.createdAt?.toDate?.() ?? new Date(),
             updatedAt: d.updatedAt?.toDate?.() ?? new Date(),
-            note: d.note,
+            note: d.message ?? d.note,
           } as TradeRecord;
         });
 
@@ -380,7 +426,6 @@ export default function TradeHistoryScreen() {
         const isIndexError = err?.code === "failed-precondition";
 
         if (isIndexError) {
-          // Extract the index creation URL from the error message if available
           const errorMsg = err?.message ?? "";
           const indexUrl = errorMsg.match(
             /https:\/\/console\.firebase\.google\.com[^\s]+/,
@@ -388,7 +433,7 @@ export default function TradeHistoryScreen() {
 
           if (indexUrl) {
             setError(
-              "Trade history requires a database index. Creating it now...",
+              "Trade history requires a database index. Tap to create it in Firebase Console.",
             );
             Linking.openURL(indexUrl).catch(() => {
               setError(
@@ -397,7 +442,7 @@ export default function TradeHistoryScreen() {
             });
           } else {
             setError(
-              "Trade history is being set up. Please try again shortly.",
+              "Trade history needs a Firestore index. Check your Firebase Console.",
             );
           }
         } else if (isOffline) {
@@ -415,7 +460,7 @@ export default function TradeHistoryScreen() {
     return () => unsubscribeTrades();
   }, [currentUser]);
 
-  // ── Filtered list ──
+  // ── Filtered list ──────────────────────────────────────────────────────────
   const filteredTrades =
     activeFilter === "all"
       ? trades
@@ -423,12 +468,10 @@ export default function TradeHistoryScreen() {
 
   const handleRefresh = () => {
     setRefreshing(true);
-    // The onSnapshot listener will re-fire automatically;
-    // we just briefly show the spinner.
     setTimeout(() => setRefreshing(false), 1000);
   };
 
-  // ── Loading ──
+  // ── Loading ────────────────────────────────────────────────────────────────
   if (loading) {
     return (
       <View style={styles.container}>
@@ -451,10 +494,10 @@ export default function TradeHistoryScreen() {
     );
   }
 
-  // ── Main UI ──
+  // ── Main UI ────────────────────────────────────────────────────────────────
   return (
     <View style={styles.container}>
-      {/* ── Header ── */}
+      {/* Header */}
       <View style={styles.header}>
         <TouchableOpacity
           style={styles.backButton}
@@ -483,7 +526,7 @@ export default function TradeHistoryScreen() {
         <Animated.View
           style={{ opacity: fadeAnim, transform: [{ translateY: slideAnim }] }}
         >
-          {/* ── Error Banner ── */}
+          {/* Error Banner */}
           {error && (
             <View style={styles.errorBanner}>
               <View style={styles.errorBannerContent}>
@@ -493,10 +536,10 @@ export default function TradeHistoryScreen() {
             </View>
           )}
 
-          {/* ── Summary Bar (only when there are trades) ── */}
+          {/* Summary Bar */}
           {trades.length > 0 && <SummaryBar trades={trades} />}
 
-          {/* ── Filter Tabs ── */}
+          {/* Filter Tabs */}
           <ScrollView
             horizontal
             showsHorizontalScrollIndicator={false}
@@ -543,7 +586,7 @@ export default function TradeHistoryScreen() {
             })}
           </ScrollView>
 
-          {/* ── Trade List or Empty State ── */}
+          {/* Trade List or Empty State */}
           {filteredTrades.length === 0 ? (
             <EmptyState filter={activeFilter} />
           ) : (
@@ -579,12 +622,7 @@ export default function TradeHistoryScreen() {
 
 // ─── Main Styles ──────────────────────────────────────────────────────────────
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: LIGHT_BG,
-  },
-
-  // Header
+  container: { flex: 1, backgroundColor: LIGHT_BG },
   header: {
     backgroundColor: HEADER_BG,
     flexDirection: "row",
@@ -616,20 +654,8 @@ const styles = StyleSheet.create({
     letterSpacing: 0.4,
   },
   headerSpacer: { width: 36 },
-
-  // Loading
-  loadingContainer: {
-    flex: 1,
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  loadingText: {
-    marginTop: 12,
-    fontSize: 14,
-    color: "#888",
-  },
-
-  // Error banner
+  loadingContainer: { flex: 1, justifyContent: "center", alignItems: "center" },
+  loadingText: { marginTop: 12, fontSize: 14, color: "#888" },
   errorBanner: {
     backgroundColor: "#FFF3CD",
     padding: 12,
@@ -639,31 +665,16 @@ const styles = StyleSheet.create({
     borderLeftWidth: 4,
     borderLeftColor: "#F5A623",
   },
-  errorBannerContent: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-  },
+  errorBannerContent: { flexDirection: "row", alignItems: "center", gap: 8 },
   errorBannerText: {
     color: "#856404",
     fontSize: 13,
     fontWeight: "500",
     flex: 1,
   },
-
-  // Scroll
-  scrollContent: {
-    paddingBottom: 48,
-  },
-
-  // Filter tabs
-  tabsScroll: {
-    marginTop: 16,
-  },
-  tabsContainer: {
-    paddingHorizontal: 16,
-    gap: 8,
-  },
+  scrollContent: { paddingBottom: 48 },
+  tabsScroll: { marginTop: 16 },
+  tabsContainer: { paddingHorizontal: 16, gap: 8 },
   tab: {
     flexDirection: "row",
     alignItems: "center",
@@ -675,18 +686,9 @@ const styles = StyleSheet.create({
     borderColor: "#E5E5E5",
     gap: 6,
   },
-  tabActive: {
-    backgroundColor: DARK_BLUE,
-    borderColor: DARK_BLUE,
-  },
-  tabLabel: {
-    fontSize: 13,
-    fontWeight: "600",
-    color: "#555",
-  },
-  tabLabelActive: {
-    color: "#fff",
-  },
+  tabActive: { backgroundColor: DARK_BLUE, borderColor: DARK_BLUE },
+  tabLabel: { fontSize: 13, fontWeight: "600", color: "#555" },
+  tabLabelActive: { color: "#fff" },
   tabBadge: {
     minWidth: 18,
     height: 18,
@@ -696,36 +698,12 @@ const styles = StyleSheet.create({
     alignItems: "center",
     paddingHorizontal: 4,
   },
-  tabBadgeActive: {
-    backgroundColor: "rgba(255,255,255,0.25)",
-  },
-  tabBadgeText: {
-    fontSize: 11,
-    fontWeight: "700",
-    color: "#666",
-  },
-  tabBadgeTextActive: {
-    color: "#fff",
-  },
-
-  // List
-  listContainer: {
-    marginTop: 16,
-    paddingHorizontal: 16,
-    gap: 10,
-  },
-
-  // Legend
-  legend: {
-    flexDirection: "row",
-    gap: 16,
-    marginBottom: 4,
-  },
-  legendItem: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
-  },
+  tabBadgeActive: { backgroundColor: "rgba(255,255,255,0.25)" },
+  tabBadgeText: { fontSize: 11, fontWeight: "700", color: "#666" },
+  tabBadgeTextActive: { color: "#fff" },
+  listContainer: { marginTop: 16, paddingHorizontal: 16, gap: 10 },
+  legend: { flexDirection: "row", gap: 16, marginBottom: 4 },
+  legendItem: { flexDirection: "row", alignItems: "center", gap: 6 },
   legendDot: {
     width: 18,
     height: 18,
@@ -733,16 +711,8 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     alignItems: "center",
   },
-  legendDotText: {
-    color: "#fff",
-    fontSize: 10,
-    fontWeight: "800",
-  },
-  legendLabel: {
-    fontSize: 12,
-    color: "#888",
-    fontWeight: "500",
-  },
+  legendDotText: { color: "#fff", fontSize: 10, fontWeight: "800" },
+  legendLabel: { fontSize: 12, color: "#888", fontWeight: "500" },
 });
 
 // ─── Card Styles ──────────────────────────────────────────────────────────────
@@ -760,13 +730,7 @@ const cardStyles = StyleSheet.create({
     shadowOpacity: 0.06,
     shadowRadius: 4,
   },
-
-  // Avatar
-  avatarWrapper: {
-    position: "relative",
-    width: 48,
-    height: 48,
-  },
+  avatarWrapper: { position: "relative", width: 48, height: 48 },
   avatarCircle: {
     width: 48,
     height: 48,
@@ -775,11 +739,7 @@ const cardStyles = StyleSheet.create({
     justifyContent: "center",
     alignItems: "center",
   },
-  avatarText: {
-    color: "#fff",
-    fontSize: 20,
-    fontWeight: "800",
-  },
+  avatarText: { color: "#fff", fontSize: 20, fontWeight: "800" },
   directionBadge: {
     position: "absolute",
     bottom: -2,
@@ -798,12 +758,7 @@ const cardStyles = StyleSheet.create({
     fontWeight: "800",
     lineHeight: 11,
   },
-
-  // Info
-  info: {
-    flex: 1,
-    gap: 5,
-  },
+  info: { flex: 1, gap: 5 },
   nameRow: {
     flexDirection: "row",
     justifyContent: "space-between",
@@ -821,33 +776,10 @@ const cardStyles = StyleSheet.create({
     fontWeight: "500",
     marginLeft: 8,
   },
-
-  // Items
-  itemsRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
-  },
-  itemLabel: {
-    flex: 1,
-    fontSize: 12.5,
-    color: "#555",
-    fontWeight: "500",
-  },
-  arrow: {
-    fontSize: 14,
-    color: DARK_BLUE,
-    fontWeight: "700",
-  },
-
-  // Note
-  note: {
-    fontSize: 12,
-    color: "#AAAAAA",
-    fontStyle: "italic",
-  },
-
-  // Status pill
+  itemsRow: { flexDirection: "row", alignItems: "center", gap: 6 },
+  itemLabel: { flex: 1, fontSize: 12.5, color: "#555", fontWeight: "500" },
+  arrow: { fontSize: 14, color: DARK_BLUE, fontWeight: "700" },
+  note: { fontSize: 12, color: "#AAAAAA", fontStyle: "italic" },
   statusPill: {
     flexDirection: "row",
     alignItems: "center",
@@ -858,10 +790,7 @@ const cardStyles = StyleSheet.create({
     gap: 4,
     marginTop: 2,
   },
-  statusLabel: {
-    fontSize: 11,
-    fontWeight: "700",
-  },
+  statusLabel: { fontSize: 11, fontWeight: "700" },
 });
 
 // ─── Summary Styles ───────────────────────────────────────────────────────────
@@ -879,16 +808,8 @@ const summaryStyles = StyleSheet.create({
     shadowOpacity: 0.06,
     shadowRadius: 4,
   },
-  stat: {
-    flex: 1,
-    alignItems: "center",
-    gap: 2,
-  },
-  statNum: {
-    fontSize: 22,
-    fontWeight: "800",
-    color: DARK_BLUE,
-  },
+  stat: { flex: 1, alignItems: "center", gap: 2 },
+  statNum: { fontSize: 22, fontWeight: "800", color: DARK_BLUE },
   statLabel: {
     fontSize: 11,
     color: "#999",
@@ -896,11 +817,7 @@ const summaryStyles = StyleSheet.create({
     textTransform: "uppercase",
     letterSpacing: 0.5,
   },
-  divider: {
-    width: 1,
-    backgroundColor: "#ECECEC",
-    marginVertical: 4,
-  },
+  divider: { width: 1, backgroundColor: "#ECECEC", marginVertical: 4 },
 });
 
 // ─── Empty State Styles ───────────────────────────────────────────────────────
@@ -933,28 +850,5 @@ const emptyStyles = StyleSheet.create({
     textAlign: "center",
     lineHeight: 20,
     marginBottom: 28,
-  },
-  comingSoonBox: {
-    backgroundColor: "#fff",
-    borderRadius: 16,
-    padding: 20,
-    alignItems: "center",
-    borderWidth: 1.5,
-    borderColor: "#E8E8F0",
-    borderStyle: "dashed",
-    width: "100%",
-  },
-  comingSoonTitle: {
-    fontSize: 15,
-    fontWeight: "800",
-    color: DARK_BLUE,
-    marginBottom: 6,
-    textAlign: "center",
-  },
-  comingSoonText: {
-    fontSize: 13,
-    color: "#888",
-    textAlign: "center",
-    lineHeight: 19,
   },
 });

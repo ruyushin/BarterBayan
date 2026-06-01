@@ -1,4 +1,5 @@
 import { Ionicons } from "@expo/vector-icons";
+import { useRouter } from "expo-router";
 import React, { useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
@@ -77,6 +78,7 @@ export const TradeChatModal: React.FC<TradeChatModalProps> = ({
   onClose,
   onStatusChange,
 }) => {
+  const router = useRouter();
   const [messages, setMessages] = useState<TradeMessage[]>([]);
   const [text, setText] = useState("");
   const [sending, setSending] = useState(false);
@@ -112,6 +114,8 @@ export const TradeChatModal: React.FC<TradeChatModalProps> = ({
           photoURL: currentUser.photoURL,
         },
         text,
+        // Pass the recipient's uid so the service can notify them
+        isOwner ? trade.offererId : trade.ownerId,
       );
       setText("");
     } finally {
@@ -130,9 +134,21 @@ export const TradeChatModal: React.FC<TradeChatModalProps> = ({
     }
   };
 
+  // Navigate to a user's profile and close the modal so the stack is clean
+  const goToProfile = (userId: string) => {
+    if (!userId) return;
+    onClose();
+    setTimeout(() => {
+      router.push({ pathname: "/user-profile", params: { userId } });
+    }, 300); // brief delay lets the modal animate out first
+  };
+
   if (!trade) return null;
 
-  const grouped: ({ type: "date"; label: string } | { type: "msg"; msg: TradeMessage })[] = [];
+  const grouped: (
+    | { type: "date"; label: string }
+    | { type: "msg"; msg: TradeMessage }
+  )[] = [];
   let lastDate = "";
   for (const msg of messages) {
     const d = formatDate(msg.createdAt);
@@ -146,6 +162,11 @@ export const TradeChatModal: React.FC<TradeChatModalProps> = ({
   const canAction = isOwner && trade.status === "pending";
   const isAccepted = trade.status === "accepted";
   const isClosed = trade.status === "declined" || trade.status === "cancelled";
+
+  // Determine the other person's profile info for the header
+  const otherUserId = isOwner ? trade.offererId : trade.ownerId;
+  const otherUserName = isOwner ? trade.offererName : "Item Owner";
+  const otherUserAvatar = isOwner ? trade.offererAvatar : "";
 
   return (
     <Modal
@@ -167,10 +188,36 @@ export const TradeChatModal: React.FC<TradeChatModalProps> = ({
             <TouchableOpacity onPress={onClose} style={styles.backBtn}>
               <Ionicons name="chevron-back" size={22} color={NAVY} />
             </TouchableOpacity>
-            <View style={styles.headerCenter}>
-              <Text style={styles.headerTitle}>Trade Chat</Text>
-              <StatusPill status={trade.status} />
-            </View>
+
+            {/* Tappable other user info */}
+            <TouchableOpacity
+              style={styles.headerCenter}
+              onPress={() => goToProfile(otherUserId)}
+              activeOpacity={0.7}
+            >
+              {otherUserAvatar ? (
+                <Image
+                  source={{ uri: otherUserAvatar }}
+                  style={styles.headerAvatar}
+                />
+              ) : (
+                <View
+                  style={[styles.headerAvatar, styles.headerAvatarFallback]}
+                >
+                  <Text style={styles.headerAvatarInitial}>
+                    {otherUserName?.[0]?.toUpperCase() ?? "?"}
+                  </Text>
+                </View>
+              )}
+              <View style={styles.headerNameBlock}>
+                <Text style={styles.headerTitle} numberOfLines={1}>
+                  {otherUserName}
+                </Text>
+                <StatusPill status={trade.status} />
+              </View>
+              <Ionicons name="chevron-forward" size={14} color="#AAAAAA" />
+            </TouchableOpacity>
+
             <View style={{ width: 34 }} />
           </View>
 
@@ -192,11 +239,9 @@ export const TradeChatModal: React.FC<TradeChatModalProps> = ({
               </Text>
               <Text style={styles.tradeCardSub}>Offered</Text>
             </View>
-
             <View style={styles.tradeCardArrow}>
               <Ionicons name="swap-horizontal" size={20} color={NAVY} />
             </View>
-
             <View style={styles.tradeCardSide}>
               {trade.requestedItemImage ? (
                 <Image
@@ -305,6 +350,11 @@ export const TradeChatModal: React.FC<TradeChatModalProps> = ({
                 }
                 const { msg } = item;
                 const isMe = msg.senderId === currentUser?.uid;
+                // Determine which userId this bubble belongs to for profile tap
+                const bubbleUserId = isMe
+                  ? (currentUser?.uid ?? "")
+                  : otherUserId;
+
                 return (
                   <View
                     style={[
@@ -312,24 +362,38 @@ export const TradeChatModal: React.FC<TradeChatModalProps> = ({
                       isMe ? styles.bubbleRowMe : styles.bubbleRowThem,
                     ]}
                   >
-                    {!isMe &&
-                      (msg.senderAvatar ? (
-                        <Image
-                          source={{ uri: msg.senderAvatar }}
-                          style={styles.avatar}
-                        />
-                      ) : (
-                        <View style={[styles.avatar, styles.avatarFallback]}>
-                          <Text style={styles.avatarInitial}>
-                            {msg.senderName?.[0]?.toUpperCase() ?? "?"}
-                          </Text>
-                        </View>
-                      ))}
+                    {/* Tappable avatar for the other person */}
+                    {!isMe && (
+                      <TouchableOpacity
+                        onPress={() => goToProfile(bubbleUserId)}
+                        activeOpacity={0.8}
+                      >
+                        {msg.senderAvatar ? (
+                          <Image
+                            source={{ uri: msg.senderAvatar }}
+                            style={styles.avatar}
+                          />
+                        ) : (
+                          <View style={[styles.avatar, styles.avatarFallback]}>
+                            <Text style={styles.avatarInitial}>
+                              {msg.senderName?.[0]?.toUpperCase() ?? "?"}
+                            </Text>
+                          </View>
+                        )}
+                      </TouchableOpacity>
+                    )}
+
                     <View style={styles.bubbleWrap}>
+                      {/* Tappable sender name for the other person */}
                       {!isMe && (
-                        <Text style={styles.bubbleSender}>
-                          {msg.senderName}
-                        </Text>
+                        <TouchableOpacity
+                          onPress={() => goToProfile(bubbleUserId)}
+                          activeOpacity={0.7}
+                        >
+                          <Text style={styles.bubbleSender}>
+                            {msg.senderName}
+                          </Text>
+                        </TouchableOpacity>
                       )}
                       <View
                         style={[
@@ -425,6 +489,8 @@ const styles = StyleSheet.create({
     alignSelf: "center",
     marginBottom: 10,
   },
+
+  // ── Header ──
   header: {
     flexDirection: "row",
     alignItems: "center",
@@ -440,15 +506,50 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     alignItems: "center",
   },
-  headerCenter: { flex: 1, alignItems: "center", gap: 4 },
-  headerTitle: { fontSize: 16, fontWeight: "800", color: "#1A1A2E" },
-  pill: { paddingHorizontal: 10, paddingVertical: 3, borderRadius: 20 },
+  headerCenter: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    backgroundColor: "#F7F8FC",
+    borderRadius: 20,
+    paddingVertical: 6,
+    paddingHorizontal: 10,
+  },
+  headerAvatar: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: "#E8E8E8",
+  },
+  headerAvatarFallback: {
+    backgroundColor: NAVY,
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  headerAvatarInitial: { fontSize: 13, fontWeight: "700", color: "#fff" },
+  headerNameBlock: { flex: 1, gap: 2 },
+  headerTitle: {
+    fontSize: 14,
+    fontWeight: "800",
+    color: "#1A1A2E",
+  },
+
+  // ── Status pill ──
+  pill: {
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 20,
+    alignSelf: "flex-start",
+  },
   pillText: {
-    fontSize: 11,
+    fontSize: 10,
     fontWeight: "700",
     textTransform: "uppercase",
     letterSpacing: 0.5,
   },
+
+  // ── Trade card ──
   tradeCard: {
     flexDirection: "row",
     alignItems: "center",
@@ -487,6 +588,8 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     padding: 6,
   },
+
+  // ── Accepted banner ──
   acceptedBanner: {
     flexDirection: "row",
     alignItems: "center",
@@ -504,6 +607,8 @@ const styles = StyleSheet.create({
     fontWeight: "600",
     flex: 1,
   },
+
+  // ── Action row ──
   actionRow: {
     flexDirection: "row",
     marginHorizontal: 16,
@@ -526,12 +631,16 @@ const styles = StyleSheet.create({
   },
   acceptBtn: { backgroundColor: NAVY },
   actionBtnText: { fontSize: 14, fontWeight: "700" },
+
+  // ── Loader ──
   loaderBox: {
     flex: 1,
     justifyContent: "center",
     alignItems: "center",
     paddingVertical: 32,
   },
+
+  // ── Message list ──
   msgList: { paddingHorizontal: 16, paddingVertical: 8, flexGrow: 1 },
   emptyChat: { alignItems: "center", paddingVertical: 40, gap: 8 },
   emptyChatText: {
@@ -548,6 +657,8 @@ const styles = StyleSheet.create({
   },
   dateLine: { flex: 1, height: 1, backgroundColor: "#ECECEC" },
   dateLabel: { fontSize: 11, color: "#AAAAAA", fontWeight: "600" },
+
+  // ── Bubbles ──
   bubbleRow: {
     flexDirection: "row",
     marginBottom: 10,
@@ -585,6 +696,8 @@ const styles = StyleSheet.create({
   bubbleTime: { fontSize: 10, color: "#BBBBBB", marginTop: 3 },
   bubbleTimeMe: { textAlign: "right", marginRight: 4 },
   bubbleTimeThem: { textAlign: "left", marginLeft: 4 },
+
+  // ── Input bar ──
   inputRow: {
     flexDirection: "row",
     alignItems: "flex-end",
@@ -622,9 +735,5 @@ const styles = StyleSheet.create({
     borderTopColor: "#F0F0F0",
     alignItems: "center",
   },
-  closedBarText: {
-    fontSize: 12,
-    color: "#AAAAAA",
-    fontStyle: "italic",
-  },
+  closedBarText: { fontSize: 12, color: "#AAAAAA", fontStyle: "italic" },
 });

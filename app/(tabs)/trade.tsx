@@ -1,5 +1,5 @@
 import { Ionicons } from "@expo/vector-icons";
-import { useRouter } from "expo-router";
+import { useLocalSearchParams, useRouter } from "expo-router";
 import { useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
@@ -52,29 +52,38 @@ export default function TradeScreen() {
   const [userItems, setUserItems] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
 
-  // ── Sent offers ──────────────────────────────────────────────────────────
   const [sentOffers, setSentOffers] = useState<TradeOffer[]>([]);
   const [cancellingOfferId, setCancellingOfferId] = useState<string | null>(
     null,
   );
   const [confirmCancelId, setConfirmCancelId] = useState<string | null>(null);
 
-  // ── See Offers modal (TradeOffersModal) ──────────────────────────────────
   const [offersModalVisible, setOffersModalVisible] = useState(false);
   const [selectedItemForOffers, setSelectedItemForOffers] = useState<any>(null);
 
-  // ── Status detail modal (sent offer detail) ──────────────────────────────
   const [statusModalVisible, setStatusModalVisible] = useState(false);
   const [selectedOffer, setSelectedOffer] = useState<TradeOffer | null>(null);
 
-  // ── Chat modal (opened from status detail for sent offers) ───────────────
   const [chatModalVisible, setChatModalVisible] = useState(false);
 
   const router = useRouter();
   const fadeAnim = useRef(new Animated.Value(1)).current;
   const addButtonScale = useRef(new Animated.Value(1)).current;
 
-  // ── Fetch user's own items ───────────────────────────────────────────────
+  // ── Deep-link: open trade chat directly from a notification ─────────────
+  const { openTradeId } = useLocalSearchParams<{ openTradeId?: string }>();
+
+  useEffect(() => {
+    if (!openTradeId || sentOffers.length === 0) return;
+    const target = sentOffers.find((o) => o.id === openTradeId);
+    if (target) {
+      setSelectedOffer(target);
+      setStatusModalVisible(true);
+      setChatModalVisible(true);
+    }
+  }, [openTradeId, sentOffers]);
+  // ─────────────────────────────────────────────────────────────────────────
+
   useEffect(() => {
     fetchUserItems();
   }, []);
@@ -95,14 +104,12 @@ export default function TradeScreen() {
     }
   };
 
-  // ── Real-time listener for sent offers ───────────────────────────────────
   useEffect(() => {
     const currentUserId = auth.currentUser?.uid;
     if (!currentUserId) return;
 
     const unsubscribe = subscribeToSentOffers(currentUserId, (offers) => {
       setSentOffers(offers);
-      // Keep the status modal in sync if it's open
       setSelectedOffer((prev) => {
         if (!prev) return prev;
         const updated = offers.find((o) => o.id === prev.id);
@@ -113,7 +120,6 @@ export default function TradeScreen() {
     return unsubscribe;
   }, []);
 
-  // ── Handlers ─────────────────────────────────────────────────────────────
   const handleSeeOffers = (item: any) => {
     setSelectedItemForOffers(item);
     setOffersModalVisible(true);
@@ -199,7 +205,6 @@ export default function TradeScreen() {
     ]).start(() => router.push("/add-item"));
   };
 
-  // ── Derived data ─────────────────────────────────────────────────────────
   const filteredItems = userItems
     .filter((item) => {
       const matchSearch =
@@ -228,7 +233,6 @@ export default function TradeScreen() {
 
   const pendingCount = sentOffers.filter((o) => o.status === "pending").length;
 
-  // ── Renderers ─────────────────────────────────────────────────────────────
   const renderTradeItem = ({ item }: any) => {
     const imageUrl =
       Array.isArray(item?.images) && item.images.length > 0
@@ -257,7 +261,6 @@ export default function TradeScreen() {
 
     return (
       <View style={styles.offerCard}>
-        {/* Tappable area → opens status detail modal */}
         <TouchableOpacity
           onPress={() => {
             setSelectedOffer(offer);
@@ -305,7 +308,6 @@ export default function TradeScreen() {
           </View>
         </TouchableOpacity>
 
-        {/* Cancel / inline confirm */}
         {isPending &&
           (isCancelling ? (
             <View style={styles.cancelOfferBtn}>
@@ -344,7 +346,6 @@ export default function TradeScreen() {
 
   return (
     <SafeAreaView style={styles.container}>
-      {/* Search Bar */}
       <View style={styles.searchContainer}>
         <Ionicons
           name="search-outline"
@@ -360,7 +361,6 @@ export default function TradeScreen() {
         />
       </View>
 
-      {/* Tabs */}
       <View style={styles.tabs}>
         <TouchableOpacity
           style={activeTab === "trades" ? styles.activeTab : styles.inactiveTab}
@@ -393,7 +393,6 @@ export default function TradeScreen() {
         </TouchableOpacity>
       </View>
 
-      {/* Sort + Filter */}
       {activeTab === "trades" && (
         <>
           <View style={styles.row}>
@@ -432,7 +431,6 @@ export default function TradeScreen() {
         </>
       )}
 
-      {/* List */}
       <Animated.View style={{ flex: 1, opacity: fadeAnim }}>
         {activeTab === "trades" ? (
           <FlatList
@@ -473,7 +471,6 @@ export default function TradeScreen() {
         )}
       </Animated.View>
 
-      {/* Add Item FAB */}
       <Animated.View style={{ transform: [{ scale: addButtonScale }] }}>
         <TouchableOpacity style={styles.addButton} onPress={handleAddItemPress}>
           <Ionicons name="add" size={20} color="white" />
@@ -481,7 +478,7 @@ export default function TradeScreen() {
         </TouchableOpacity>
       </Animated.View>
 
-      {/* ── TradeOffersModal — incoming offers on your item ─────────────── */}
+      {/* Incoming offers modal */}
       <TradeOffersModal
         visible={offersModalVisible}
         itemId={selectedItemForOffers?.id ?? null}
@@ -492,7 +489,7 @@ export default function TradeScreen() {
         }}
       />
 
-      {/* ── Status Detail Modal — sent offer detail + chat entry ────────── */}
+      {/* Status detail modal */}
       <Modal
         visible={statusModalVisible}
         transparent
@@ -579,7 +576,6 @@ export default function TradeScreen() {
                       </Text>
                     </View>
 
-                    {/* ── Message button — visible when pending or accepted ── */}
                     {canChat && (
                       <TouchableOpacity
                         style={styles.chatBtn}
@@ -599,7 +595,6 @@ export default function TradeScreen() {
                       </TouchableOpacity>
                     )}
 
-                    {/* ── Cancel — only when pending ── */}
                     {isPending && (
                       <TouchableOpacity
                         style={styles.cancelOfferBtnModal}
@@ -637,11 +632,11 @@ export default function TradeScreen() {
         </View>
       </Modal>
 
-      {/* ── TradeChatModal — opened from status detail modal ────────────── */}
+      {/* Trade chat modal */}
       <TradeChatModal
         visible={chatModalVisible}
         trade={selectedOffer}
-        isOwner={false} // This user is the offerer, not the owner
+        isOwner={false}
         onClose={() => setChatModalVisible(false)}
       />
     </SafeAreaView>
@@ -726,8 +721,6 @@ const styles = StyleSheet.create({
   dropdownItem: { paddingVertical: 12, paddingHorizontal: 15 },
   dropdownText: { fontSize: 13, color: "#333" },
   dropdownTextActive: { fontWeight: "700", color: "#5E3EA1" },
-
-  // Your Trades card
   card: {
     flexDirection: "row",
     alignItems: "center",
@@ -746,8 +739,6 @@ const styles = StyleSheet.create({
     borderRadius: 7,
   },
   offerText: { fontSize: 12, color: "#fff", fontWeight: "600" },
-
-  // Your Offers card
   offerCard: {
     backgroundColor: "#fff",
     borderRadius: 14,
@@ -787,7 +778,6 @@ const styles = StyleSheet.create({
     borderRadius: 20,
   },
   statusBadgeText: { fontSize: 11, fontWeight: "700" },
-
   cancelOfferBtn: {
     flexDirection: "row",
     alignItems: "center",
@@ -829,7 +819,6 @@ const styles = StyleSheet.create({
     borderColor: "#FECDD3",
   },
   cancelConfirmYesText: { fontSize: 12, fontWeight: "700", color: "#E11D48" },
-
   emptyContainer: {
     flex: 1,
     justifyContent: "center",
@@ -838,7 +827,6 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   emptyText: { color: "#999", fontSize: 16 },
-
   addButton: {
     position: "absolute",
     bottom: 20,
@@ -851,8 +839,6 @@ const styles = StyleSheet.create({
     borderRadius: 10,
   },
   addText: { color: "white", fontWeight: "700", marginLeft: 6 },
-
-  // Shared modal styles
   modalOverlay: {
     flex: 1,
     backgroundColor: "rgba(0,0,0,0.5)",
@@ -881,8 +867,6 @@ const styles = StyleSheet.create({
     color: "#111827",
     marginBottom: 4,
   },
-
-  // Status detail modal
   statusDetailRow: {
     flexDirection: "row",
     alignItems: "center",
@@ -914,8 +898,6 @@ const styles = StyleSheet.create({
     fontWeight: "700",
     textAlign: "center",
   },
-
-  // Chat button
   chatBtn: {
     flexDirection: "row",
     alignItems: "center",
@@ -927,8 +909,6 @@ const styles = StyleSheet.create({
     marginBottom: 10,
   },
   chatBtnText: { fontSize: 14, fontWeight: "700", color: "#fff" },
-
-  // Cancel offer button (inside modal)
   cancelOfferBtnModal: {
     flexDirection: "row",
     alignItems: "center",
@@ -946,7 +926,6 @@ const styles = StyleSheet.create({
     fontWeight: "700",
     color: "#E11D48",
   },
-
   modalCloseBtn: {
     marginTop: 4,
     backgroundColor: "#F3F4F6",

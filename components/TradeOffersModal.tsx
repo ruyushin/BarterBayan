@@ -1,20 +1,20 @@
 import { Ionicons } from "@expo/vector-icons";
 import React, { useEffect, useState } from "react";
 import {
-    ActivityIndicator,
-    Image,
-    Modal,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TouchableOpacity,
-    View,
+  ActivityIndicator,
+  Image,
+  Modal,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
 } from "react-native";
 import { auth } from "../firebaseConfig";
 import {
-    TradeOffer,
-    subscribeToOffersForItem,
-    updateTradeStatus,
+  TradeOffer,
+  subscribeToOffersForItem,
+  updateTradeStatus,
 } from "../services/tradeService";
 import { TradeChatModal } from "./TradeChatModal";
 

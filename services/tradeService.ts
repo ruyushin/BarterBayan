@@ -12,6 +12,7 @@ import {
   where,
 } from "firebase/firestore";
 import { db } from "../firebaseConfig";
+import { createNotification } from "./notificationService";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -281,16 +282,39 @@ export const sendTradeMessage = async (
     photoURL: string | null;
   },
   text: string,
+  recipientUid?: string,
 ): Promise<void> => {
   if (!text.trim()) return;
+
+  const now = Timestamp.now();
+
+  // Write the message
   const messagesRef = collection(db, "trades", tradeId, "messages");
   await addDoc(messagesRef, {
     senderId: sender.uid,
     senderName: sender.displayName ?? "Unknown",
     senderAvatar: sender.photoURL ?? "",
     text: text.trim(),
-    createdAt: Timestamp.now(),
+    createdAt: now,
   });
+
+  // Write a trade_message notification for the recipient so tapping it
+  // in the Inbox routes back to this trade chat, not the regular chat.
+  if (recipientUid) {
+    const senderName = sender.displayName ?? "Someone";
+    const preview =
+      text.trim().length > 60
+        ? text.trim().slice(0, 57) + "\u2026"
+        : text.trim();
+    await createNotification({
+      userId: recipientUid,
+      type: "trade_message",
+      title: `${senderName} sent you a message`,
+      body: preview,
+      avatar: sender.photoURL ?? "",
+      tradeId,
+    });
+  }
 };
 
 /**
