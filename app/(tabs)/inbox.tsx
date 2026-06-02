@@ -32,16 +32,24 @@ import {
   deleteNotifications,
   getNotifications,
   markAllNotificationsRead,
-  markNotificationRead,
 } from "../../services/notificationService";
+// ── NEW: needed to fetch the trade and open TradeChatModal ──
+import { TradeChatModal } from "../../components/TradeChatModal";
+import { TradeOffer, getTradeOffer } from "../../services/tradeService";
 
-// ─── Constants ────────────────────────────────────────────────────────────────
+// ─── Constants
 const NAVY = "#2e2d7c";
 const ACCENT = "#f5c518";
 const PAGE_SIZE = 10;
 
-// ─── Types ────────────────────────────────────────────────────────────────────
-type NotifType = "trade_offer" | "trade_accepted" | "message" | "generic";
+// ─── Types
+// CHANGED: added "trade_message" so inbox knows how to route it
+type NotifType =
+  | "trade_offer"
+  | "trade_accepted"
+  | "trade_message"
+  | "message"
+  | "generic";
 
 interface Notification {
   id: string;
@@ -63,10 +71,8 @@ interface SheetOption {
   onPress: () => void;
 }
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
+// ─── Helpers
 
-// FIX #1: Handles Firestore Timestamp, plain Date,
-//         {seconds, nanoseconds} objects, and raw strings/numbers.
 const tsToDate = (timestamp: any): Date => {
   if (!timestamp) return new Date(0);
   if (timestamp instanceof Date) return timestamp;
@@ -110,12 +116,15 @@ const letterAvatarColor = (name: string): string => {
   return AVATAR_COLORS[index];
 };
 
+// CHANGED: added trade_message icon
 const notifIcon = (type: NotifType): any => {
   switch (type) {
     case "trade_offer":
       return "swap-horizontal";
     case "trade_accepted":
       return "checkmark-circle";
+    case "trade_message":
+      return "chatbubble-ellipses";
     case "message":
       return "mail";
     default:
@@ -123,8 +132,6 @@ const notifIcon = (type: NotifType): any => {
   }
 };
 
-// FIX #2: Resolve avatar — checks every possible field name,
-//         only returns if it looks like a real HTTP(S) URL.
 const resolveAvatar = (info: any): string | null => {
   const url =
     info?.avatarUrl ||
@@ -139,9 +146,6 @@ const resolveAvatar = (info: any): string | null => {
   return null;
 };
 
-// ─── Avatar component with onError fallback ───────────────────────────────────
-// FIX #3: If the image URI fails to load, immediately falls back to
-//         the letter/colour avatar instead of showing a broken image.
 function AvatarWithFallback({
   uri,
   name,
@@ -195,7 +199,6 @@ function AvatarWithFallback({
   );
 }
 
-// ─── Notification avatar with fallback ───────────────────────────────────────
 function NotifAvatarWithFallback({
   uri,
   title,
@@ -228,7 +231,6 @@ function NotifAvatarWithFallback({
   );
 }
 
-// ─── Bottom Sheet ─────────────────────────────────────────────────────────────
 function BottomSheet({
   visible,
   title,
@@ -325,13 +327,13 @@ const sheet = StyleSheet.create({
   cancelLabel: { fontSize: 16, fontWeight: "600", color: "#333" },
 });
 
-// ─── Main Component ───────────────────────────────────────────────────────────
+// ─── Main Component
 export default function InboxScreen() {
   const [activeTab, setActiveTab] = useState<
     "messages" | "archived" | "notifications"
   >("messages");
 
-  // ── Messages state ──
+  // ── Messages state
   const [conversations, setConversations] = useState<any[]>([]);
   const [archivedConversations, setArchivedConversations] = useState<any[]>([]);
   const [convLoading, setConvLoading] = useState(false);
@@ -340,24 +342,29 @@ export default function InboxScreen() {
   }>({});
   const [searchQuery, setSearchQuery] = useState<string>("");
 
-  // ── Bottom sheet ──
+  // ── Bottom sheet
   const [sheetVisible, setSheetVisible] = useState(false);
   const [sheetOptions, setSheetOptions] = useState<SheetOption[]>([]);
   const [sheetTitle, setSheetTitle] = useState<string | undefined>();
 
-  // ── Delete confirmation modal ──
+  // ── Delete confirmation modal
   const [deleteModalVisible, setDeleteModalVisible] = useState(false);
   const [conversationToDelete, setConversationToDelete] = useState<any>(null);
 
-  // ── Notifications state ──
+  // ── Notifications state
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
   const [notifLoading, setNotifLoading] = useState(false);
   const [markingRead, setMarkingRead] = useState(false);
 
-  // ── Selection mode ──
+  // ── Selection mode
   const [selectionMode, setSelectionMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+
+  // ── NEW: TradeChatModal state — opened when a trade_message notif is tapped
+  const [tradeChatVisible, setTradeChatVisible] = useState(false);
+  const [tradeChatOffer, setTradeChatOffer] = useState<TradeOffer | null>(null);
+  const [tradeChatLoading, setTradeChatLoading] = useState(false);
 
   const router = useRouter();
   const currentUserId = auth.currentUser?.uid;
@@ -368,7 +375,7 @@ export default function InboxScreen() {
     setSheetVisible(true);
   };
 
-  // ─── Data loaders ─────────────────────────────────────────────────────────
+  // ─── Data loaders
   useFocusEffect(
     useCallback(() => {
       if (currentUserId) {
@@ -414,8 +421,6 @@ export default function InboxScreen() {
         }),
       );
 
-      // FIX #4: Sync mute state from Firestore on every load so changes
-      //         made in chat.tsx are reflected here immediately on return.
       const newMuted: { [key: string]: Date } = {};
       enriched.forEach((conv: any) => {
         const mutedTs = conv.mutedBy?.[currentUserId!];
@@ -458,7 +463,7 @@ export default function InboxScreen() {
     }
   };
 
-  // ─── Mark all read ────────────────────────────────────────────────────────
+  // ─── Mark all read
   const handleMarkAllRead = async () => {
     if (markingRead) return;
     const unreadIds = notifications.filter((n) => !n.read).map((n) => n.id);
@@ -474,33 +479,65 @@ export default function InboxScreen() {
     }
   };
 
-  // ─── Notification press ───────────────────────────────────────────────────
+  // ─── Notification press
+  // CHANGED: trade_message opens TradeChatModal instead of the regular chat
+  // ── Shared helper: fetch a trade by ID and open TradeChatModal
+  const openTradeChat = async (tradeId: string) => {
+    setTradeChatLoading(true);
+    try {
+      const trade = await getTradeOffer(tradeId);
+      if (trade) {
+        setTradeChatOffer(trade);
+        setTradeChatVisible(true);
+      } else {
+        Alert.alert("Not found", "This trade could not be loaded.");
+      }
+    } catch (err: any) {
+      console.error("openTradeChat failed:", err);
+      Alert.alert("Error", err?.message ?? "Could not open trade chat.");
+    } finally {
+      setTradeChatLoading(false);
+    }
+  };
+
   const handleNotifPress = async (item: Notification) => {
+    console.log("NOTIF TAPPED type=" + item.type + " tradeId=" + item.tradeId);
+
     if (selectionMode) {
       toggleSelect(item.id);
       return;
     }
+
+    // Mark as read
     if (!item.read) {
+      markAllNotificationsRead; // import already pulled in
+      const { markNotificationRead } =
+        await import("../../services/notificationService");
       markNotificationRead(item.id).catch(console.error);
       setNotifications((prev) =>
         prev.map((n) => (n.id === item.id ? { ...n, read: true } : n)),
       );
     }
+
+    // If ANY notification carries a tradeId open trade chat —
+    // covers both "trade_message" and legacy "message" typed notifications.
+    if (item.tradeId) {
+      await openTradeChat(item.tradeId);
+      return;
+    }
+
     switch (item.type) {
       case "trade_offer":
       case "trade_accepted":
-        if (item.tradeId)
-          router.push({
-            pathname: "/trade",
-            params: { tradeId: item.tradeId },
-          });
+        router.push({ pathname: "/trade", params: {} });
         break;
       case "message":
-        if (item.otherUserId)
+        if (item.otherUserId) {
           router.push({
             pathname: "/chat",
             params: { ownerUserId: item.otherUserId },
           });
+        }
         break;
     }
   };
@@ -541,7 +578,7 @@ export default function InboxScreen() {
     }
   };
 
-  // ─── Conversation menu ────────────────────────────────────────────────────
+  // ─── Conversation menu
   const handleConversationMenu = (item: any) => {
     const isMuted = mutedConversations[item.id];
     const isMutedActive = isMuted && new Date() < isMuted;
@@ -688,7 +725,7 @@ export default function InboxScreen() {
     ]);
   };
 
-  // ─── Search filtering ─────────────────────────────────────────────────────
+  // ─── Search filtering
   const filteredConversations = conversations.filter(
     (conv) =>
       conv.userName?.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -701,13 +738,13 @@ export default function InboxScreen() {
       conv.lastMessage?.toLowerCase().includes(searchQuery.toLowerCase()),
   );
 
-  // ─── Pagination ───────────────────────────────────────────────────────────
+  // ─── Pagination
   const visibleNotifs = notifications.slice(0, visibleCount);
   const hasMore = notifications.length > visibleCount;
   const loadMore = () => setVisibleCount((c) => c + PAGE_SIZE);
   const unreadCount = notifications.filter((n) => !n.read).length;
 
-  // ─── Renders ──────────────────────────────────────────────────────────────
+  // ─── Renders
   const renderMessage = ({ item }: any) => {
     const isMuted = mutedConversations[item.id];
     const isMutedActive = isMuted && new Date() < isMuted;
@@ -715,8 +752,6 @@ export default function InboxScreen() {
       item.readBy?.includes(currentUserId!) || item.isRead === true;
     const name = item.userName || "User";
 
-    // Build the last-message line — only include the dot separator if there's
-    // both a message text AND a non-empty time string.
     const timeStr = item.lastMessageTime
       ? formatTime(item.lastMessageTime)
       : "";
@@ -739,7 +774,6 @@ export default function InboxScreen() {
             }
             activeOpacity={0.75}
           >
-            {/* FIX #3: AvatarWithFallback replaces the bare <Image> */}
             <View style={styles.avatarWrap}>
               <AvatarWithFallback
                 uri={item.userAvatar}
@@ -769,7 +803,6 @@ export default function InboxScreen() {
                   />
                 )}
               </View>
-              {/* FIX #1: lastLine always shows the correct formatted time */}
               <Text
                 style={[
                   styles.messageLast,
@@ -817,7 +850,6 @@ export default function InboxScreen() {
           </View>
         )}
         <View style={styles.notifIconWrap}>
-          {/* FIX #3: NotifAvatarWithFallback replaces bare <Image> */}
           <NotifAvatarWithFallback
             uri={item.avatar}
             title={item.title}
@@ -832,7 +864,6 @@ export default function InboxScreen() {
           <Text style={styles.notifBody} numberOfLines={2}>
             {item.body}
           </Text>
-          {/* FIX #1: Only render time text when it's non-empty */}
           {formatTime(item.createdAt) ? (
             <Text style={styles.notifTime}>{formatTime(item.createdAt)}</Text>
           ) : null}
@@ -853,11 +884,10 @@ export default function InboxScreen() {
     );
   };
 
-  // ─── UI ───────────────────────────────────────────────────────────────────
+  // ─── UI
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.inner}>
-        {/* ── Bottom Sheet ── */}
         <BottomSheet
           visible={sheetVisible}
           title={sheetTitle}
@@ -865,7 +895,6 @@ export default function InboxScreen() {
           onClose={() => setSheetVisible(false)}
         />
 
-        {/* ── Delete Confirmation Modal ── */}
         <Modal
           visible={deleteModalVisible}
           transparent
@@ -923,7 +952,7 @@ export default function InboxScreen() {
           </Pressable>
         </Modal>
 
-        {/* ── Sidebar ── */}
+        {/* Sidebar */}
         <View style={styles.sidebar}>
           <TouchableOpacity
             style={[
@@ -982,7 +1011,7 @@ export default function InboxScreen() {
           </TouchableOpacity>
         </View>
 
-        {/* ── Main content ── */}
+        {/* Main content */}
         <View style={styles.content}>
           {activeTab === "messages" || activeTab === "archived" ? (
             <>
@@ -1106,6 +1135,14 @@ export default function InboxScreen() {
                 <Text style={styles.hintText}>Hold to select &amp; delete</Text>
               )}
 
+              {/* Loading spinner for trade chat fetch */}
+              {tradeChatLoading && (
+                <View style={styles.tradeChatLoader}>
+                  <ActivityIndicator size="small" color={NAVY} />
+                  <Text style={styles.tradeChatLoaderText}>Opening chat…</Text>
+                </View>
+              )}
+
               {notifLoading ? (
                 <View style={styles.centered}>
                   <ActivityIndicator size="large" color={NAVY} />
@@ -1131,11 +1168,30 @@ export default function InboxScreen() {
           )}
         </View>
       </View>
+
+      {/* NEW: TradeChatModal — opened when a trade_message notification is tapped */}
+      <TradeChatModal
+        visible={tradeChatVisible}
+        trade={tradeChatOffer}
+        isOwner={
+          tradeChatOffer != null &&
+          auth.currentUser?.uid === tradeChatOffer.ownerId
+        }
+        onClose={() => {
+          setTradeChatVisible(false);
+          setTradeChatOffer(null);
+        }}
+        onStatusChange={(tradeId, newStatus) => {
+          setTradeChatOffer((prev) =>
+            prev ? { ...prev, status: newStatus } : prev,
+          );
+        }}
+      />
     </SafeAreaView>
   );
 }
 
-// ─── Styles ───────────────────────────────────────────────────────────────────
+// ─── Styles
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#e8e8f0" },
   inner: { flex: 1, flexDirection: "row" },
@@ -1192,7 +1248,6 @@ const styles = StyleSheet.create({
   searchIcon: { marginRight: 10 },
   searchInput: { flex: 1, fontSize: 15, color: "#242424", paddingVertical: 8 },
 
-  // ── Message rows ────────────────────────────────────────────────────────────
   messageRowContainer: {
     flexDirection: "row",
     alignItems: "center",
@@ -1235,7 +1290,6 @@ const styles = StyleSheet.create({
   messageLastUnread: { color: "#333", fontWeight: "500" },
   moreButton: { padding: 8, marginLeft: 8 },
 
-  // ── Delete modal ────────────────────────────────────────────────────────────
   modalOverlay: {
     flex: 1,
     backgroundColor: "rgba(0,0,0,0.45)",
@@ -1290,7 +1344,6 @@ const styles = StyleSheet.create({
   },
   modalDeleteText: { fontWeight: "600", color: "#fff", fontSize: 15 },
 
-  // ── Notifications ────────────────────────────────────────────────────────────
   notifHeader: {
     flexDirection: "row",
     alignItems: "center",
@@ -1328,6 +1381,15 @@ const styles = StyleSheet.create({
   deleteBtnText: { color: "#fff", fontSize: 13, fontWeight: "700" },
 
   hintText: { fontSize: 11, color: "#aaa", marginBottom: 10, marginTop: 2 },
+
+  // NEW: small inline loader while fetching trade for chat
+  tradeChatLoader: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    marginBottom: 8,
+  },
+  tradeChatLoaderText: { fontSize: 12, color: "#888" },
 
   notifRow: {
     flexDirection: "row",

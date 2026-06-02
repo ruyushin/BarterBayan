@@ -14,7 +14,7 @@ import {
 } from "react-native";
 import { auth } from "../firebaseConfig";
 import { getUserPostedItems } from "../services/itemService";
-import { proposeTrade } from "../services/tradeService";
+import { getOffersForItem, proposeTrade } from "../services/tradeService";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 const NAVY = "#2f2f6f";
@@ -67,6 +67,8 @@ export const ProposeTradeModal: React.FC<ProposeTradeModalProps> = ({
   const [message, setMessage] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [succeeded, setSucceeded] = useState(false);
+  const [hasExistingOffer, setHasExistingOffer] = useState(false);
+  const [checkingOffer, setCheckingOffer] = useState(false);
 
   // Fetch the current user's own posted items whenever modal opens
   useEffect(() => {
@@ -74,9 +76,24 @@ export const ProposeTradeModal: React.FC<ProposeTradeModalProps> = ({
     setSelectedItemId(null);
     setMessage("");
     setSucceeded(false);
+    setHasExistingOffer(false);
 
     const uid = auth.currentUser?.uid;
     if (!uid) return;
+
+    // Check if user already has a pending offer on this item
+    if (targetItem?.id) {
+      setCheckingOffer(true);
+      getOffersForItem(targetItem.id)
+        .then((offers) => {
+          const alreadyProposed = offers.some(
+            (o) => o.offererId === uid && o.status === "pending",
+          );
+          setHasExistingOffer(alreadyProposed);
+        })
+        .catch(() => {})
+        .finally(() => setCheckingOffer(false));
+    }
 
     setLoadingItems(true);
     getUserPostedItems(uid)
@@ -167,6 +184,31 @@ export const ProposeTradeModal: React.FC<ProposeTradeModalProps> = ({
                 </Text>
                 . You'll be notified once they respond.
               </Text>
+            </View>
+          ) : checkingOffer ? (
+            <View style={styles.checkingBox}>
+              <ActivityIndicator size="small" color={NAVY} />
+              <Text style={styles.checkingText}>Checking offers…</Text>
+            </View>
+          ) : hasExistingOffer ? (
+            <View style={styles.existingOfferContainer}>
+              <View style={styles.existingOfferIconCircle}>
+                <Ionicons name="time-outline" size={36} color={NAVY} />
+              </View>
+              <Text style={styles.existingOfferTitle}>Offer Already Sent</Text>
+              <Text style={styles.existingOfferBody}>
+                You already have a pending trade proposal for{" "}
+                <Text style={styles.existingOfferItemName}>
+                  {targetItem?.title ?? ""}
+                </Text>
+                . Wait for the owner to respond before sending another.
+              </Text>
+              <TouchableOpacity
+                style={styles.existingOfferCloseBtn}
+                onPress={onClose}
+              >
+                <Text style={styles.existingOfferCloseBtnText}>Got it</Text>
+              </TouchableOpacity>
             </View>
           ) : (
             <>
@@ -588,6 +630,62 @@ const styles = StyleSheet.create({
   },
   cancelBtn: { paddingVertical: 12, alignItems: "center" },
   cancelText: { color: "#888", fontWeight: "600", fontSize: 14 },
+
+  // ── Checking state ──
+  checkingBox: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 60,
+    gap: 10,
+  },
+  checkingText: { fontSize: 14, color: "#888" },
+
+  // ── Existing offer screen ──
+  existingOfferContainer: {
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 40,
+    paddingHorizontal: 24,
+    gap: 14,
+  },
+  existingOfferIconCircle: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    backgroundColor: "#ECEDF8",
+    justifyContent: "center",
+    alignItems: "center",
+    marginBottom: 4,
+  },
+  existingOfferTitle: {
+    fontSize: 20,
+    fontWeight: "800",
+    color: "#1A1A2E",
+    textAlign: "center",
+  },
+  existingOfferBody: {
+    fontSize: 14,
+    color: "#666",
+    textAlign: "center",
+    lineHeight: 22,
+  },
+  existingOfferItemName: {
+    fontWeight: "700",
+    color: NAVY,
+  },
+  existingOfferCloseBtn: {
+    marginTop: 8,
+    backgroundColor: NAVY,
+    paddingVertical: 13,
+    paddingHorizontal: 40,
+    borderRadius: 14,
+  },
+  existingOfferCloseBtnText: {
+    color: "#fff",
+    fontWeight: "700",
+    fontSize: 15,
+  },
 
   // ── Success screen ──
   successContainer: {
