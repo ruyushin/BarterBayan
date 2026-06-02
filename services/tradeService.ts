@@ -1,17 +1,18 @@
 import {
-    addDoc,
-    collection,
-    doc,
-    getDoc,
-    getDocs,
-    onSnapshot,
-    orderBy,
-    query,
-    Timestamp,
-    updateDoc,
-    where,
+  addDoc,
+  collection,
+  doc,
+  getDoc,
+  getDocs,
+  onSnapshot,
+  orderBy,
+  query,
+  Timestamp,
+  updateDoc,
+  where,
 } from "firebase/firestore";
 import { db } from "../firebaseConfig";
+import { createNotification } from "./notificationService";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -19,39 +20,34 @@ export type TradeStatus = "pending" | "accepted" | "declined" | "cancelled";
 
 export interface TradeOffer {
   id: string;
-  // The item being offered BY the proposer
   offeredItemId: string;
   offeredItemTitle: string;
   offeredItemImage: string;
-  // The item the proposer WANTS (belongs to ownerId)
   requestedItemId: string;
   requestedItemTitle: string;
   requestedItemImage: string;
-  // People involved
   offererId: string;
   offererName: string;
   offererAvatar: string;
-  ownerId: string; // owner of the requested item
-  // State
+  ownerId: string;
   status: TradeStatus;
-  participants: string[]; // [offererId, ownerId] — used for array-contains queries
+  participants: string[];
   createdAt: Timestamp;
   updatedAt?: Timestamp;
-  // Optional message from proposer
   message?: string;
+}
+
+export interface TradeMessage {
+  id: string;
+  senderId: string;
+  senderName: string;
+  senderAvatar: string;
+  text: string;
+  createdAt: Timestamp;
 }
 
 // ─── Create ───────────────────────────────────────────────────────────────────
 
-/**
- * Propose a trade: offer one of YOUR items in exchange for someone else's item.
- *
- * @param offeredItem   - Your item object (must have id, title, images/image, ownerId)
- * @param requestedItem - The item you want (must have id, title, images/image, ownerId)
- * @param offererUser   - Current Firebase Auth user (uid, displayName, photoURL)
- * @param message       - Optional note to the owner
- * @returns The new TradeOffer document ID
- */
 export const proposeTrade = async (
   offeredItem: {
     id: string;
@@ -73,12 +69,10 @@ export const proposeTrade = async (
   },
   message?: string,
 ): Promise<string> => {
-  // Guard: cannot trade with yourself
   if (offererUser.uid === requestedItem.ownerId) {
     throw new Error("You cannot propose a trade for your own item.");
   }
 
-  // Guard: duplicate pending offer
   const existingQ = query(
     collection(db, "trades"),
     where("offererId", "==", offererUser.uid),
@@ -118,9 +112,6 @@ export const proposeTrade = async (
 
 // ─── Read ─────────────────────────────────────────────────────────────────────
 
-/**
- * Get all trade offers sent BY a user (the "Your Offers" tab in trade.tsx).
- */
 export const getOffersByUser = async (
   userId: string,
 ): Promise<TradeOffer[]> => {
@@ -136,7 +127,6 @@ export const getOffersByUser = async (
       ...(d.data() as Omit<TradeOffer, "id">),
     }));
   } catch {
-    // Firestore index might not exist yet — fall back to unordered
     const q2 = query(
       collection(db, "trades"),
       where("offererId", "==", userId),
@@ -151,10 +141,6 @@ export const getOffersByUser = async (
   }
 };
 
-/**
- * Subscribe to all trade offers sent BY a user in real-time.
- * Returns an unsubscribe function — call it in useEffect cleanup.
- */
 export const subscribeToSentOffers = (
   userId: string,
   onUpdate: (offers: TradeOffer[]) => void,
@@ -171,9 +157,6 @@ export const subscribeToSentOffers = (
   });
 };
 
-/**
- * Get all trade offers received ON a specific item (the "See Offers" modal in trade.tsx).
- */
 export const getOffersForItem = async (
   itemId: string,
 ): Promise<TradeOffer[]> => {
@@ -204,9 +187,28 @@ export const getOffersForItem = async (
 };
 
 /**
- * Get all trade offers for a user (both sent AND received).
- * Useful for a notification badge or full history.
+ * Real-time subscription to all offers on a specific item.
+ * Use this in TradeOffersModal so the list updates instantly on accept/decline.
  */
+export const subscribeToOffersForItem = (
+  itemId: string,
+  onUpdate: (offers: TradeOffer[]) => void,
+): (() => void) => {
+  const q = query(
+    collection(db, "trades"),
+    where("requestedItemId", "==", itemId),
+  );
+  return onSnapshot(q, (snap) => {
+    const offers: TradeOffer[] = snap.docs
+      .map((d) => ({ id: d.id, ...(d.data() as Omit<TradeOffer, "id">) }))
+      .sort(
+        (a, b) =>
+          (b.createdAt?.toMillis?.() ?? 0) - (a.createdAt?.toMillis?.() ?? 0),
+      );
+    onUpdate(offers);
+  });
+};
+
 export const getAllOffersForUser = async (
   userId: string,
 ): Promise<TradeOffer[]> => {
@@ -236,9 +238,6 @@ export const getAllOffersForUser = async (
   }
 };
 
-/**
- * Fetch a single trade offer by ID.
- */
 export const getTradeOffer = async (
   offerId: string,
 ): Promise<TradeOffer | null> => {
@@ -250,10 +249,6 @@ export const getTradeOffer = async (
 
 // ─── Update ───────────────────────────────────────────────────────────────────
 
-/**
- * Accept or decline a trade offer.
- * Only the item owner (ownerId) should call this.
- */
 export const updateTradeStatus = async (
   offerId: string,
   newStatus: "accepted" | "declined",
@@ -265,15 +260,81 @@ export const updateTradeStatus = async (
   });
 };
 
-/**
- * Cancel a trade offer.
- * Only the offerer should call this, and only while status is "pending".
- */
 export const cancelTradeOffer = async (offerId: string): Promise<void> => {
   const docRef = doc(db, "trades", offerId);
   await updateDoc(docRef, {
     status: "cancelled",
     updatedAt: Timestamp.now(),
+  });
+};
+
+// ─── Messaging ────────────────────────────────────────────────────────────────
+
+/**
+ * Send a message in a trade's chat thread.
+ * Messages are stored in: trades/{tradeId}/messages/{messageId}
+ */
+export const sendTradeMessage = async (
+  tradeId: string,
+  sender: {
+    uid: string;
+    displayName: string | null;
+    photoURL: string | null;
+  },
+  text: string,
+  recipientUid?: string,
+): Promise<void> => {
+  if (!text.trim()) return;
+
+  const now = Timestamp.now();
+
+  // Write the message
+  const messagesRef = collection(db, "trades", tradeId, "messages");
+  await addDoc(messagesRef, {
+    senderId: sender.uid,
+    senderName: sender.displayName ?? "Unknown",
+    senderAvatar: sender.photoURL ?? "",
+    text: text.trim(),
+    createdAt: now,
+  });
+
+  // Write a trade_message notification for the recipient so tapping it
+  // in the Inbox routes back to this trade chat, not the regular chat.
+  if (recipientUid) {
+    const senderName = sender.displayName ?? "Someone";
+    const preview =
+      text.trim().length > 60
+        ? text.trim().slice(0, 57) + "\u2026"
+        : text.trim();
+    await createNotification({
+      userId: recipientUid,
+      type: "trade_message",
+      title: `${senderName} sent you a message`,
+      body: preview,
+      avatar: sender.photoURL ?? "",
+      tradeId,
+    });
+  }
+};
+
+/**
+ * Real-time subscription to a trade's chat messages.
+ * Returns an unsubscribe function — call it in useEffect cleanup.
+ */
+export const subscribeToTradeMessages = (
+  tradeId: string,
+  onUpdate: (messages: TradeMessage[]) => void,
+): (() => void) => {
+  const q = query(
+    collection(db, "trades", tradeId, "messages"),
+    orderBy("createdAt", "asc"),
+  );
+  return onSnapshot(q, (snap) => {
+    const messages: TradeMessage[] = snap.docs.map((d) => ({
+      id: d.id,
+      ...(d.data() as Omit<TradeMessage, "id">),
+    }));
+    onUpdate(messages);
   });
 };
 

@@ -66,12 +66,14 @@ export const ProposeTradeModal: React.FC<ProposeTradeModalProps> = ({
   const [selectedItemId, setSelectedItemId] = useState<string | null>(null);
   const [message, setMessage] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const [succeeded, setSucceeded] = useState(false);
 
   // Fetch the current user's own posted items whenever modal opens
   useEffect(() => {
     if (!visible) return;
     setSelectedItemId(null);
     setMessage("");
+    setSucceeded(false);
 
     const uid = auth.currentUser?.uid;
     if (!uid) return;
@@ -121,18 +123,12 @@ export const ProposeTradeModal: React.FC<ProposeTradeModalProps> = ({
         message,
       );
 
-      // Close the modal first so it doesn't race with or swallow the Alert
-      onClose();
-
-      // Small delay lets the modal's slide-down animation finish before
-      // the native Alert appears, giving the user a clean confirmation
+      // Show inline success screen, then auto-close after 2.5 s
+      setSucceeded(true);
       setTimeout(() => {
-        Alert.alert(
-          "Trade Proposed! 🤝",
-          `Your offer has been sent. The owner of "${targetItem.title}" will be notified.`,
-          [{ text: "Got it!", onPress: () => onSuccess?.() }],
-        );
-      }, 300);
+        onClose();
+        onSuccess?.();
+      }, 2500);
     } catch (err: any) {
       Alert.alert(
         "Failed to propose trade",
@@ -157,196 +153,216 @@ export const ProposeTradeModal: React.FC<ProposeTradeModalProps> = ({
           {/* ── Handle ── */}
           <View style={styles.handle} />
 
-          {/* ── Header ── */}
-          <View style={styles.header}>
-            <View style={{ flex: 1 }}>
-              <Text style={styles.title}>Propose a Trade</Text>
-              <Text style={styles.subtitle} numberOfLines={1}>
-                For:{" "}
-                <Text style={styles.targetTitle}>
+          {/* ── SUCCESS SCREEN ── */}
+          {succeeded ? (
+            <View style={styles.successContainer}>
+              <View style={styles.successIconCircle}>
+                <Ionicons name="checkmark" size={48} color="#fff" />
+              </View>
+              <Text style={styles.successTitle}>Trade Proposal Sent! 🤝</Text>
+              <Text style={styles.successBody}>
+                Your offer has been sent to the owner of{" "}
+                <Text style={styles.successItemName}>
                   {targetItem?.title ?? ""}
                 </Text>
-              </Text>
-            </View>
-            <TouchableOpacity
-              onPress={onClose}
-              style={styles.closeBtn}
-              disabled={submitting}
-            >
-              <Ionicons name="close" size={22} color="#555" />
-            </TouchableOpacity>
-          </View>
-
-          {/* ── Trade visual: your item ⇄ their item ── */}
-          <View style={styles.tradePreview}>
-            {/* Your side */}
-            <View style={styles.previewSide}>
-              <View
-                style={[
-                  styles.previewImageBox,
-                  !selectedItem && styles.previewImageBoxEmpty,
-                ]}
-              >
-                {selectedItem ? (
-                  <Image
-                    source={{ uri: resolveImage(selectedItem) }}
-                    style={styles.previewImage}
-                  />
-                ) : (
-                  <Ionicons name="cube-outline" size={28} color="#CCCCCC" />
-                )}
-              </View>
-              <Text style={styles.previewLabel} numberOfLines={2}>
-                {selectedItem ? selectedItem.title : "Select below ↓"}
-              </Text>
-            </View>
-
-            {/* Arrow */}
-            <View style={styles.previewArrow}>
-              <Ionicons name="swap-horizontal" size={26} color={NAVY} />
-            </View>
-
-            {/* Their side */}
-            <View style={styles.previewSide}>
-              <View style={styles.previewImageBox}>
-                {targetItem ? (
-                  <Image
-                    source={{ uri: resolveImage(targetItem) }}
-                    style={styles.previewImage}
-                  />
-                ) : (
-                  <View style={styles.previewImageBoxEmpty} />
-                )}
-              </View>
-              <Text style={styles.previewLabel} numberOfLines={2}>
-                {targetItem?.title ?? ""}
-              </Text>
-            </View>
-          </View>
-
-          {/* ── Pick your item ── */}
-          <Text style={styles.sectionLabel}>Choose your item to offer</Text>
-
-          {loadingItems ? (
-            <View style={styles.loaderBox}>
-              <ActivityIndicator size="small" color={NAVY} />
-              <Text style={styles.loaderText}>Loading your items…</Text>
-            </View>
-          ) : ownItems.length === 0 ? (
-            <View style={styles.emptyBox}>
-              <Ionicons name="cube-outline" size={36} color="#CCCCCC" />
-              <Text style={styles.emptyTitle}>No items listed</Text>
-              <Text style={styles.emptyText}>
-                Add items in the Trade tab first before you can propose a trade.
+                . You'll be notified once they respond.
               </Text>
             </View>
           ) : (
-            <FlatList
-              data={ownItems}
-              keyExtractor={(item) => item.id}
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              contentContainerStyle={styles.itemList}
-              renderItem={({ item }) => {
-                const isSelected = selectedItemId === item.id;
-                const imgUri = resolveImage(item);
-                return (
-                  <TouchableOpacity
-                    style={[
-                      styles.itemCard,
-                      isSelected && styles.itemCardSelected,
-                    ]}
-                    onPress={() => setSelectedItemId(item.id)}
-                    activeOpacity={0.8}
-                  >
-                    <View style={styles.itemImageBox}>
-                      {imgUri ? (
-                        <Image
-                          source={{ uri: imgUri }}
-                          style={styles.itemImage}
-                        />
-                      ) : (
-                        <View style={styles.itemImagePlaceholder}>
-                          <Ionicons
-                            name="image-outline"
-                            size={22}
-                            color="#CCC"
-                          />
-                        </View>
-                      )}
-                      {isSelected && (
-                        <View style={styles.itemSelectedOverlay}>
-                          <Ionicons
-                            name="checkmark-circle"
-                            size={24}
-                            color="#fff"
-                          />
-                        </View>
-                      )}
-                    </View>
-                    <Text
-                      style={[
-                        styles.itemTitle,
-                        isSelected && styles.itemTitleSelected,
-                      ]}
-                      numberOfLines={2}
-                    >
-                      {item.title}
+            <>
+              {/* ── Header ── */}
+              <View style={styles.header}>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.title}>Propose a Trade</Text>
+                  <Text style={styles.subtitle} numberOfLines={1}>
+                    For:{" "}
+                    <Text style={styles.targetTitle}>
+                      {targetItem?.title ?? ""}
                     </Text>
-                    {item.category ? (
-                      <Text style={styles.itemCategory} numberOfLines={1}>
-                        {item.category}
-                      </Text>
-                    ) : null}
-                  </TouchableOpacity>
-                );
-              }}
-            />
+                  </Text>
+                </View>
+                <TouchableOpacity
+                  onPress={onClose}
+                  style={styles.closeBtn}
+                  disabled={submitting}
+                >
+                  <Ionicons name="close" size={22} color="#555" />
+                </TouchableOpacity>
+              </View>
+
+              {/* ── Trade visual: your item ⇄ their item ── */}
+              <View style={styles.tradePreview}>
+                {/* Your side */}
+                <View style={styles.previewSide}>
+                  <View
+                    style={[
+                      styles.previewImageBox,
+                      !selectedItem && styles.previewImageBoxEmpty,
+                    ]}
+                  >
+                    {selectedItem ? (
+                      <Image
+                        source={{ uri: resolveImage(selectedItem) }}
+                        style={styles.previewImage}
+                      />
+                    ) : (
+                      <Ionicons name="cube-outline" size={28} color="#CCCCCC" />
+                    )}
+                  </View>
+                  <Text style={styles.previewLabel} numberOfLines={2}>
+                    {selectedItem ? selectedItem.title : "Select below ↓"}
+                  </Text>
+                </View>
+
+                {/* Arrow */}
+                <View style={styles.previewArrow}>
+                  <Ionicons name="swap-horizontal" size={26} color={NAVY} />
+                </View>
+
+                {/* Their side */}
+                <View style={styles.previewSide}>
+                  <View style={styles.previewImageBox}>
+                    {targetItem ? (
+                      <Image
+                        source={{ uri: resolveImage(targetItem) }}
+                        style={styles.previewImage}
+                      />
+                    ) : (
+                      <View style={styles.previewImageBoxEmpty} />
+                    )}
+                  </View>
+                  <Text style={styles.previewLabel} numberOfLines={2}>
+                    {targetItem?.title ?? ""}
+                  </Text>
+                </View>
+              </View>
+
+              {/* ── Pick your item ── */}
+              <Text style={styles.sectionLabel}>Choose your item to offer</Text>
+
+              {loadingItems ? (
+                <View style={styles.loaderBox}>
+                  <ActivityIndicator size="small" color={NAVY} />
+                  <Text style={styles.loaderText}>Loading your items…</Text>
+                </View>
+              ) : ownItems.length === 0 ? (
+                <View style={styles.emptyBox}>
+                  <Ionicons name="cube-outline" size={36} color="#CCCCCC" />
+                  <Text style={styles.emptyTitle}>No items listed</Text>
+                  <Text style={styles.emptyText}>
+                    Add items in the Trade tab first before you can propose a
+                    trade.
+                  </Text>
+                </View>
+              ) : (
+                <FlatList
+                  data={ownItems}
+                  keyExtractor={(item) => item.id}
+                  horizontal
+                  showsHorizontalScrollIndicator={false}
+                  contentContainerStyle={styles.itemList}
+                  renderItem={({ item }) => {
+                    const isSelected = selectedItemId === item.id;
+                    const imgUri = resolveImage(item);
+                    return (
+                      <TouchableOpacity
+                        style={[
+                          styles.itemCard,
+                          isSelected && styles.itemCardSelected,
+                        ]}
+                        onPress={() => setSelectedItemId(item.id)}
+                        activeOpacity={0.8}
+                      >
+                        <View style={styles.itemImageBox}>
+                          {imgUri ? (
+                            <Image
+                              source={{ uri: imgUri }}
+                              style={styles.itemImage}
+                            />
+                          ) : (
+                            <View style={styles.itemImagePlaceholder}>
+                              <Ionicons
+                                name="image-outline"
+                                size={22}
+                                color="#CCC"
+                              />
+                            </View>
+                          )}
+                          {isSelected && (
+                            <View style={styles.itemSelectedOverlay}>
+                              <Ionicons
+                                name="checkmark-circle"
+                                size={24}
+                                color="#fff"
+                              />
+                            </View>
+                          )}
+                        </View>
+                        <Text
+                          style={[
+                            styles.itemTitle,
+                            isSelected && styles.itemTitleSelected,
+                          ]}
+                          numberOfLines={2}
+                        >
+                          {item.title}
+                        </Text>
+                        {item.category ? (
+                          <Text style={styles.itemCategory} numberOfLines={1}>
+                            {item.category}
+                          </Text>
+                        ) : null}
+                      </TouchableOpacity>
+                    );
+                  }}
+                />
+              )}
+
+              {/* ── Optional message ── */}
+              <Text style={styles.sectionLabel}>Add a message (optional)</Text>
+              <TextInput
+                style={styles.messageInput}
+                placeholder="Hi! I'd love to trade my item for yours…"
+                placeholderTextColor="#AAAAAA"
+                multiline
+                numberOfLines={3}
+                maxLength={200}
+                value={message}
+                onChangeText={setMessage}
+                textAlignVertical="top"
+                editable={!submitting}
+              />
+              <Text style={styles.charCount}>{message.length}/200</Text>
+
+              {/* ── Submit ── */}
+              <TouchableOpacity
+                style={[
+                  styles.submitBtn,
+                  (!selectedItemId || submitting) && styles.submitBtnDisabled,
+                ]}
+                onPress={handleSubmit}
+                disabled={!selectedItemId || submitting}
+                activeOpacity={0.85}
+              >
+                {submitting ? (
+                  <ActivityIndicator size="small" color="#fff" />
+                ) : (
+                  <>
+                    <Ionicons name="swap-horizontal" size={18} color="#fff" />
+                    <Text style={styles.submitText}>Send Trade Offer</Text>
+                  </>
+                )}
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={styles.cancelBtn}
+                onPress={onClose}
+                disabled={submitting}
+              >
+                <Text style={styles.cancelText}>Cancel</Text>
+              </TouchableOpacity>
+            </>
           )}
-
-          {/* ── Optional message ── */}
-          <Text style={styles.sectionLabel}>Add a message (optional)</Text>
-          <TextInput
-            style={styles.messageInput}
-            placeholder="Hi! I'd love to trade my item for yours…"
-            placeholderTextColor="#AAAAAA"
-            multiline
-            numberOfLines={3}
-            maxLength={200}
-            value={message}
-            onChangeText={setMessage}
-            textAlignVertical="top"
-            editable={!submitting}
-          />
-          <Text style={styles.charCount}>{message.length}/200</Text>
-
-          {/* ── Submit ── */}
-          <TouchableOpacity
-            style={[
-              styles.submitBtn,
-              (!selectedItemId || submitting) && styles.submitBtnDisabled,
-            ]}
-            onPress={handleSubmit}
-            disabled={!selectedItemId || submitting}
-            activeOpacity={0.85}
-          >
-            {submitting ? (
-              <ActivityIndicator size="small" color="#fff" />
-            ) : (
-              <>
-                <Ionicons name="swap-horizontal" size={18} color="#fff" />
-                <Text style={styles.submitText}>Send Trade Offer</Text>
-              </>
-            )}
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={styles.cancelBtn}
-            onPress={onClose}
-            disabled={submitting}
-          >
-            <Text style={styles.cancelText}>Cancel</Text>
-          </TouchableOpacity>
         </View>
       </View>
     </Modal>
@@ -572,4 +588,43 @@ const styles = StyleSheet.create({
   },
   cancelBtn: { paddingVertical: 12, alignItems: "center" },
   cancelText: { color: "#888", fontWeight: "600", fontSize: 14 },
+
+  // ── Success screen ──
+  successContainer: {
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 48,
+    paddingHorizontal: 24,
+    gap: 16,
+  },
+  successIconCircle: {
+    width: 88,
+    height: 88,
+    borderRadius: 44,
+    backgroundColor: NAVY,
+    justifyContent: "center",
+    alignItems: "center",
+    marginBottom: 8,
+    shadowColor: NAVY,
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.3,
+    shadowRadius: 10,
+    elevation: 6,
+  },
+  successTitle: {
+    fontSize: 22,
+    fontWeight: "800",
+    color: "#1A1A2E",
+    textAlign: "center",
+  },
+  successBody: {
+    fontSize: 14,
+    color: "#666",
+    textAlign: "center",
+    lineHeight: 22,
+  },
+  successItemName: {
+    fontWeight: "700",
+    color: NAVY,
+  },
 });
