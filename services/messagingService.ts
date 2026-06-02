@@ -1,27 +1,22 @@
 import {
-    addDoc,
-    arrayUnion,
-    collection,
-    deleteDoc,
-    doc,
-    getDoc,
-    getDocs,
-    limit,
-    onSnapshot,
-    orderBy,
-    query,
-    setDoc,
-    Timestamp,
-    updateDoc,
-    where,
-<<<<<<< HEAD
-} from 'firebase/firestore';
-import { db } from '../firebaseConfig';
-=======
+  addDoc,
+  arrayUnion,
+  collection,
+  deleteDoc,
+  doc,
+  getDoc,
+  getDocs,
+  limit,
+  onSnapshot,
+  orderBy,
+  query,
+  setDoc,
+  Timestamp,
+  updateDoc,
+  where,
 } from "firebase/firestore";
 import { auth, db } from "../firebaseConfig";
 import { createNotification } from "./notificationService";
->>>>>>> origin/tradeFunction
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -472,7 +467,6 @@ export const markConversationAsRead = async (
 };
 
 export const markConversationAsUnread = async (
-<<<<<<< HEAD
     conversationId: string,
     userId: string
 ): Promise<void> => {
@@ -486,22 +480,6 @@ export const markConversationAsUnread = async (
         console.error('Error marking conversation as unread:', error);
         throw error;
     }
-=======
-  conversationId: string,
-  _userId: string,
-): Promise<void> => {
-  try {
-    const conversationRef = doc(db, "messages", conversationId);
-    await setDoc(
-      conversationRef,
-      { isRead: false, readBy: [] },
-      { merge: true },
-    );
-  } catch (error) {
-    console.error("Error marking conversation as unread:", error);
-    throw error;
-  }
->>>>>>> origin/tradeFunction
 };
 
 // ─── Archive / Unarchive ──────────────────────────────────────────────────────

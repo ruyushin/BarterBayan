@@ -3,35 +3,39 @@ import { useLocalSearchParams, useRouter } from "expo-router";
 import { onAuthStateChanged } from "firebase/auth";
 import React, { useEffect, useRef, useState } from "react";
 import {
-  ActivityIndicator,
-  Alert,
-  Dimensions,
-  FlatList,
-  Image,
-  Modal,
-  Pressable,
-  SafeAreaView,
-  ScrollView,
-  Share,
-  StyleSheet,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  View,
+    ActivityIndicator,
+    Alert,
+    Dimensions,
+    FlatList,
+    Image,
+    Modal,
+    Pressable,
+    SafeAreaView,
+    ScrollView,
+    Share,
+    StyleSheet,
+    Text,
+    TextInput,
+    TouchableOpacity,
+    View,
 } from "react-native";
 import { ProposeTradeModal } from "../../components/ProposeTradeModal";
 import { auth } from "../../firebaseConfig";
 import {
-  addComment,
-  addCommentReply,
-  deleteComment,
-  getAllItems,
-  getUserSavedItems,
-  updateCommentLike,
-  updateItemLikes,
-  updateItemSave,
+    addComment,
+    addCommentReply,
+    deleteComment,
+    getAllItems,
+    getUserSavedItems,
+    updateCommentLike,
+    updateItemLikes,
+    updateItemSave,
 } from "../../services/itemService";
 import { sendMessage } from "../../services/messagingService";
+import {
+    getPersonalizedSuggestions,
+    getTrendingItems,
+} from "../../services/trendingService";
 
 const { width: screenWidth, height: screenHeight } = Dimensions.get("window");
 
@@ -45,7 +49,7 @@ const FILTER_CATEGORIES = [
 ];
 
 export default function Screen() {
-  const params = useLocalSearchParams<{ filter?: string; search?: string }>();
+  const params = useLocalSearchParams<{ filter?: string; search?: string; type?: string }>();
   const router = useRouter();
   const [search, setSearch] = useState("");
   const [sortType, setSortType] = useState("none");
@@ -55,6 +59,8 @@ export default function Screen() {
   const [loading, setLoading] = useState(true);
   const [userId, setUserId] = useState<string | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
+  const [typeFilter, setTypeFilter] = useState<"all" | "trending" | "personalized">("all");
+  const [isInitialLoad, setIsInitialLoad] = useState(true);
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (user) => {
@@ -66,17 +72,36 @@ export default function Screen() {
   useEffect(() => {
     const fetchItems = async () => {
       try {
-        setLoading(true);
-        const items = await getAllItems();
+        // Only show loading on initial load, not on filter changes
+        if (isInitialLoad) {
+          setLoading(true);
+        }
+        let items;
+
+        if (typeFilter === "trending") {
+          items = await getTrendingItems(50);
+        } else if (typeFilter === "personalized") {
+          if (userId) {
+            items = await getPersonalizedSuggestions(userId, 50);
+          } else {
+            items = await getAllItems();
+          }
+        } else {
+          items = await getAllItems();
+        }
+
         setAllItems(items);
+        setIsInitialLoad(false);
       } catch (error) {
         console.error("Error fetching items:", error);
       } finally {
-        setLoading(false);
+        if (isInitialLoad) {
+          setLoading(false);
+        }
       }
     };
     fetchItems();
-  }, [refreshKey, userId]);
+  }, [refreshKey, userId, typeFilter]);
 
   useEffect(() => {
     if (
@@ -88,7 +113,14 @@ export default function Screen() {
       setFilter("All");
     }
     if (typeof params.search === "string") setSearch(params.search);
-  }, [params.filter, params.search]);
+    if (params.type === "trending") {
+      setTypeFilter("trending");
+    } else if (params.type === "personalized") {
+      setTypeFilter("personalized");
+    } else {
+      setTypeFilter("all");
+    }
+  }, [params.filter, params.search, params.type]);
 
   const filteredItems = allItems
     .filter((item) => {
@@ -158,6 +190,75 @@ export default function Screen() {
                 value={search}
                 onChangeText={setSearch}
               />
+            </View>
+
+            <View style={styles.typeFilterRow}>
+              <Pressable
+                style={[
+                  styles.typeFilterBtn,
+                  typeFilter === "all" && styles.typeFilterBtnActive,
+                ]}
+                onPress={() => setTypeFilter("all")}
+              >
+                <Ionicons
+                  name="grid"
+                  size={16}
+                  color={typeFilter === "all" ? "#fff" : "#2f2f6f"}
+                />
+                <Text
+                  style={[
+                    styles.typeFilterText,
+                    typeFilter === "all" && styles.typeFilterTextActive,
+                  ]}
+                >
+                  All
+                </Text>
+              </Pressable>
+
+              <Pressable
+                style={[
+                  styles.typeFilterBtn,
+                  typeFilter === "trending" && styles.typeFilterBtnActive,
+                ]}
+                onPress={() => setTypeFilter("trending")}
+              >
+                <Ionicons
+                  name="flame"
+                  size={16}
+                  color={typeFilter === "trending" ? "#fff" : "#2f2f6f"}
+                />
+                <Text
+                  style={[
+                    styles.typeFilterText,
+                    typeFilter === "trending" && styles.typeFilterTextActive,
+                  ]}
+                >
+                  Trending
+                </Text>
+              </Pressable>
+
+              <Pressable
+                style={[
+                  styles.typeFilterBtn,
+                  typeFilter === "personalized" && styles.typeFilterBtnActive,
+                ]}
+                onPress={() => setTypeFilter("personalized")}
+              >
+                <Ionicons
+                  name="sparkles"
+                  size={16}
+                  color={typeFilter === "personalized" ? "#fff" : "#2f2f6f"}
+                />
+                <Text
+                  style={[
+                    styles.typeFilterText,
+                    typeFilter === "personalized" &&
+                      styles.typeFilterTextActive,
+                  ]}
+                >
+                  Suggested
+                </Text>
+              </Pressable>
             </View>
 
             <View style={styles.filterRow}>
@@ -243,11 +344,24 @@ function ItemCard({ item, onCommentAdded }: any) {
   // Is this item owned by the current user?
   const isOwnItem = !!currentUser && currentUser === item?.ownerId;
 
-  const imagesList =
-    Array.isArray(item?.images) && item.images.length > 0
-      ? item.images
-      : [item?.image || "https://via.placeholder.com/400x200"];
-  const imageUrl = imagesList[0];
+  // Filter out blob URLs and validate image URLs
+  const validateImageUrl = (url: string | undefined): boolean => {
+    if (!url) return false;
+    if (typeof url !== "string") return false;
+    if (url.startsWith("blob:")) return false;
+    return true;
+  };
+
+  const imagesList = (() => {
+    const imgs = (Array.isArray(item?.images) ? item.images : []).filter(
+      (img: string) => validateImageUrl(img),
+    );
+    if (imgs.length > 0) return imgs;
+    if (validateImageUrl(item?.image)) return [item.image];
+    return ["https://via.placeholder.com/400x200"];
+  })();
+
+  const imageUrl = imagesList[0] || "https://via.placeholder.com/400x200";
 
   useEffect(() => {
     if (currentUser && item?.likedBy?.includes(currentUser)) setIsLiked(true);
@@ -525,7 +639,13 @@ function ItemCard({ item, onCommentAdded }: any) {
         style={styles.cardImageContainer}
         onPress={() => setShowImageGallery(true)}
       >
-        <Image source={{ uri: imageUrl }} style={styles.cardImage} />
+        <Image 
+          source={{ 
+            uri: imageUrl?.startsWith("blob:") ? "https://via.placeholder.com/400x200" : imageUrl 
+          }} 
+          style={styles.cardImage}
+          onError={() => console.warn("Failed to load image:", imageUrl)}
+        />
         {imagesList.length > 1 && (
           <View style={styles.imageCountBadge}>
             <Text style={styles.imageCountText}>{imagesList.length}</Text>
@@ -556,12 +676,15 @@ function ItemCard({ item, onCommentAdded }: any) {
             {imagesList.map((img: string, idx: number) => (
               <Image
                 key={idx}
-                source={{ uri: img }}
+                source={{ 
+                  uri: img?.startsWith("blob:") ? "https://via.placeholder.com/400x200" : (img || "https://via.placeholder.com/400x200")
+                }}
                 style={{
                   width: screenWidth,
                   height: screenHeight,
                   resizeMode: "contain",
                 }}
+                onError={() => console.warn("Failed to load image:", img)}
               />
             ))}
           </ScrollView>
@@ -839,6 +962,36 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   filterText: { marginRight: 5, fontSize: 13 },
+  typeFilterRow: {
+    flexDirection: "row",
+    marginHorizontal: 12,
+    marginBottom: 16,
+    gap: 10,
+  },
+  typeFilterBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 20,
+    backgroundColor: "#F0F0F0",
+    borderWidth: 2,
+    borderColor: "transparent",
+    gap: 6,
+  },
+  typeFilterBtnActive: {
+    backgroundColor: "#2f2f6f",
+    borderColor: "#2f2f6f",
+  },
+  typeFilterText: {
+    fontSize: 13,
+    fontWeight: "600",
+    color: "#666",
+  },
+  typeFilterTextActive: {
+    color: "#FFFFFF",
+    fontWeight: "700",
+  },
   filterDropdown: {
     marginHorizontal: 15,
     backgroundColor: "white",

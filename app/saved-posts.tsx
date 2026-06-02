@@ -3,15 +3,15 @@ import { useRouter } from "expo-router";
 import { onAuthStateChanged } from "firebase/auth";
 import React, { useEffect, useState } from "react";
 import {
-  ActivityIndicator,
-  FlatList,
-  Image,
-  Pressable,
-  SafeAreaView,
-  StyleSheet,
-  Text,
-  TouchableOpacity,
-  View,
+    ActivityIndicator,
+    FlatList,
+    Image,
+    Pressable,
+    SafeAreaView,
+    StyleSheet,
+    Text,
+    TouchableOpacity,
+    View,
 } from "react-native";
 import { auth } from "../firebaseConfig";
 import { getUserSavedItems } from "../services/itemService";
@@ -170,10 +170,19 @@ interface SavedItemCardProps {
 }
 
 function SavedItemCard({ item, onPress }: SavedItemCardProps) {
-  const displayImage =
-    item.image ||
-    (item.images && item.images[0]) ||
-    "https://via.placeholder.com/200";
+  // Validate image URLs and filter out blob URLs
+  const validateImageUrl = (url: string | undefined): boolean => {
+    if (!url) return false;
+    if (typeof url !== "string") return false;
+    if (url.startsWith("blob:")) return false;
+    return true;
+  };
+
+  const displayImage = (() => {
+    if (validateImageUrl(item.image)) return item.image;
+    if (validateImageUrl(item.images?.[0])) return item.images![0];
+    return "https://via.placeholder.com/200";
+  })();
 
   return (
     <Pressable
@@ -181,7 +190,11 @@ function SavedItemCard({ item, onPress }: SavedItemCardProps) {
       onPress={() => onPress(item.id)}
       android_ripple={{ color: "rgba(0,0,0,0.1)" }}
     >
-      <Image source={{ uri: displayImage }} style={styles.cardImage} />
+      <Image 
+        source={{ uri: displayImage }} 
+        style={styles.cardImage}
+        onError={() => console.warn("Failed to load saved item image:", displayImage)}
+      />
 
       <View style={styles.cardContent}>
         <View style={styles.titleRow}>

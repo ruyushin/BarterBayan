@@ -1,25 +1,24 @@
 import { Ionicons } from "@expo/vector-icons";
 import {
-    deleteUser,
-    EmailAuthProvider,
-    reauthenticateWithCredential,
-    User,
+  deleteUser,
+  EmailAuthProvider,
+  reauthenticateWithCredential,
+  User,
 } from "firebase/auth";
 import { deleteDoc, doc } from "firebase/firestore";
 import React, { useState } from "react";
 import {
-    ActivityIndicator,
-    Alert,
-    Text,
-    TextInput,
-    TouchableOpacity,
-    View
+  ActivityIndicator,
+  Alert,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View
 } from "react-native";
 import { db } from "../firebaseConfig";
 
 const DARK_BLUE = "#2D2D7A";
 const ACCENT_RED = "#C0392B";
-const SUCCESS_GREEN = "#065F46";
 const LIGHT_BG = "#F4F5F9";
 
 function AppModal({
@@ -79,24 +78,20 @@ export function DeleteAccountModal({
     setPasswordError("");
 
     try {
-      // Reauthenticate with password
       const credential = EmailAuthProvider.credential(
         currentUser.email,
         password
       );
       await reauthenticateWithCredential(currentUser, credential);
 
-      // Delete Firestore document
       try {
         await deleteDoc(doc(db, "users", currentUser.uid));
       } catch (dbErr: any) {
         console.error("Firestore delete error:", dbErr);
       }
 
-      // Delete Firebase Auth user
       await deleteUser(currentUser);
 
-      // Success
       Alert.alert(
         "Account Deleted",
         "Your account and all data have been permanently deleted.",
@@ -162,7 +157,6 @@ export function DeleteAccountModal({
           >
             <Ionicons name="trash-outline" size={28} color={ACCENT_RED} />
           </View>
-
           <Text
             style={{
               fontSize: 18,
@@ -171,9 +165,8 @@ export function DeleteAccountModal({
               marginBottom: 8,
             }}
           >
-            Delete Account?
+            {"Delete Account?"}
           </Text>
-
           <Text
             style={{
               fontSize: 14,
@@ -182,10 +175,8 @@ export function DeleteAccountModal({
               marginBottom: 16,
             }}
           >
-            This action cannot be undone. All your listings, trades, messages,
-            and data will be permanently erased.
+            {"This action cannot be undone. All your listings, trades, messages, and data will be permanently erased."}
           </Text>
-
           <View style={{ marginBottom: 16 }}>
             <Text
               style={{
@@ -195,7 +186,7 @@ export function DeleteAccountModal({
                 marginBottom: 6,
               }}
             >
-              Enter your password to confirm
+              {"Enter your password to confirm"}
             </Text>
             <TextInput
               style={{
@@ -217,7 +208,7 @@ export function DeleteAccountModal({
               }}
               editable={!deleting}
             />
-            {passwordError && (
+            {passwordError ? (
               <Text
                 style={{
                   color: ACCENT_RED,
@@ -227,9 +218,8 @@ export function DeleteAccountModal({
               >
                 {passwordError}
               </Text>
-            )}
+            ) : null}
           </View>
-
           <View
             style={{
               flexDirection: "row",
@@ -258,10 +248,9 @@ export function DeleteAccountModal({
                   color: DARK_BLUE,
                 }}
               >
-                Cancel
+                {"Cancel"}
               </Text>
             </TouchableOpacity>
-
             <TouchableOpacity
               style={{
                 flex: 1,
@@ -286,7 +275,7 @@ export function DeleteAccountModal({
                     color: "#fff",
                   }}
                 >
-                  Delete Account
+                  {"Delete Account"}
                 </Text>
               )}
             </TouchableOpacity>

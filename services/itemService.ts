@@ -1,12 +1,12 @@
 import {
-  addDoc,
-  arrayRemove,
-  arrayUnion,
-  collection,
-  doc,
-  getDoc,
-  getDocs,
-  updateDoc,
+    addDoc,
+    arrayRemove,
+    arrayUnion,
+    collection,
+    doc,
+    getDoc,
+    getDocs,
+    updateDoc,
 } from "firebase/firestore";
 import { db } from "../firebaseConfig";
 
@@ -85,6 +85,7 @@ export const searchItems = async (searchQuery: string) => {
 
 /**
  * Get user information by userId
+ * Returns null if user not found (graceful fallback)
  */
 export const getUserInfo = async (userId: string) => {
   try {
@@ -96,12 +97,11 @@ export const getUserInfo = async (userId: string) => {
         id: userSnap.id,
         ...userSnap.data(),
       };
-    } else {
-      throw new Error("User not found");
     }
+    return null; // User not found - return null instead of throwing
   } catch (error) {
     console.error("Error getting user info:", error);
-    throw error;
+    return null;
   }
 };
 

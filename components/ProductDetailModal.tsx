@@ -4,20 +4,20 @@ import * as MediaLibrary from "expo-media-library";
 import { useRouter } from "expo-router";
 import React, { useEffect, useState } from "react";
 import {
-  ActivityIndicator,
-  Alert,
-  Dimensions,
-  FlatList,
-  Image,
-  ImageStyle,
-  Modal,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextStyle,
-  TouchableOpacity,
-  View,
-  ViewStyle,
+    ActivityIndicator,
+    Alert,
+    Dimensions,
+    FlatList,
+    Image,
+    ImageStyle,
+    Modal,
+    ScrollView,
+    StyleSheet,
+    Text,
+    TextStyle,
+    TouchableOpacity,
+    View,
+    ViewStyle,
 } from "react-native";
 import { LongPressGestureHandler, State } from "react-native-gesture-handler";
 import { auth } from "../firebaseConfig";
@@ -57,11 +57,22 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
   const [tradeModalVisible, setTradeModalVisible] = useState(false);
   // ─────────────────────────────────────────────────────────────────────────
 
-  const images = Array.isArray(item?.images)
-    ? item.images
-    : item?.image
-      ? [item.image]
-      : [];
+  // Validate image URLs and filter out blob URLs
+  const validateImageUrl = (url: string | undefined): boolean => {
+    if (!url) return false;
+    if (typeof url !== "string") return false;
+    if (url.startsWith("blob:")) return false;
+    return true;
+  };
+
+  const images = (() => {
+    const imgs = (Array.isArray(item?.images) ? item.images : []).filter(
+      (img: string) => validateImageUrl(img),
+    );
+    if (imgs.length > 0) return imgs;
+    if (validateImageUrl(item?.image)) return [item.image];
+    return [];
+  })();
 
   // Is this item owned by the current user?
   const isOwnItem = !!currentUser && currentUser === item?.ownerId;
@@ -193,9 +204,12 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
             <Ionicons name="close" size={28} color="#fff" />
           </TouchableOpacity>
           <Image
-            source={{ uri: image }}
+            source={{ 
+              uri: image?.startsWith("blob:") ? "https://via.placeholder.com/400x200" : (image || "https://via.placeholder.com/400x200")
+            }}
             style={styles.fullScreenImage}
             resizeMode="contain"
+            onError={() => console.warn("Failed to load full-screen image:", image)}
           />
           <View style={styles.fullScreenControls}>
             <TouchableOpacity
@@ -256,9 +270,12 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
                   onPress={() => setFullScreenImageIndex(currentImageIndex)}
                 >
                   <Image
-                    source={{ uri: imageUrl }}
+                    source={{ 
+                      uri: imageUrl?.startsWith("blob:") ? "https://via.placeholder.com/400x200" : (imageUrl || "https://via.placeholder.com/400x200")
+                    }}
                     style={styles.carouselImage}
                     resizeMode="contain"
+                    onError={() => console.warn("Failed to load carousel image:", imageUrl)}
                   />
                 </TouchableOpacity>
               </LongPressGestureHandler>

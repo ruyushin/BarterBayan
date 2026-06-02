@@ -166,14 +166,29 @@ function ItemCard({
   item: ListedItem;
   onPress: () => void;
 }) {
-  const imageUrl =
-    (Array.isArray(item.images) && item.images[0]) || item.image || null;
+  // Validate image URLs and filter out blob URLs
+  const validateImageUrl = (url: string | undefined): boolean => {
+    if (!url) return false;
+    if (typeof url !== "string") return false;
+    if (url.startsWith("blob:")) return false;
+    return true;
+  };
+
+  const imageUrl = (() => {
+    if (validateImageUrl(item.images?.[0])) return item.images![0];
+    if (validateImageUrl(item.image)) return item.image;
+    return null;
+  })();
 
   return (
     <TouchableOpacity style={card.wrap} onPress={onPress} activeOpacity={0.88}>
       <View style={card.imgWrap}>
         {imageUrl ? (
-          <Image source={{ uri: imageUrl }} style={card.img} />
+          <Image 
+            source={{ uri: imageUrl }} 
+            style={card.img}
+            onError={() => console.warn("Failed to load user profile item image:", imageUrl)}
+          />
         ) : (
           <View style={[card.img, card.imgPlaceholder]}>
             <Ionicons name="image-outline" size={32} color="#ccc" />

@@ -1,3 +1,4 @@
+
 import { Ionicons } from "@expo/vector-icons";
 import * as Clipboard from "expo-clipboard";
 import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
@@ -824,14 +825,12 @@ function SwipeableMessage({
       onMoveShouldSetPanResponder: (_: any, gs: any) =>
         Math.abs(gs.dx) > 8 && Math.abs(gs.dx) > Math.abs(gs.dy) * 1.5,
       onPanResponderMove: (_: any, gs: any) => {
-        // All messages swipe from right to left (negative direction)
         if (gs.dx < 0) {
           const value = Math.max(gs.dx, -(THRESHOLD + 20));
           translateX.setValue(value);
         }
       },
       onPanResponderRelease: (_: any, gs: any) => {
-        // Trigger reply on left swipe past threshold
         if (gs.dx <= -THRESHOLD && !triggered.current) {
           triggered.current = true;
           onSwipeReply();
@@ -870,7 +869,6 @@ function SwipeableMessage({
       >
         {children}
       </Animated.View>
-      {/* Time tooltip on swipe - appears on right side */}
       {timeStr && (
         <Animated.View
           style={[
@@ -994,19 +992,53 @@ export default function ChatScreen() {
   const [editHistoryData, setEditHistoryData] = useState<any[]>([]);
   const [reactionsModalVisible, setReactionsModalVisible] = useState(false);
   const [reactionsModalEmoji, setReactionsModalEmoji] = useState("");
-  const [reactionsModalUserIds, setReactionsModalUserIds] = useState<string[]>(
-    [],
-  );
+  const [reactionsModalUserIds, setReactionsModalUserIds] = useState<string[]>([]);
   const [multiSelect, setMultiSelect] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [sheetVisible, setSheetVisible] = useState(false);
   const [sheetOptions, setSheetOptions] = useState<SheetOption[]>([]);
   const [sheetTitle, setSheetTitle] = useState<string | undefined>();
+  const [showAllTimestamps, setShowAllTimestamps] = useState(false);
 
   const messageLayoutsRef = useRef<Record<string, number>>({});
   const currentUserId = auth.currentUser?.uid;
   const flatListRef = useRef<FlatList>(null);
   const isMuted = muteUntil !== null && new Date() < muteUntil;
+  const conversationSwipeRef = useRef(new Animated.Value(0)).current;
+
+  // ── FIX: timestamps only show while the gesture is actively held ──
+  const conversationPanResponder = useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => false,
+      onMoveShouldSetPanResponder: (_: any, gs: any) =>
+        Math.abs(gs.dx) > 10 && Math.abs(gs.dx) > Math.abs(gs.dy) * 1.5 && gs.dx < 0,
+      onPanResponderMove: (_: any, gs: any) => {
+        if (gs.dx < 0) {
+          const value = Math.min(80, -gs.dx);
+          conversationSwipeRef.setValue(value);
+          setShowAllTimestamps(true);
+        }
+      },
+      onPanResponderRelease: () => {
+        // Hide timestamps immediately on release
+        setShowAllTimestamps(false);
+        Animated.timing(conversationSwipeRef, {
+          toValue: 0,
+          duration: 200,
+          useNativeDriver: true,
+        }).start();
+      },
+      onPanResponderTerminate: () => {
+        // Also hide if gesture is stolen by scroll or anything else
+        setShowAllTimestamps(false);
+        Animated.timing(conversationSwipeRef, {
+          toValue: 0,
+          duration: 200,
+          useNativeDriver: true,
+        }).start();
+      },
+    }),
+  ).current;
 
   const conversationId = useMemo(
     () => [currentUserId, ownerUserId as string].sort().join("_"),
@@ -1045,13 +1077,8 @@ export default function ChatScreen() {
           } else {
             setMuteUntil(null);
           }
-          // Mark both the conversation and individual messages as read for the receiver
-          await markConversationAsRead(conversationId, currentUserId!).catch(
-            console.error,
-          );
-          await markMessagesAsRead(conversationId, currentUserId!).catch(
-            console.error,
-          );
+          await markConversationAsRead(conversationId, currentUserId!).catch(console.error);
+          await markMessagesAsRead(conversationId, currentUserId!).catch(console.error);
         } catch (err) {
           console.error("Error loading chat metadata:", err);
         } finally {
@@ -1063,13 +1090,8 @@ export default function ChatScreen() {
           ownerUserId as string,
           (newMessages) => {
             setMessages(newMessages);
-            // Mark both the conversation and individual messages as read for the receiver
-            markConversationAsRead(conversationId, currentUserId!).catch(
-              console.error,
-            );
-            markMessagesAsRead(conversationId, currentUserId!).catch(
-              console.error,
-            );
+            markConversationAsRead(conversationId, currentUserId!).catch(console.error);
+            markMessagesAsRead(conversationId, currentUserId!).catch(console.error);
             setTimeout(
               () => flatListRef.current?.scrollToEnd({ animated: true }),
               100,
@@ -1085,18 +1107,14 @@ export default function ChatScreen() {
     }, [currentUserId, ownerUserId, conversationId]),
   );
 
+  // ── FIX: only day separators, no hourly time separators ──
   const listData = useMemo<ListItem[]>(() => {
     const result: ListItem[] = [];
     let lastDay: string | null = null;
-    let lastHour: string | null = null;
-    
+
     messages.forEach((msg) => {
       const day = dayKey(msg.timestamp);
-      const date = toDate(msg.timestamp);
-      const currentHour = date.toLocaleTimeString([], { 
-        hour: "2-digit"
-      });
-      
+
       if (day !== lastDay && day !== "unknown") {
         result.push({
           type: "separator",
@@ -1104,23 +1122,8 @@ export default function ChatScreen() {
           date: formatDateLabel(msg.timestamp),
         });
         lastDay = day;
-        lastHour = null;
       }
-      
-      // Add time group separator every hour
-      if (currentHour !== lastHour) {
-        const timeLabel = date.toLocaleTimeString([], { 
-          hour: "2-digit", 
-          minute: "2-digit" 
-        });
-        result.push({
-          type: "separator",
-          id: `time-sep-${timeLabel}-${msg.id ?? Math.random()}`,
-          date: timeLabel,
-        });
-        lastHour = currentHour;
-      }
-      
+
       result.push({ ...msg, type: "message" });
     });
     return result;
@@ -1192,9 +1195,7 @@ export default function ChatScreen() {
     setMultiSelect(false);
     await Promise.all(
       ids.map((id) =>
-        deleteMessageForMe(conversationId, id, currentUserId!).catch(
-          console.error,
-        ),
+        deleteMessageForMe(conversationId, id, currentUserId!).catch(console.error),
       ),
     );
   };
@@ -1205,9 +1206,7 @@ export default function ChatScreen() {
     setMultiSelect(false);
     await Promise.all(
       ids.map((id) =>
-        deleteMessageForEveryone(conversationId, id, currentUserId!).catch(
-          console.error,
-        ),
+        deleteMessageForEveryone(conversationId, id, currentUserId!).catch(console.error),
       ),
     );
   };
@@ -1326,31 +1325,11 @@ export default function ChatScreen() {
       }
     };
     openSheet("Mute notifications for...", [
-      {
-        label: "15 minutes",
-        icon: "time-outline",
-        onPress: () => mute(15 * 60 * 1000),
-      },
-      {
-        label: "1 hour",
-        icon: "time-outline",
-        onPress: () => mute(60 * 60 * 1000),
-      },
-      {
-        label: "8 hours",
-        icon: "time-outline",
-        onPress: () => mute(8 * 60 * 60 * 1000),
-      },
-      {
-        label: "24 hours",
-        icon: "time-outline",
-        onPress: () => mute(24 * 60 * 60 * 1000),
-      },
-      {
-        label: "Until I change it",
-        icon: "infinite-outline",
-        onPress: () => mute(365 * 24 * 60 * 60 * 1000),
-      },
+      { label: "15 minutes", icon: "time-outline", onPress: () => mute(15 * 60 * 1000) },
+      { label: "1 hour", icon: "time-outline", onPress: () => mute(60 * 60 * 1000) },
+      { label: "8 hours", icon: "time-outline", onPress: () => mute(8 * 60 * 60 * 1000) },
+      { label: "24 hours", icon: "time-outline", onPress: () => mute(24 * 60 * 60 * 1000) },
+      { label: "Until I change it", icon: "infinite-outline", onPress: () => mute(365 * 24 * 60 * 60 * 1000) },
     ]);
   };
 
@@ -1386,9 +1365,6 @@ export default function ChatScreen() {
       item.deletedFor.includes(currentUserId);
 
     if (isDeletedForMe) return null;
-
-    // Get sender name for display
-    const senderName = isMe ? currentUserName : ownerFirstName;
 
     const messageContent = (
       <View
@@ -1525,8 +1501,8 @@ export default function ChatScreen() {
                 ))}
             </View>
           )}
-          {/* Read indicator for sent messages - always show */}
-          {isMe && !isDeletedForEveryone && (
+          {/* ── FIX: read indicator hidden while timestamps are shown ── */}
+          {isMe && !isDeletedForEveryone && !showAllTimestamps && (
             <View style={styles.readIndicatorWrap}>
               <Ionicons
                 name={item.read ? "checkmark-done" : "checkmark"}
@@ -1541,14 +1517,24 @@ export default function ChatScreen() {
 
     if (!multiSelect && !isDeletedForEveryone) {
       return (
-        <SwipeableMessage 
-          onSwipeReply={() => setReplyTo(item)} 
-          isMe={isMe}
-          timeStr={timeStr}
-          readStatus={item.read}
-        >
-          {messageContent}
-        </SwipeableMessage>
+        <View style={[styles.messageRowWithTimestamp, isMe ? styles.messageRowRight : styles.messageRowLeft]}>
+          <View style={{ flex: 1, minWidth: 0 }}>
+            <SwipeableMessage
+              onSwipeReply={() => setReplyTo(item)}
+              isMe={isMe}
+              timeStr={timeStr}
+              readStatus={item.read}
+            >
+              {messageContent}
+            </SwipeableMessage>
+          </View>
+          {/* ── FIX: timestamp only visible while holding the whole-conversation swipe ── */}
+          {showAllTimestamps && (
+            <Text style={styles.messageTimestampRight}>
+              {timeStr}
+            </Text>
+          )}
+        </View>
       );
     }
     return messageContent;
@@ -1658,7 +1644,6 @@ export default function ChatScreen() {
             <Ionicons name="chevron-back" size={24} color="white" />
           </TouchableOpacity>
 
-          {/* PATCH: tapping name/avatar opens the other user's profile */}
           <TouchableOpacity
             style={styles.headerContent}
             onPress={() =>
@@ -1713,32 +1698,40 @@ export default function ChatScreen() {
         behavior={Platform.OS === "ios" ? "padding" : undefined}
         keyboardVerticalOffset={90}
       >
-        <FlatList
-          ref={flatListRef}
-          data={listData}
-          renderItem={renderItem}
-          keyExtractor={(item) => item.id}
-          contentContainerStyle={styles.messagesList}
-          showsVerticalScrollIndicator={false}
-          onContentSizeChange={() =>
-            flatListRef.current?.scrollToEnd({ animated: false })
-          }
-          onScrollToIndexFailed={(info) => {
-            setTimeout(() => {
-              flatListRef.current?.scrollToIndex({
-                index: info.index,
-                animated: true,
-              });
-            }, 200);
-          }}
-          ListEmptyComponent={
-            <View style={styles.emptyChat}>
-              <Text style={styles.emptyChatText}>
-                No messages yet. Say hello!
-              </Text>
-            </View>
-          }
-        />
+        <Animated.View
+          style={[
+            { flex: 1 },
+            { transform: [{ translateX: conversationSwipeRef }] },
+          ]}
+          {...conversationPanResponder.panHandlers}
+        >
+          <FlatList
+            ref={flatListRef}
+            data={listData}
+            renderItem={renderItem}
+            keyExtractor={(item) => item.id}
+            contentContainerStyle={styles.messagesList}
+            showsVerticalScrollIndicator={false}
+            onContentSizeChange={() =>
+              flatListRef.current?.scrollToEnd({ animated: false })
+            }
+            onScrollToIndexFailed={(info) => {
+              setTimeout(() => {
+                flatListRef.current?.scrollToIndex({
+                  index: info.index,
+                  animated: true,
+                });
+              }, 200);
+            }}
+            ListEmptyComponent={
+              <View style={styles.emptyChat}>
+                <Text style={styles.emptyChatText}>
+                  No messages yet. Say hello!
+                </Text>
+              </View>
+            }
+          />
+        </Animated.View>
 
         {showSuggested && messages.length === 0 && !multiSelect && (
           <View style={styles.suggestedContainer}>
@@ -1929,26 +1922,6 @@ const styles = StyleSheet.create({
   theirBubbleText: { color: "#111" },
   deletedText: { color: "#8e8e93", fontStyle: "italic" },
   editedLabel: { fontSize: 10, marginTop: 2 },
-  bubbleTime: { fontSize: 11, color: "#555", marginTop: 3, marginBottom: 6, fontWeight: "500" },
-  bubbleTimeRight: { textAlign: "right" },
-  bubbleTimeLeft: { textAlign: "left" },
-  messageFooter: {
-    flexDirection: "row",
-    alignItems: "center",
-    marginTop: 3,
-    marginBottom: 6,
-  },
-  messageFooterRight: { justifyContent: "flex-end" },
-  messageFooterLeft: { justifyContent: "flex-start" },
-  senderName: {
-    fontSize: 12,
-    fontWeight: "600",
-    marginBottom: 2,
-    marginLeft: 0,
-    marginRight: 0,
-  },
-  senderNameRight: { textAlign: "right", color: "rgba(255,255,255,0.8)" },
-  senderNameLeft: { textAlign: "left", color: "#666" },
   reactionsRow: {
     flexDirection: "row",
     flexWrap: "wrap",
@@ -2067,5 +2040,23 @@ const styles = StyleSheet.create({
   readIndicatorWrap: {
     marginTop: 4,
     alignItems: "flex-end",
+  },
+  messageRowWithTimestamp: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 4,
+    paddingHorizontal: 4,
+    gap: 8,
+  },
+  messageRowLeft: {},
+  messageRowRight: {},
+  messageTimestampRight: {
+    fontSize: 11,
+    fontWeight: "500",
+    color: "#999",
+    minWidth: 45,
+    textAlign: "right",
+    flexShrink: 0,
   },
 });

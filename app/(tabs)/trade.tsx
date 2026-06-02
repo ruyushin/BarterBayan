@@ -2,27 +2,27 @@ import { Ionicons } from "@expo/vector-icons";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useEffect, useRef, useState } from "react";
 import {
-  ActivityIndicator,
-  Alert,
-  Animated,
-  FlatList,
-  Image,
-  Modal,
-  SafeAreaView,
-  StyleSheet,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  View,
+    ActivityIndicator,
+    Alert,
+    Animated,
+    FlatList,
+    Image,
+    Modal,
+    SafeAreaView,
+    StyleSheet,
+    Text,
+    TextInput,
+    TouchableOpacity,
+    View,
 } from "react-native";
 import { TradeChatModal } from "../../components/TradeChatModal";
 import { TradeOffersModal } from "../../components/TradeOffersModal";
 import { auth } from "../../firebaseConfig";
 import { getAllItems } from "../../services/itemService";
 import {
-  TradeOffer,
-  cancelTradeOffer,
-  subscribeToSentOffers,
+    TradeOffer,
+    cancelTradeOffer,
+    subscribeToSentOffers,
 } from "../../services/tradeService";
 
 const FILTER_CATEGORIES = [
@@ -234,13 +234,27 @@ export default function TradeScreen() {
   const pendingCount = sentOffers.filter((o) => o.status === "pending").length;
 
   const renderTradeItem = ({ item }: any) => {
-    const imageUrl =
-      Array.isArray(item?.images) && item.images.length > 0
-        ? item.images[0]
-        : item?.image || "https://via.placeholder.com/200";
+    // Validate image URLs and filter out blob URLs
+    const validateImageUrl = (url: string | undefined): boolean => {
+      if (!url) return false;
+      if (typeof url !== "string") return false;
+      if (url.startsWith("blob:")) return false;
+      return true;
+    };
+
+    const imageUrl = (() => {
+      if (validateImageUrl(item?.images?.[0])) return item.images[0];
+      if (validateImageUrl(item?.image)) return item.image;
+      return "https://via.placeholder.com/200";
+    })();
+
     return (
       <View style={styles.card}>
-        <Image source={{ uri: imageUrl }} style={styles.image} />
+        <Image 
+          source={{ uri: imageUrl }} 
+          style={styles.image}
+          onError={() => console.warn("Failed to load trade item image:", imageUrl)}
+        />
         <Text style={styles.itemName} numberOfLines={2}>
           {item.title || item.name}
         </Text>

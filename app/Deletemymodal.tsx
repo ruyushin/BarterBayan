@@ -1,23 +1,23 @@
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import {
-    deleteUser,
-    EmailAuthProvider,
-    onAuthStateChanged,
-    reauthenticateWithCredential,
-    User,
+  deleteUser,
+  EmailAuthProvider,
+  onAuthStateChanged,
+  reauthenticateWithCredential,
+  User,
 } from "firebase/auth";
 import { deleteDoc, doc } from "firebase/firestore";
 import React, { useEffect, useRef, useState } from "react";
 import {
-    ActivityIndicator,
-    Animated,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TextInput,
-    TouchableOpacity,
-    View,
+  ActivityIndicator,
+  Animated,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
 } from "react-native";
 import { auth, db } from "../firebaseConfig"; // adjust path as needed
 
@@ -400,8 +400,10 @@ export function DeleteAccountModal({ visible, onClose }: DeleteAccountModalProps
                   onPress={goNext}
                   activeOpacity={0.8}
                 >
-                  <Text style={modalStyles.primaryBtnText}>I Understand, Continue</Text>
-                  <Ionicons name="arrow-forward" size={16} color={WHITE} />
+                  <View style={modalStyles.primaryBtnInner}>
+                    <Text style={modalStyles.primaryBtnText}>I Understand, Continue</Text>
+                    <Ionicons name="arrow-forward" size={16} color={WHITE} />
+                  </View>
                 </TouchableOpacity>
 
                 <TouchableOpacity style={modalStyles.cancelBtn} onPress={handleClose}>
@@ -467,8 +469,10 @@ export function DeleteAccountModal({ visible, onClose }: DeleteAccountModalProps
                   disabled={!phraseMatches}
                   activeOpacity={0.8}
                 >
-                  <Text style={modalStyles.primaryBtnText}>Continue</Text>
-                  <Ionicons name="arrow-forward" size={16} color={WHITE} />
+                  <View style={modalStyles.primaryBtnInner}>
+                    <Text style={modalStyles.primaryBtnText}>Continue</Text>
+                    <Ionicons name="arrow-forward" size={16} color={WHITE} />
+                  </View>
                 </TouchableOpacity>
 
                 <TouchableOpacity style={modalStyles.cancelBtn} onPress={handleClose}>
@@ -527,6 +531,7 @@ export function DeleteAccountModal({ visible, onClose }: DeleteAccountModalProps
                   </View>
                 )}
 
+                {/* FIX: replaced <> fragment with <View> to prevent web text node error */}
                 <TouchableOpacity
                   style={[
                     modalStyles.primaryBtn,
@@ -540,10 +545,10 @@ export function DeleteAccountModal({ visible, onClose }: DeleteAccountModalProps
                   {verifyingPassword ? (
                     <ActivityIndicator color={WHITE} size="small" />
                   ) : (
-                    <>
+                    <View style={modalStyles.primaryBtnInner}>
                       <Text style={modalStyles.primaryBtnText}>Verify & Continue</Text>
                       <Ionicons name="arrow-forward" size={16} color={WHITE} />
-                    </>
+                    </View>
                   )}
                 </TouchableOpacity>
 
@@ -667,10 +672,8 @@ const modalStyles = StyleSheet.create({
     paddingHorizontal: 8,
   },
   primaryBtn: {
-    flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
-    gap: 8,
     paddingVertical: 15,
     borderRadius: 14,
     elevation: 3,
@@ -679,6 +682,13 @@ const modalStyles = StyleSheet.create({
     shadowOpacity: 0.3,
     shadowRadius: 6,
     marginBottom: 12,
+  },
+  // FIX: extracted row layout into a dedicated inner View style
+  // instead of relying on flexDirection on the button itself with a fragment child
+  primaryBtnInner: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
   },
   primaryBtnText: {
     color: WHITE,

@@ -1,14 +1,14 @@
 ﻿import React, { useState } from "react";
 import {
-  ActivityIndicator,
-  FlatList,
-  Image,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  View,
+    ActivityIndicator,
+    FlatList,
+    Image,
+    ScrollView,
+    StyleSheet,
+    Text,
+    TextInput,
+    TouchableOpacity,
+    View,
 } from "react-native";
 
 import { ThemedView } from "@/components/themed-view";
@@ -247,7 +247,7 @@ export default function HomeScreen() {
         {/* ── Trending ── */}
         <View style={styles.sectionHeader}>
           <Text style={styles.sectionTitle}>Trending</Text>
-          <Link href="/explore">
+          <Link href="/explore?type=trending">
             <Text style={styles.seeAllText}>See all</Text>
           </Link>
         </View>
@@ -284,7 +284,7 @@ export default function HomeScreen() {
         {/* ── Suggested ── */}
         <View style={styles.sectionHeader}>
           <Text style={styles.sectionTitle}>Suggested</Text>
-          <Link href="/explore">
+          <Link href="/explore?type=personalized">
             <Text style={styles.seeAllText}>See all</Text>
           </Link>
         </View>
