@@ -55,7 +55,11 @@ export default function AuthLayout() {
             return;
           }
 
-          // Don't redirect if already on the correct screen
+          // Don't redirect if already on the correct screen or on special routes
+          // Special routes: ChangePasswordScreen, etc. (authenticated-only routes)
+          const specialAuthRoutes = ['ChangePasswordScreen'];
+          const isSpecialRoute = specialAuthRoutes.includes(currentRoute);
+          
           // Priority: Terms → Profile Setup → Home
           
           // 1. If terms not accepted, must show terms screen (don't show profile-setup yet)
@@ -72,8 +76,8 @@ export default function AuthLayout() {
             await router.replace('/(auth)/profile-setup');
             setTimeout(() => { navigationInProgressRef.current = false; }, 800);
           } 
-          // 3. If both complete, go home
-          else if (data?.profileComplete && data?.termsAccepted) {
+          // 3. If both complete, go home (but allow special authenticated routes)
+          else if (data?.profileComplete && data?.termsAccepted && !isSpecialRoute) {
             console.log('[AuthLayout] Redirecting to home - both flags true');
             navigationInProgressRef.current = true;
             await router.replace('/');

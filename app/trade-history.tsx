@@ -2,24 +2,24 @@ import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import { onAuthStateChanged, User } from "firebase/auth";
 import {
-  collection,
-  limit,
-  onSnapshot,
-  orderBy,
-  query,
-  where,
+    collection,
+    limit,
+    onSnapshot,
+    orderBy,
+    query,
+    where,
 } from "firebase/firestore";
 import React, { useEffect, useRef, useState } from "react";
 import {
-  ActivityIndicator,
-  Animated,
-  Linking,
-  RefreshControl,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TouchableOpacity,
-  View,
+    ActivityIndicator,
+    Animated,
+    Linking,
+    RefreshControl,
+    ScrollView,
+    StyleSheet,
+    Text,
+    TouchableOpacity,
+    View,
 } from "react-native";
 import { auth, db } from "../firebaseConfig.ts";
 
@@ -110,7 +110,12 @@ function avatarInitial(name: string): string {
 // ─── Trade Card ───────────────────────────────────────────────────────────────
 function TradeCard({ trade }: { trade: TradeRecord }) {
   const scale = useRef(new Animated.Value(1)).current;
-  const cfg = STATUS_CONFIG[trade.status];
+  const cfg = STATUS_CONFIG[trade.status] ?? {
+    label: "Unknown",
+    color: "#666",
+    bg: "#F3F4F6",
+    icon: "help-circle",
+  };
 
   const handlePressIn = () =>
     Animated.spring(scale, { toValue: 0.97, useNativeDriver: true }).start();

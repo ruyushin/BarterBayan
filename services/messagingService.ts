@@ -1,19 +1,19 @@
 import {
-  addDoc,
-  arrayUnion,
-  collection,
-  deleteDoc,
-  doc,
-  getDoc,
-  getDocs,
-  limit,
-  onSnapshot,
-  orderBy,
-  query,
-  setDoc,
-  Timestamp,
-  updateDoc,
-  where,
+    addDoc,
+    arrayUnion,
+    collection,
+    deleteDoc,
+    doc,
+    getDoc,
+    getDocs,
+    limit,
+    onSnapshot,
+    orderBy,
+    query,
+    setDoc,
+    Timestamp,
+    updateDoc,
+    where,
 } from 'firebase/firestore';
 import { db } from '../firebaseConfig';
 
@@ -342,6 +342,44 @@ export const getUserConversations = async (
     }
 };
 
+/**
+ * Real-time subscription to conversations.
+ * Returns an unsubscribe function.
+ */
+export const subscribeToUserConversations = (
+    userId: string,
+    onConversations: (conversations: ConversationData[]) => void
+): (() => void) => {
+    const conversationsRef = collection(db, 'messages');
+    const q = query(
+        conversationsRef,
+        where('participants', 'array-contains', userId)
+    );
+
+    const unsubscribe = onSnapshot(
+        q,
+        (snapshot) => {
+            const conversations = snapshot.docs
+                .map((d) => ({ id: d.id, ...(d.data() as Omit<ConversationData, 'id'>) }))
+                .filter(
+                    (conv) =>
+                        !Array.isArray(conv.deletedBy) || !conv.deletedBy.includes(userId)
+                )
+                .sort((a, b) => {
+                    const timeA = a.lastMessageTime?.toMillis?.() ?? 0;
+                    const timeB = b.lastMessageTime?.toMillis?.() ?? 0;
+                    return timeB - timeA;
+                });
+            onConversations(conversations);
+        },
+        (error) => {
+            console.error('Error subscribing to conversations:', error);
+        }
+    );
+
+    return unsubscribe;
+};
+
 export const getOtherUserInConversation = (
     conversationId: string,
     currentUserId: string
@@ -351,6 +389,31 @@ export const getOtherUserInConversation = (
 };
 
 // ─── Read / Unread ────────────────────────────────────────────────────────────
+
+/**
+ * Get unread message count for a conversation.
+ * Only counts messages where the current user is the recipient and the message is unread.
+ * This ensures only the receiver sees the unread count badge.
+ */
+export const getUnreadMessageCount = async (
+    conversationId: string,
+    userId: string
+): Promise<number> => {
+    try {
+        const messagesRef = collection(db, 'messages', conversationId, 'threads');
+        const q = query(
+            messagesRef,
+            where('recipientId', '==', userId),
+            where('read', '==', false)
+        );
+
+        const snapshot = await getDocs(q);
+        return snapshot.docs.length;
+    } catch (error) {
+        console.error('Error getting unread message count:', error);
+        return 0;
+    }
+};
 
 export const markMessagesAsRead = async (
     conversationId: string,
@@ -377,6 +440,35 @@ export const markMessagesAsRead = async (
     }
 };
 
+/**
+ * Mark all messages received by the user as unread in a conversation.
+ * Used when user clicks "Mark as Unread" to reset the unread state.
+ */
+export const markMessagesAsUnread = async (
+    conversationId: string,
+    userId: string
+): Promise<void> => {
+    try {
+        const messagesRef = collection(db, 'messages', conversationId, 'threads');
+        const q = query(
+            messagesRef,
+            where('recipientId', '==', userId),
+            where('read', '==', true)
+        );
+
+        const snapshot = await getDocs(q);
+        snapshot.docs.forEach((messageDoc) => {
+            const messageRef = doc(db, 'messages', conversationId, 'threads', messageDoc.id);
+            setDoc(messageRef, { read: false }, { merge: true }).catch((error) =>
+                console.error('Error marking message as unread:', error)
+            );
+        });
+    } catch (error) {
+        console.error('Error marking messages as unread:', error);
+        throw error;
+    }
+};
+
 export const markConversationAsRead = async (
     conversationId: string,
     userId: string
@@ -396,9 +488,12 @@ export const markConversationAsRead = async (
 
 export const markConversationAsUnread = async (
     conversationId: string,
-    _userId: string
+    userId: string
 ): Promise<void> => {
     try {
+        // Also mark the individual messages as unread so the badge appears
+        await markMessagesAsUnread(conversationId, userId);
+        
         const conversationRef = doc(db, 'messages', conversationId);
         await setDoc(conversationRef, { isRead: false, readBy: [] }, { merge: true });
     } catch (error) {

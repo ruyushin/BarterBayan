@@ -31,11 +31,12 @@ import {
   editMessage,
   getConversationData,
   markConversationAsRead,
+  markMessagesAsRead,
   muteConversation,
   reactToMessage,
   sendMessage,
   subscribeToMessages,
-  unmuteConversation,
+  unmuteConversation
 } from "../services/messagingService";
 
 const NAVY = "#2e2d7c";
@@ -805,10 +806,14 @@ function SwipeableMessage({
   children,
   onSwipeReply,
   isMe,
+  timeStr,
+  readStatus,
 }: {
   children: React.ReactNode;
   onSwipeReply: () => void;
   isMe: boolean;
+  timeStr?: string;
+  readStatus?: boolean;
 }) {
   const translateX = useRef(new Animated.Value(0)).current;
   const triggered = useRef(false);
@@ -819,17 +824,15 @@ function SwipeableMessage({
       onMoveShouldSetPanResponder: (_: any, gs: any) =>
         Math.abs(gs.dx) > 8 && Math.abs(gs.dx) > Math.abs(gs.dy) * 1.5,
       onPanResponderMove: (_: any, gs: any) => {
-        const shouldSwipe = isMe ? gs.dx < 0 : gs.dx > 0;
-        if (shouldSwipe) {
-          const value = isMe
-            ? Math.max(gs.dx, -(THRESHOLD + 20))
-            : Math.min(gs.dx, THRESHOLD + 20);
+        // All messages swipe from right to left (negative direction)
+        if (gs.dx < 0) {
+          const value = Math.max(gs.dx, -(THRESHOLD + 20));
           translateX.setValue(value);
         }
       },
       onPanResponderRelease: (_: any, gs: any) => {
-        const shouldTrigger = isMe ? gs.dx <= -THRESHOLD : gs.dx >= THRESHOLD;
-        if (shouldTrigger && !triggered.current) {
+        // Trigger reply on left swipe past threshold
+        if (gs.dx <= -THRESHOLD && !triggered.current) {
           triggered.current = true;
           onSwipeReply();
         }
@@ -853,13 +856,41 @@ function SwipeableMessage({
     }),
   ).current;
 
+  const opacity = translateX.interpolate({
+    inputRange: [-THRESHOLD, 0],
+    outputRange: [1, 0],
+    extrapolate: "clamp",
+  });
+
   return (
-    <Animated.View
-      {...panResponder.panHandlers}
-      style={{ transform: [{ translateX }] }}
-    >
-      {children}
-    </Animated.View>
+    <View style={{ position: "relative" }}>
+      <Animated.View
+        {...panResponder.panHandlers}
+        style={{ transform: [{ translateX }] }}
+      >
+        {children}
+      </Animated.View>
+      {/* Time tooltip on swipe - appears on right side */}
+      {timeStr && (
+        <Animated.View
+          style={[
+            styles.swipeTimeOverlay,
+            styles.swipeTimeRight,
+            { opacity },
+          ]}
+        >
+          <Text style={styles.swipeTimeText}>{timeStr}</Text>
+          {isMe && (
+            <Ionicons
+              name={readStatus ? "checkmark-done" : "checkmark"}
+              size={16}
+              color="#999"
+              style={{ marginLeft: 4 }}
+            />
+          )}
+        </Animated.View>
+      )}
+    </View>
   );
 }
 
@@ -952,6 +983,7 @@ export default function ChatScreen() {
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
   const [ownerInfo, setOwnerInfo] = useState<any>(null);
+  const [currentUserInfo, setCurrentUserInfo] = useState<any>(null);
   const [showSuggested, setShowSuggested] = useState(true);
   const [muteUntil, setMuteUntil] = useState<Date | null>(null);
   const [ctxVisible, setCtxVisible] = useState(false);
@@ -986,6 +1018,11 @@ export default function ChatScreen() {
     return name.split(" ")[0];
   }, [ownerInfo]);
 
+  const currentUserName = useMemo(() => {
+    const name = currentUserInfo?.displayName || currentUserInfo?.username || "You";
+    return name.split(" ")[0];
+  }, [currentUserInfo]);
+
   useFocusEffect(
     useCallback(() => {
       if (!currentUserId || !ownerUserId) return;
@@ -994,11 +1031,13 @@ export default function ChatScreen() {
       const init = async () => {
         try {
           setLoading(true);
-          const [info, convData] = await Promise.all([
+          const [info, convData, curUserInfo] = await Promise.all([
             getUserInfo(ownerUserId as string).catch(() => null),
             getConversationData(conversationId).catch(() => null),
+            currentUserId ? getUserInfo(currentUserId).catch(() => null) : Promise.resolve(null),
           ]);
           setOwnerInfo(info);
+          setCurrentUserInfo(curUserInfo);
           const mutedTs = convData?.mutedBy?.[currentUserId!];
           if (mutedTs) {
             const until = toDate(mutedTs);
@@ -1006,7 +1045,11 @@ export default function ChatScreen() {
           } else {
             setMuteUntil(null);
           }
-          markConversationAsRead(conversationId, currentUserId!).catch(
+          // Mark both the conversation and individual messages as read for the receiver
+          await markConversationAsRead(conversationId, currentUserId!).catch(
+            console.error,
+          );
+          await markMessagesAsRead(conversationId, currentUserId!).catch(
             console.error,
           );
         } catch (err) {
@@ -1020,7 +1063,11 @@ export default function ChatScreen() {
           ownerUserId as string,
           (newMessages) => {
             setMessages(newMessages);
+            // Mark both the conversation and individual messages as read for the receiver
             markConversationAsRead(conversationId, currentUserId!).catch(
+              console.error,
+            );
+            markMessagesAsRead(conversationId, currentUserId!).catch(
               console.error,
             );
             setTimeout(
@@ -1041,8 +1088,15 @@ export default function ChatScreen() {
   const listData = useMemo<ListItem[]>(() => {
     const result: ListItem[] = [];
     let lastDay: string | null = null;
+    let lastHour: string | null = null;
+    
     messages.forEach((msg) => {
       const day = dayKey(msg.timestamp);
+      const date = toDate(msg.timestamp);
+      const currentHour = date.toLocaleTimeString([], { 
+        hour: "2-digit"
+      });
+      
       if (day !== lastDay && day !== "unknown") {
         result.push({
           type: "separator",
@@ -1050,7 +1104,23 @@ export default function ChatScreen() {
           date: formatDateLabel(msg.timestamp),
         });
         lastDay = day;
+        lastHour = null;
       }
+      
+      // Add time group separator every hour
+      if (currentHour !== lastHour) {
+        const timeLabel = date.toLocaleTimeString([], { 
+          hour: "2-digit", 
+          minute: "2-digit" 
+        });
+        result.push({
+          type: "separator",
+          id: `time-sep-${timeLabel}-${msg.id ?? Math.random()}`,
+          date: timeLabel,
+        });
+        lastHour = currentHour;
+      }
+      
       result.push({ ...msg, type: "message" });
     });
     return result;
@@ -1317,6 +1387,9 @@ export default function ChatScreen() {
 
     if (isDeletedForMe) return null;
 
+    // Get sender name for display
+    const senderName = isMe ? currentUserName : ownerFirstName;
+
     const messageContent = (
       <View
         style={[styles.messageWrap, isMe ? styles.myWrap : styles.theirWrap]}
@@ -1343,6 +1416,16 @@ export default function ChatScreen() {
           </View>
         )}
         <View style={isMe ? styles.myBubbleCol : styles.theirBubbleCol}>
+          {item.replyTo && !isDeletedForEveryone && (
+            <View style={styles.repliedToNotice}>
+              <Ionicons name="arrow-back" size={14} color="#666" />
+              <Text style={styles.repliedToText}>
+                {item.replyTo.senderId === currentUserId
+                  ? "You"
+                  : ownerFirstName} replied to you
+              </Text>
+            </View>
+          )}
           {item.replyTo && !isDeletedForEveryone && (
             <TouchableOpacity
               onPress={() =>
@@ -1442,23 +1525,28 @@ export default function ChatScreen() {
                 ))}
             </View>
           )}
-          {timeStr ? (
-            <Text
-              style={[
-                styles.bubbleTime,
-                isMe ? styles.bubbleTimeRight : styles.bubbleTimeLeft,
-              ]}
-            >
-              {timeStr}
-            </Text>
-          ) : null}
+          {/* Read indicator for sent messages - always show */}
+          {isMe && !isDeletedForEveryone && (
+            <View style={styles.readIndicatorWrap}>
+              <Ionicons
+                name={item.read ? "checkmark-done" : "checkmark"}
+                size={16}
+                color="#999"
+              />
+            </View>
+          )}
         </View>
       </View>
     );
 
     if (!multiSelect && !isDeletedForEveryone) {
       return (
-        <SwipeableMessage onSwipeReply={() => setReplyTo(item)} isMe={isMe}>
+        <SwipeableMessage 
+          onSwipeReply={() => setReplyTo(item)} 
+          isMe={isMe}
+          timeStr={timeStr}
+          readStatus={item.read}
+        >
           {messageContent}
         </SwipeableMessage>
       );
@@ -1841,9 +1929,26 @@ const styles = StyleSheet.create({
   theirBubbleText: { color: "#111" },
   deletedText: { color: "#8e8e93", fontStyle: "italic" },
   editedLabel: { fontSize: 10, marginTop: 2 },
-  bubbleTime: { fontSize: 10, color: "#9ca3af", marginTop: 3, marginBottom: 6 },
+  bubbleTime: { fontSize: 11, color: "#555", marginTop: 3, marginBottom: 6, fontWeight: "500" },
   bubbleTimeRight: { textAlign: "right" },
   bubbleTimeLeft: { textAlign: "left" },
+  messageFooter: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginTop: 3,
+    marginBottom: 6,
+  },
+  messageFooterRight: { justifyContent: "flex-end" },
+  messageFooterLeft: { justifyContent: "flex-start" },
+  senderName: {
+    fontSize: 12,
+    fontWeight: "600",
+    marginBottom: 2,
+    marginLeft: 0,
+    marginRight: 0,
+  },
+  senderNameRight: { textAlign: "right", color: "rgba(255,255,255,0.8)" },
+  senderNameLeft: { textAlign: "left", color: "#666" },
   reactionsRow: {
     flexDirection: "row",
     flexWrap: "wrap",
@@ -1930,4 +2035,37 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   sendBtnDisabled: { opacity: 0.4 },
+  swipeTimeOverlay: {
+    position: "absolute",
+    top: 0,
+    bottom: 0,
+    right: 0,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "flex-end",
+    gap: 6,
+  },
+  swipeTimeRight: { right: 0 },
+  swipeTimeText: {
+    fontSize: 12,
+    fontWeight: "600",
+    color: "#666",
+  },
+  repliedToNotice: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    marginBottom: 6,
+  },
+  repliedToText: {
+    fontSize: 12,
+    color: "#666",
+    fontWeight: "500",
+  },
+  readIndicatorWrap: {
+    marginTop: 4,
+    alignItems: "flex-end",
+  },
 });

@@ -2,13 +2,11 @@ import { Ionicons } from "@expo/vector-icons";
 import * as ImagePicker from "expo-image-picker";
 import { useRouter } from "expo-router";
 import {
-  deleteUser,
   onAuthStateChanged,
-  sendPasswordResetEmail,
   updateProfile,
-  User,
+  User
 } from "firebase/auth";
-import { deleteDoc, doc, getDoc, updateDoc } from "firebase/firestore";
+import { doc, getDoc, updateDoc } from "firebase/firestore";
 import React, { useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
@@ -26,6 +24,7 @@ import {
   View,
 } from "react-native";
 import { auth, db } from "../firebaseConfig";
+import { DeleteAccountModal } from "./DeleteAccountModal";
 
 // ─── Cloudinary Config ────────────────────────────────────────────────────────
 const CLOUDINARY_CLOUD_NAME = process.env.EXPO_PUBLIC_CLOUDINARY_CLOUD_NAME ?? "";
@@ -463,6 +462,7 @@ export default function EditProfileScreen() {
   const [saved, setSaved] = useState(false);
   const [showSaveModal, setShowSaveModal] = useState(false);
   const [showDiscardModal, setShowDiscardModal] = useState(false);
+  const [deleteModalVisible, setDeleteModalVisible] = useState(false);
 
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const slideAnim = useRef(new Animated.Value(24)).current;
@@ -775,6 +775,14 @@ export default function EditProfileScreen() {
         </View>
       </AppModal>
 
+      {/* ── Delete Account Modal ── */}
+      <DeleteAccountModal
+        visible={deleteModalVisible}
+        onClose={() => setDeleteModalVisible(false)}
+        currentUser={currentUser}
+        router={router}
+      />
+
       {/* ── Header ── */}
       <View style={styles.header}>
         <TouchableOpacity
@@ -935,26 +943,7 @@ export default function EditProfileScreen() {
             <TouchableOpacity
               style={styles.dangerRow}
               activeOpacity={0.7}
-              onPress={() =>
-                Alert.alert(
-                  "Change Password",
-                  "A password reset email will be sent to " + email,
-                  [
-                    { text: "Cancel", style: "cancel" },
-                    {
-                      text: "Send",
-                      onPress: async () => {
-                        try {
-                          await sendPasswordResetEmail(auth, email);
-                          Alert.alert("Email sent", "Check your inbox to reset your password.");
-                        } catch (e: any) {
-                          Alert.alert("Error", e?.message ?? "Failed to send reset email.");
-                        }
-                      },
-                    },
-                  ],
-                )
-              }
+              onPress={() => router.push("/(auth)/ChangePasswordScreen")}
             >
               <View style={styles.dangerRowLeft}>
                 <View style={styles.dangerIconBox}>
@@ -973,62 +962,7 @@ export default function EditProfileScreen() {
             <TouchableOpacity
               style={styles.dangerRow}
               activeOpacity={0.7}
-              onPress={() => {
-                Alert.alert(
-                  "Delete Account?",
-                  "This action cannot be undone. All your listings, trades, messages, and data will be permanently erased.\n\nYou will need to log in again if you proceed.",
-                  [
-                    { text: "Cancel", style: "cancel" },
-                    {
-                      text: "Delete my account",
-                      style: "destructive",
-                      onPress: async () => {
-                        try {
-                          setSaving(true);
-                          if (!currentUser) {
-                            Alert.alert("Error", "Not logged in. Please log in again.");
-                            setSaving(false);
-                            return;
-                          }
-                          try {
-                            await deleteDoc(doc(db, "users", currentUser.uid));
-                          } catch (dbErr: any) {
-                            console.error("Firestore delete error:", dbErr);
-                          }
-                          try {
-                            await deleteUser(currentUser);
-                          } catch (authErr: any) {
-                            console.error("Auth delete error:", authErr);
-                            if (authErr.code === "auth/requires-recent-login") {
-                              Alert.alert(
-                                "Re-authentication Required",
-                                "For security, please log out and log back in, then delete your account again.",
-                                [{ text: "OK", onPress: () => router.replace("/(auth)/login") }],
-                              );
-                              setSaving(false);
-                              return;
-                            }
-                            throw authErr;
-                          }
-                          Alert.alert(
-                            "Account Deleted",
-                            "Your account and all data have been permanently deleted.",
-                            [{ text: "OK", onPress: () => router.replace("/(auth)/login") }],
-                          );
-                        } catch (err: any) {
-                          console.error("Delete account error:", err);
-                          Alert.alert(
-                            "Error",
-                            err?.message ?? "Failed to delete account. Please try again or contact support.",
-                          );
-                        } finally {
-                          setSaving(false);
-                        }
-                      },
-                    },
-                  ],
-                );
-              }}
+              onPress={() => setDeleteModalVisible(true)}
             >
               <View style={styles.dangerRowLeft}>
                 <View style={[styles.dangerIconBox, { backgroundColor: "#FEE2E2" }]}>

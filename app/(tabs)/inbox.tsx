@@ -1,6 +1,6 @@
 import { Ionicons } from "@expo/vector-icons";
-import { useFocusEffect, useRouter } from "expo-router";
-import { useCallback, useState } from "react";
+import { useRouter } from "expo-router";
+import { useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -21,12 +21,14 @@ import {
   archiveConversation,
   deleteConversation,
   getOtherUserInConversation,
+  getUnreadMessageCount,
   getUserConversations,
   markConversationAsRead,
   markConversationAsUnread,
   muteConversation,
+  subscribeToUserConversations,
   unarchiveConversation,
-  unmuteConversation,
+  unmuteConversation
 } from "../../services/messagingService";
 import {
   deleteNotifications,
@@ -361,6 +363,7 @@ export default function InboxScreen() {
 
   const router = useRouter();
   const currentUserId = auth.currentUser?.uid;
+  const conversationUnsubscribeRef = useRef<(() => void) | null>(null);
 
   const openSheet = (title: string | undefined, options: SheetOption[]) => {
     setSheetTitle(title);
@@ -368,16 +371,87 @@ export default function InboxScreen() {
     setSheetVisible(true);
   };
 
-  // ─── Data loaders ─────────────────────────────────────────────────────────
-  useFocusEffect(
-    useCallback(() => {
-      if (currentUserId) {
-        loadConversations();
-        loadNotifications();
-      }
-    }, [currentUserId]),
-  );
+  // ─── Data loaders - Real-time listeners ────────────────────────────────────
+  useEffect(() => {
+    if (!currentUserId) return;
 
+    const setupConversationListener = async () => {
+      conversationUnsubscribeRef.current?.();
+      conversationUnsubscribeRef.current = subscribeToUserConversations(
+        currentUserId,
+        async (convs: any) => {
+          if (!convs || convs.length === 0) {
+            setConversations([]);
+            setArchivedConversations([]);
+            setMutedConversations({});
+            setConvLoading(false);
+            return;
+          }
+
+          const enriched = await Promise.all(
+            convs.map(async (conv: any) => {
+              try {
+                const otherUserId = getOtherUserInConversation(
+                  conv.id,
+                  currentUserId!,
+                );
+                if (!otherUserId) return conv;
+                const userInfo: any = await getUserInfo(otherUserId).catch(
+                  () => null,
+                );
+                const avatarUri = resolveAvatar(userInfo);
+                // Get unread message count for this conversation
+                const unreadCount = await getUnreadMessageCount(conv.id, currentUserId!).catch(
+                  () => 0,
+                );
+                return {
+                  ...conv,
+                  otherUserId,
+                  userName: userInfo?.username || userInfo?.displayName || "User",
+                  userAvatar: avatarUri,
+                  unreadCount,
+                };
+              } catch {
+                return { ...conv, userName: "User", userAvatar: null, unreadCount: 0 };
+              }
+            }),
+          );
+
+          const newMuted: { [key: string]: Date } = {};
+          enriched.forEach((conv: any) => {
+            const mutedTs = conv.mutedBy?.[currentUserId!];
+            if (mutedTs) {
+              const until = tsToDate(mutedTs);
+              if (until.getTime() > Date.now()) {
+                newMuted[conv.id] = until;
+              }
+            }
+          });
+          setMutedConversations(newMuted);
+
+          const active = enriched.filter(
+            (conv) => !conv.archivedBy || !conv.archivedBy.includes(currentUserId!),
+          );
+          const archived = enriched.filter(
+            (conv) => conv.archivedBy && conv.archivedBy.includes(currentUserId!),
+          );
+          setConversations(active);
+          setArchivedConversations(archived);
+          setConvLoading(false);
+        }
+      );
+    };
+
+    setConvLoading(true);
+    setupConversationListener();
+    loadNotifications();
+
+    return () => {
+      conversationUnsubscribeRef.current?.();
+    };
+  }, [currentUserId]);
+
+  // Keep loadConversations for manual refresh
   const loadConversations = async () => {
     try {
       setConvLoading(true);
@@ -402,14 +476,19 @@ export default function InboxScreen() {
               () => null,
             );
             const avatarUri = resolveAvatar(userInfo);
+            // Get unread message count for this conversation
+            const unreadCount = await getUnreadMessageCount(conv.id, currentUserId!).catch(
+              () => 0,
+            );
             return {
               ...conv,
               otherUserId,
               userName: userInfo?.username || userInfo?.displayName || "User",
               userAvatar: avatarUri,
+              unreadCount,
             };
           } catch {
-            return { ...conv, userName: "User", userAvatar: null };
+            return { ...conv, userName: "User", userAvatar: null, unreadCount: 0 };
           }
         }),
       );
@@ -705,14 +784,29 @@ export default function InboxScreen() {
   const visibleNotifs = notifications.slice(0, visibleCount);
   const hasMore = notifications.length > visibleCount;
   const loadMore = () => setVisibleCount((c) => c + PAGE_SIZE);
-  const unreadCount = notifications.filter((n) => !n.read).length;
+  
+  // Count unique unread conversations in notifications (deduplicate messages + reactions)
+  const unreadNotificationConversations = new Set(
+    notifications
+      .filter((n) => !n.read)
+      .map((n) => n.conversationId || n.otherUserId || n.id)
+  );
+  const unreadCount = Math.min(unreadNotificationConversations.size, 99);
+  const unreadNotificationBadge = unreadCount > 99 ? "99+" : unreadCount.toString();
+  
+  // Calculate unread conversations based on ACTUAL unread messages (not conversation read state)
+  // Count conversations with unreadCount > 0 to match the badge display
+  const unreadConversationsCount = conversations.filter(
+    (conv) => (conv.unreadCount || 0) > 0
+  ).length;
+  const totalUnreadBadge = unreadConversationsCount > 99 ? "99+" : unreadConversationsCount.toString();
 
   // ─── Renders ──────────────────────────────────────────────────────────────
   const renderMessage = ({ item }: any) => {
     const isMuted = mutedConversations[item.id];
     const isMutedActive = isMuted && new Date() < isMuted;
-    const isRead =
-      item.readBy?.includes(currentUserId!) || item.isRead === true;
+    // Determine read state based on actual unread message count
+    const isRead = (item.unreadCount || 0) === 0;
     const name = item.userName || "User";
 
     // Build the last-message line — only include the dot separator if there's
@@ -723,6 +817,10 @@ export default function InboxScreen() {
     const lastLine = timeStr
       ? `${item.lastMessage || "No messages"} · ${timeStr}`
       : item.lastMessage || "No messages";
+
+    // Get actual unread message count and format for display (capped at 99+)
+    const unreadCount = item.unreadCount || 0;
+    const unreadBadgeText = unreadCount > 99 ? "99+" : unreadCount.toString();
 
     return (
       <View
@@ -740,7 +838,7 @@ export default function InboxScreen() {
             activeOpacity={0.75}
           >
             {/* FIX #3: AvatarWithFallback replaces the bare <Image> */}
-            <View style={styles.avatarWrap}>
+            <View style={[styles.avatarWrap, { position: "relative" }]}>
               <AvatarWithFallback
                 uri={item.userAvatar}
                 name={name}
@@ -748,6 +846,11 @@ export default function InboxScreen() {
                 fallbackFontSize={20}
               />
               <View style={[styles.statusDot, { backgroundColor: "#aaa" }]} />
+              {unreadCount > 0 && (
+                <View style={styles.unreadBadgeMessage}>
+                  <Text style={styles.unreadBadgeMessageText}>{unreadBadgeText}</Text>
+                </View>
+              )}
             </View>
 
             <View style={styles.messageInfo}>
@@ -940,6 +1043,13 @@ export default function InboxScreen() {
               size={24}
               color={activeTab === "messages" ? "#fff" : "#999"}
             />
+            {unreadConversationsCount > 0 && (
+              <View style={styles.badgePill}>
+                <Text style={styles.badgePillText}>
+                  {totalUnreadBadge}
+                </Text>
+              </View>
+            )}
           </TouchableOpacity>
           <TouchableOpacity
             style={[
@@ -975,7 +1085,7 @@ export default function InboxScreen() {
             {unreadCount > 0 && (
               <View style={styles.badgePill}>
                 <Text style={styles.badgePillText}>
-                  {unreadCount > 9 ? "9+" : unreadCount}
+                  {unreadNotificationBadge}
                 </Text>
               </View>
             )}
@@ -1232,7 +1342,22 @@ const styles = StyleSheet.create({
   },
   messageNameUnread: { fontWeight: "700", color: "#000" },
   messageLast: { fontSize: 12, color: "#777" },
-  messageLastUnread: { color: "#333", fontWeight: "500" },
+  messageLastUnread: { color: "#333", fontWeight: "700" },
+  unreadBadgeMessage: {
+    position: "absolute",
+    top: -4,
+    right: -4,
+    backgroundColor: "#ef4444",
+    borderRadius: 10,
+    minWidth: 18,
+    height: 18,
+    justifyContent: "center",
+    alignItems: "center",
+    paddingHorizontal: 4,
+    borderWidth: 1.5,
+    borderColor: "#f0f0f5",
+  },
+  unreadBadgeMessageText: { color: "#fff", fontSize: 10, fontWeight: "700" },
   moreButton: { padding: 8, marginLeft: 8 },
 
   // ── Delete modal ────────────────────────────────────────────────────────────
