@@ -31,6 +31,8 @@ const CATEGORIES = [
 
 const MAGNIFIER_IMG = require("../../assets/images/magnifier.png");
 
+const NAVY = "#2f2f6f";
+
 export default function HomeScreen() {
   const { items, loading } = useItems("trending");
   const [searchQuery, setSearchQuery] = useState("");
@@ -89,7 +91,6 @@ export default function HomeScreen() {
     setModalVisible(true);
   };
 
-  // ── NEW: navigate to the poster's profile on long-press ──────────────────
   const handleItemLongPress = (item: any) => {
     if (item.ownerId) {
       router.push({
@@ -98,7 +99,6 @@ export default function HomeScreen() {
       });
     }
   };
-  // ─────────────────────────────────────────────────────────────────────────
 
   const hasItems = userPostedItems.length > 0;
 
@@ -119,6 +119,32 @@ export default function HomeScreen() {
       showsVerticalScrollIndicator={false}
     >
       <ThemedView style={styles.container}>
+        {/* ── Header ── */}
+        <View style={styles.header}>
+          <View style={styles.headerBrand}>
+            {/* Logo mark */}
+            <View style={styles.logoMark}>
+              <Ionicons name="swap-horizontal" size={18} color="#fff" />
+            </View>
+            {/* Wordmark */}
+            <Text style={styles.headerWordmark}>
+              <Text style={styles.headerWordmarkBold}>Barter</Text>
+              <Text style={styles.headerWordmarkLight}>Bayan</Text>
+            </Text>
+          </View>
+
+          {/* Right actions */}
+          <View style={styles.headerActions}>
+            <TouchableOpacity
+              style={styles.headerIconBtn}
+              onPress={() => router.push("/inbox")}
+              activeOpacity={0.75}
+            >
+              <Ionicons name="notifications-outline" size={22} color={NAVY} />
+            </TouchableOpacity>
+          </View>
+        </View>
+
         {/* ── Search ── */}
         <View style={styles.searchWrapper}>
           <View style={styles.searchContainer}>
@@ -332,14 +358,68 @@ const styles = StyleSheet.create({
     backgroundColor: "#FFFFFF",
   },
   scrollContent: {
-    paddingTop: 16,
+    paddingTop: 0,
     paddingBottom: 24,
+  },
+
+  // ── Header ──────────────────────────────────────────────────────────────────
+  header: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: 16,
+    paddingTop: 18,
+    paddingBottom: 10,
+    backgroundColor: "#FFFFFF",
+  },
+  headerBrand: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  logoMark: {
+    width: 34,
+    height: 34,
+    borderRadius: 10,
+    backgroundColor: NAVY,
+    justifyContent: "center",
+    alignItems: "center",
+    shadowColor: NAVY,
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.25,
+    shadowRadius: 6,
+    elevation: 4,
+  },
+  headerWordmark: {
+    fontSize: 22,
+    letterSpacing: -0.3,
+  },
+  headerWordmarkBold: {
+    fontWeight: "800",
+    color: NAVY,
+  },
+  headerWordmarkLight: {
+    fontWeight: "400",
+    color: "#5B5B9F",
+  },
+  headerActions: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+  },
+  headerIconBtn: {
+    width: 38,
+    height: 38,
+    borderRadius: 12,
+    backgroundColor: "#F5F5F5",
+    justifyContent: "center",
+    alignItems: "center",
   },
 
   // ── Search ──────────────────────────────────────────────────────────────────
   searchWrapper: {
     marginHorizontal: 16,
-    marginTop: 14,
+    marginTop: 6,
     marginBottom: 4,
     position: "relative",
     overflow: "visible",
@@ -397,7 +477,7 @@ const styles = StyleSheet.create({
   noResultsText: { color: "#6B7280", fontSize: 13, lineHeight: 20 },
 
   // ── Categories ───────────────────────────────────────────────────────────────
-  sectionHeaderSmall: { marginHorizontal: 16, marginBottom: 8 },
+  sectionHeaderSmall: { marginHorizontal: 16, marginBottom: 8, marginTop: 16 },
   sectionTitleSmall: { fontSize: 20, fontWeight: "700", color: "#1F2937" },
   categoryList: { paddingHorizontal: 16, paddingVertical: 6 },
   categoryLink: { marginRight: 18 },
