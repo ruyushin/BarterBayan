@@ -301,7 +301,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingHorizontal: 16,
-    paddingTop: 15,
+    paddingTop: 32,
     paddingBottom: 15,
   },
   backButton: {
@@ -331,7 +331,7 @@ const styles = StyleSheet.create({
 
   // Scroll
   scrollContent: {
-    paddingBottom: 48,
+    paddingBottom: 100,
   },
 
   // Hero

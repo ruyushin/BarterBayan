@@ -1,14 +1,14 @@
 ﻿import React, { useState } from "react";
 import {
-    ActivityIndicator,
-    FlatList,
-    Image,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TextInput,
-    TouchableOpacity,
-    View,
+  ActivityIndicator,
+  FlatList,
+  Image,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
 } from "react-native";
 
 import { ThemedView } from "@/components/themed-view";
@@ -359,7 +359,7 @@ const styles = StyleSheet.create({
   },
   scrollContent: {
     paddingTop: 0,
-    paddingBottom: 24,
+    paddingBottom: 100,
   },
 
   // ── Header ──────────────────────────────────────────────────────────────────
@@ -368,7 +368,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "space-between",
     paddingHorizontal: 16,
-    paddingTop: 18,
+    paddingTop: 32,
     paddingBottom: 10,
     backgroundColor: "#FFFFFF",
   },
@@ -419,7 +419,7 @@ const styles = StyleSheet.create({
   // ── Search ──────────────────────────────────────────────────────────────────
   searchWrapper: {
     marginHorizontal: 16,
-    marginTop: 6,
+    marginTop: 12,
     marginBottom: 4,
     position: "relative",
     overflow: "visible",

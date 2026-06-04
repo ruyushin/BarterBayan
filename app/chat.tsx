@@ -4,40 +4,40 @@ import * as Clipboard from "expo-clipboard";
 import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  ActivityIndicator,
-  Alert,
-  Animated,
-  FlatList,
-  Image,
-  KeyboardAvoidingView,
-  Modal,
-  PanResponder,
-  Platform,
-  Pressable,
-  SafeAreaView,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  View,
+    ActivityIndicator,
+    Alert,
+    Animated,
+    FlatList,
+    Image,
+    KeyboardAvoidingView,
+    Modal,
+    PanResponder,
+    Platform,
+    Pressable,
+    SafeAreaView,
+    ScrollView,
+    StyleSheet,
+    Text,
+    TextInput,
+    TouchableOpacity,
+    View
 } from "react-native";
 import { auth } from "../firebaseConfig";
 import { getUserInfo } from "../services/itemService";
 import {
-  archiveConversation,
-  deleteConversation,
-  deleteMessageForEveryone,
-  deleteMessageForMe,
-  editMessage,
-  getConversationData,
-  markConversationAsRead,
-  markMessagesAsRead,
-  muteConversation,
-  reactToMessage,
-  sendMessage,
-  subscribeToMessages,
-  unmuteConversation
+    archiveConversation,
+    deleteConversation,
+    deleteMessageForEveryone,
+    deleteMessageForMe,
+    editMessage,
+    getConversationData,
+    markConversationAsRead,
+    markMessagesAsRead,
+    muteConversation,
+    reactToMessage,
+    sendMessage,
+    subscribeToMessages,
+    unmuteConversation
 } from "../services/messagingService";
 
 const NAVY = "#2e2d7c";
@@ -999,6 +999,7 @@ export default function ChatScreen() {
   const [sheetOptions, setSheetOptions] = useState<SheetOption[]>([]);
   const [sheetTitle, setSheetTitle] = useState<string | undefined>();
   const [showAllTimestamps, setShowAllTimestamps] = useState(false);
+  const [keyboardHeight, setKeyboardHeight] = useState(0);
 
   const messageLayoutsRef = useRef<Record<string, number>>({});
   const currentUserId = auth.currentUser?.uid;
@@ -1106,6 +1107,30 @@ export default function ChatScreen() {
       };
     }, [currentUserId, ownerUserId, conversationId]),
   );
+
+  // ── Keyboard height listener for proper input adjustment ──
+  useEffect(() => {
+    // Only setup keyboard listeners on native platforms (iOS/Android), not on web
+    if (Platform.OS === "web") return;
+
+    const showSub = Keyboard.addListener(
+      Platform.OS === "ios" ? "keyboardWillShow" : "keyboardDidShow",
+      (e) => {
+        setKeyboardHeight(e.endCoordinates.height);
+      }
+    );
+    const hideSub = Keyboard.addListener(
+      Platform.OS === "ios" ? "keyboardWillHide" : "keyboardDidHide",
+      () => {
+        setKeyboardHeight(0);
+      }
+    );
+
+    return () => {
+      showSub.remove();
+      hideSub.remove();
+    };
+  }, []);
 
   // ── FIX: only day separators, no hourly time separators ──
   const listData = useMemo<ListItem[]>(() => {
@@ -1695,8 +1720,8 @@ export default function ChatScreen() {
 
       <KeyboardAvoidingView
         style={{ flex: 1 }}
-        behavior={Platform.OS === "ios" ? "padding" : undefined}
-        keyboardVerticalOffset={90}
+        behavior={Platform.OS === "ios" ? "padding" : "height"}
+        keyboardVerticalOffset={Platform.OS === "ios" ? 90 : 0}
       >
         <Animated.View
           style={[
@@ -1710,7 +1735,12 @@ export default function ChatScreen() {
             data={listData}
             renderItem={renderItem}
             keyExtractor={(item) => item.id}
-            contentContainerStyle={styles.messagesList}
+            contentContainerStyle={[
+              styles.messagesList,
+              Platform.OS === "android" && keyboardHeight > 0
+                ? { paddingBottom: keyboardHeight - 10 }
+                : {},
+            ]}
             showsVerticalScrollIndicator={false}
             onContentSizeChange={() =>
               flatListRef.current?.scrollToEnd({ animated: false })

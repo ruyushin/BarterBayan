@@ -257,7 +257,8 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
     alignItems: "center",
     paddingHorizontal: 16,
-    paddingVertical: 14,
+    paddingTop: 32,
+    paddingBottom: 14,
   },
   headerTitle: {
     color: "#fff",
@@ -338,6 +339,7 @@ const styles = StyleSheet.create({
   },
   listContent: {
     padding: 12,
+    paddingBottom: 100,
   },
   cardContainer: {
     backgroundColor: "#fff",

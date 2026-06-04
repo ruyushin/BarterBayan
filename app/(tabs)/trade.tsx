@@ -51,6 +51,7 @@ export default function TradeScreen() {
   const [isFilterOpen, setIsFilterOpen] = useState(false);
   const [userItems, setUserItems] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [searchPopupVisible, setSearchPopupVisible] = useState(false);
 
   const [sentOffers, setSentOffers] = useState<TradeOffer[]>([]);
   const [cancellingOfferId, setCancellingOfferId] = useState<string | null>(
@@ -360,19 +361,83 @@ export default function TradeScreen() {
 
   return (
     <SafeAreaView style={styles.container}>
-      <View style={styles.searchContainer}>
-        <Ionicons
-          name="search-outline"
-          size={20}
-          color="#5B5B7B"
-          style={styles.searchIcon}
-        />
-        <TextInput
-          placeholder="Search for items..."
-          style={styles.searchInput}
-          value={search}
-          onChangeText={setSearch}
-        />
+      <View style={styles.searchWrapper}>
+        <View style={styles.searchContainer}>
+          <Ionicons
+            name="search-outline"
+            size={20}
+            color="#5B5B7B"
+            style={styles.searchIcon}
+          />
+          <TextInput
+            placeholder="Search for items..."
+            placeholderTextColor="#888"
+            style={styles.searchInput}
+            value={search}
+            onChangeText={(text) => {
+              setSearch(text);
+              setSearchPopupVisible(text.length > 0);
+            }}
+            onSubmitEditing={() => setSearchPopupVisible(false)}
+          />
+        </View>
+
+        {searchPopupVisible && search.trim().length > 0 && (
+          <View style={styles.searchPopup}>
+            <Text style={styles.popupTitle}>
+              {userItems.filter(
+                (item) =>
+                  item.title.toLowerCase().includes(search.toLowerCase()) ||
+                  item.category.toLowerCase().includes(search.toLowerCase())
+              ).length > 0
+                ? `Found ${userItems.filter(
+                    (item) =>
+                      item.title.toLowerCase().includes(search.toLowerCase()) ||
+                      item.category.toLowerCase().includes(search.toLowerCase())
+                  ).length} related posts`
+                : "No related posts found"}
+            </Text>
+            {userItems
+              .filter(
+                (item) =>
+                  item.title.toLowerCase().includes(search.toLowerCase()) ||
+                  item.category.toLowerCase().includes(search.toLowerCase())
+              )
+              .slice(0, 5).length > 0 ? (
+              userItems
+                .filter(
+                  (item) =>
+                    item.title.toLowerCase().includes(search.toLowerCase()) ||
+                    item.category.toLowerCase().includes(search.toLowerCase())
+                )
+                .slice(0, 5)
+                .map((item) => (
+                  <TouchableOpacity
+                    key={item.id}
+                    style={styles.searchResultLink}
+                    onPress={() => {
+                      setSearch(item.title);
+                      setSearchPopupVisible(false);
+                    }}
+                    activeOpacity={0.7}
+                  >
+                    <View style={styles.searchResultItem}>
+                      <Text style={styles.searchResultText}>
+                        {item.title}
+                      </Text>
+                      <Text style={styles.searchResultCategory}>
+                        {item.category}
+                      </Text>
+                    </View>
+                  </TouchableOpacity>
+                ))
+            ) : (
+              <Text style={styles.noResultsText}>
+                Try a different keyword or category.
+              </Text>
+            )}
+          </View>
+        )}
       </View>
 
       <View style={styles.tabs}>
@@ -659,6 +724,14 @@ export default function TradeScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#efeff4" },
+  searchWrapper: {
+    marginHorizontal: 16,
+    marginTop: 30,
+    marginBottom: 4,
+    position: "relative",
+    overflow: "visible",
+    zIndex: 9999,
+  },
   searchContainer: {
     flexDirection: "row",
     alignItems: "center",
@@ -668,12 +741,41 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: "#E9E9E9",
     paddingHorizontal: 14,
-    marginHorizontal: 16,
-    marginTop: 14,
-    marginBottom: 16,
   },
   searchIcon: { marginRight: 10 },
   searchInput: { flex: 1, color: "#242424", fontSize: 15, paddingVertical: 8 },
+  searchPopup: {
+    position: "absolute",
+    top: 52,
+    left: 0,
+    right: 0,
+    borderRadius: 16,
+    backgroundColor: "#FFFFFF",
+    borderColor: "#E5E7EB",
+    borderWidth: 1,
+    padding: 14,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.12,
+    shadowRadius: 18,
+    elevation: 30,
+    zIndex: 10000,
+  },
+  popupTitle: {
+    fontSize: 14,
+    fontWeight: "700",
+    color: "#111827",
+    marginBottom: 10,
+  },
+  searchResultLink: { width: "100%" },
+  searchResultItem: {
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: "#E5E7EB",
+  },
+  searchResultText: { fontSize: 14, fontWeight: "600", color: "#111827" },
+  searchResultCategory: { fontSize: 12, color: "#6B7280", marginTop: 2 },
+  noResultsText: { color: "#6B7280", fontSize: 13, lineHeight: 20 },
   tabs: {
     marginTop: 10,
     flexDirection: "row",

@@ -6,30 +6,30 @@ import * as Google from "expo-auth-session/providers/google";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import * as WebBrowser from "expo-web-browser";
 import {
-  FacebookAuthProvider,
-  GoogleAuthProvider,
-  browserLocalPersistence,
-  browserSessionPersistence,
-  sendEmailVerification,
-  setPersistence,
-  signInWithCredential,
-  signInWithEmailAndPassword,
+    FacebookAuthProvider,
+    GoogleAuthProvider,
+    browserLocalPersistence,
+    browserSessionPersistence,
+    sendEmailVerification,
+    setPersistence,
+    signInWithCredential,
+    signInWithEmailAndPassword,
 } from "firebase/auth";
 import { doc, getDoc, setDoc } from "firebase/firestore";
 import React, { useEffect, useRef, useState } from "react";
 import {
-  ActivityIndicator,
-  Alert,
-  Animated,
-  Modal,
-  Platform,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  View,
+    ActivityIndicator,
+    Alert,
+    Animated,
+    Modal,
+    Platform,
+    Pressable,
+    ScrollView,
+    StyleSheet,
+    Text,
+    TextInput,
+    TouchableOpacity,
+    View,
 } from "react-native";
 import { auth, db } from "../../firebaseConfig";
 
@@ -508,13 +508,21 @@ export default function LoginScreen() {
                 size={22}
                 color={primaryBrand}
               />
-              <Text style={[styles.keepLoggedInText, { color: textColor }]}>
+              <Text
+                style={[styles.keepLoggedInText, { color: textColor }]}
+                numberOfLines={1}
+                allowFontScaling={false}
+              >
                 Keep me logged in
               </Text>
             </TouchableOpacity>
 
             <TouchableOpacity onPress={() => router.push("/forgot-password")}>
-              <Text style={[styles.forgotPassword, { color: primaryBrand }]}>
+              <Text
+                style={[styles.forgotPassword, { color: primaryBrand }]}
+                numberOfLines={1}
+                allowFontScaling={false}
+              >
                 Forgot Password?
               </Text>
             </TouchableOpacity>
@@ -650,9 +658,9 @@ const styles = StyleSheet.create({
     alignItems: "center",
     marginBottom: 30,
   },
-  keepLoggedInRow: { flexDirection: "row", alignItems: "center" },
-  keepLoggedInText: { marginLeft: 8, fontSize: 14 },
-  forgotPassword: { fontSize: 14, fontWeight: "700" },
+  keepLoggedInRow: { flexDirection: "row", alignItems: "center", flex: 1 },
+  keepLoggedInText: { marginLeft: 8, fontSize: 14, flexShrink: 1 },
+  forgotPassword: { fontSize: 14, fontWeight: "700", flexShrink: 1 },
   loginButton: {
     height: 56,
     borderRadius: 12,

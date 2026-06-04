@@ -4,29 +4,30 @@ import * as MediaLibrary from "expo-media-library";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import React, { useEffect, useState } from "react";
 import {
-    ActivityIndicator,
-    Alert,
-    Dimensions,
-    FlatList,
-    Image,
-    ImageStyle,
-    Modal,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TextStyle,
-    TouchableOpacity,
-    View,
-    ViewStyle,
+  ActivityIndicator,
+  Alert,
+  Dimensions,
+  FlatList,
+  Image,
+  ImageStyle,
+  Modal,
+  SafeAreaView,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextStyle,
+  TouchableOpacity,
+  View,
+  ViewStyle,
 } from "react-native";
 import { LongPressGestureHandler, State } from "react-native-gesture-handler";
 import { auth } from "../firebaseConfig";
 import {
-    getUserInfo,
-    getUserPostedItems,
-    updateItemLikes,
+  getUserInfo,
+  getUserPostedItems,
+  updateItemLikes,
 } from "../services/itemService";
-import { createTradeOffer } from "../services/tradeService";
+import { proposeTrade } from "../services/tradeService";
 import { trackItemView, trackUserActivity } from "../services/trendingService";
 
 const SCREEN_WIDTH = Dimensions.get("window").width;
@@ -37,7 +38,7 @@ interface ProductDetailParams {
 }
 
 export default function ProductDetailsScreen() {
-  const params = useLocalSearchParams<ProductDetailParams>();
+  const params = useLocalSearchParams();
   const router = useRouter();
   const [currentImageIndex, setCurrentImageIndex] = useState(0);
   const [item, setItem] = useState<any>(null);
@@ -57,7 +58,7 @@ export default function ProductDetailsScreen() {
   // ─────────────────────────────────────────────────────────────────────────
 
   useEffect(() => {
-    if (params.item) {
+    if (params.item && typeof params.item === "string") {
       try {
         const itemData = JSON.parse(params.item);
         setItem(itemData);
@@ -113,7 +114,6 @@ export default function ProductDetailsScreen() {
       return;
     }
     try {
-      setLoading(true);
       const nowLiked = !isLiked;
       await updateItemLikes(item.id, currentUser, nowLiked);
       setIsLiked(nowLiked);
@@ -125,8 +125,6 @@ export default function ProductDetailsScreen() {
     } catch (error) {
       Alert.alert("Error", "Failed to update like status");
       console.error("Error:", error);
-    } finally {
-      setLoading(false);
     }
   };
 
@@ -198,28 +196,19 @@ export default function ProductDetailsScreen() {
     }
     try {
       setTradeSubmitting(true);
-      const offeredImage =
-        Array.isArray(selectedOfferItem.images) &&
-        selectedOfferItem.images.length > 0
-          ? selectedOfferItem.images[0]
-          : selectedOfferItem.image || "";
-      const requestedImage =
-        Array.isArray(item.images) && item.images.length > 0
-          ? item.images[0]
-          : item.image || "";
 
-      await createTradeOffer({
-        offererId: currentUser!,
-        offererName: auth.currentUser?.displayName || "Anonymous",
-        offererAvatar: auth.currentUser?.photoURL || "",
-        offeredItemId: selectedOfferItem.id,
-        offeredItemTitle: selectedOfferItem.title,
-        offeredItemImage: offeredImage,
-        requestedItemId: item.id,
-        requestedItemTitle: item.title,
-        requestedItemImage: requestedImage,
-        ownerId: item.ownerId,
-      });
+      await proposeTrade(
+        selectedOfferItem,
+        {
+          ...item,
+          ownerId: item.ownerId,
+        },
+        {
+          uid: currentUser!,
+          displayName: auth.currentUser?.displayName || "Anonymous",
+          photoURL: auth.currentUser?.photoURL || "",
+        },
+      );
 
       setShowTradeModal(false);
       setSelectedOfferItem(null);
@@ -236,12 +225,11 @@ export default function ProductDetailsScreen() {
   // ─────────────────────────────────────────────────────────────────────────
 
   const handleImageLongPress = (nativeEvent: any) => {
-    if (nativeEvent.state === State.ACTIVE) {
+    if (nativeEvent.state === State.ACTIVE || nativeEvent.state === 4) {
       handleSaveImage();
     }
   };
 
-  // Validate and filter image URLs
   const validateImageUrl = (url: string | undefined): boolean => {
     if (!url) return false;
     if (typeof url !== "string") return false;
@@ -261,7 +249,7 @@ export default function ProductDetailsScreen() {
   if (loading) {
     return (
       <View style={styles.container}>
-        <ActivityIndicator size="large" color="#2e2d7c" />
+        <ActivityIndicator size="large" color="#2f2f6f" />
       </View>
     );
   }
@@ -270,346 +258,416 @@ export default function ProductDetailsScreen() {
     return (
       <View style={styles.container}>
         <TouchableOpacity style={styles.closeButton} onPress={handleBackPress}>
-          <Ionicons name="arrow-back" size={28} color="#2e2d7c" />
+          <Ionicons name="arrow-back" size={28} color="#2f2f6f" />
         </TouchableOpacity>
         <Text style={styles.errorText}>Product not found</Text>
       </View>
     );
   }
 
+  // FIX: Pre-compute owner display name to avoid inline logic inside View
+  const ownerDisplayName =
+    ownerInfo?.firstName && ownerInfo?.lastName
+      ? `${ownerInfo.firstName} ${ownerInfo.lastName}`
+      : ownerInfo?.username || "Unknown User";
+
+  // FIX: Pre-compute rating label to avoid inline expressions inside View
+  const ratingLabel = ownerInfo?.rating?.toFixed(1) ?? "N/A";
+  const tradeCountLabel = `(${ownerInfo?.tradeCount ?? 0} trades)`;
+
+  // FIX: Pre-compute trade modal subtitle to avoid nested Text with whitespace
+  const tradeModalSubtitleText = `You want: ${item?.title ?? ""}`;
+
   return (
-    <View style={styles.container}>
-      <TouchableOpacity style={styles.closeButton} onPress={handleBackPress}>
-        <Ionicons name="arrow-back" size={28} color="#fff" />
-      </TouchableOpacity>
-
-      <ScrollView
-        contentContainerStyle={styles.scrollContent}
-        showsVerticalScrollIndicator={false}
-      >
-        {/* Image Carousel */}
-        <View style={styles.carouselContainer}>
-          <FlatList
-            horizontal
-            pagingEnabled
-            scrollEnabled={images.length > 1}
-            showsHorizontalScrollIndicator={false}
-            data={images}
-            keyExtractor={(_, index: number) => `image-${index}`}
-            renderItem={({ item: imageUrl }) => (
-              <LongPressGestureHandler
-                onHandlerStateChange={({ nativeEvent }) =>
-                  handleImageLongPress(nativeEvent)
-                }
-                minDurationMs={500}
-              >
-                <View style={styles.imageWrapper}>
-                  <Image
-                    source={{ 
-                      uri: imageUrl?.startsWith("blob:") ? "https://via.placeholder.com/400x200" : imageUrl
-                    }}
-                    style={styles.carouselImage}
-                    resizeMode="contain"
-                    onError={() => console.warn("Failed to load image:", imageUrl)}
-                  />
-                </View>
-              </LongPressGestureHandler>
-            )}
-            onMomentumScrollEnd={(event) => {
-              const index = Math.round(
-                event.nativeEvent.contentOffset.x /
-                  event.nativeEvent.layoutMeasurement.width,
-              );
-              setCurrentImageIndex(index);
-            }}
-          />
-          {images.length > 1 && (
-            <View style={styles.pagination}>
-              {images.map((_: string, index: number) => (
-                <View
-                  key={index}
-                  style={[
-                    styles.paginationDot,
-                    index === currentImageIndex && styles.paginationDotActive,
-                  ]}
-                />
-              ))}
-              <Text style={styles.paginationText}>
-                {currentImageIndex + 1} / {images.length}
-              </Text>
-            </View>
-          )}
-          <View style={styles.holdToSaveContainer}>
-            <Text style={styles.holdToSaveText}>Hold image to save</Text>
-          </View>
+    <SafeAreaView style={styles.safeContainer}>
+      <View style={styles.container}>
+        {/* Sticky Header */}
+        <View style={styles.stickyHeader}>
+          <TouchableOpacity
+            style={styles.stickyBackButton}
+            onPress={handleBackPress}
+          >
+            <Ionicons name="arrow-back" size={24} color="#fff" />
+          </TouchableOpacity>
+          <Text style={styles.stickyHeaderTitle}>{"Product Details"}</Text>
+          <View style={styles.stickyHeaderSpacer} />
         </View>
 
-        <View style={styles.content}>
-          {/* Product Info */}
-          <View style={styles.productInfo}>
-            <Text style={styles.title}>{item?.title}</Text>
-          </View>
-
-          {/* Details Section */}
-          <View style={styles.detailsSection}>
-            <Text style={styles.detailsHeader}>Details</Text>
-
-            {item?.description && (
-              <View style={styles.descriptionContainer}>
-                <Text style={styles.descriptionText}>
-                  {descriptionExpanded
-                    ? item.description
-                    : item.description.length > 1000
-                      ? item.description.substring(0, 1000) + "..."
-                      : item.description}
-                </Text>
-                {item.description.length > 1000 && (
-                  <TouchableOpacity
-                    onPress={() => setDescriptionExpanded(!descriptionExpanded)}
-                    style={styles.seeMoreButton}
-                  >
-                    <Text style={styles.seeMoreText}>
-                      {descriptionExpanded ? "See less" : "See more"}
-                    </Text>
-                  </TouchableOpacity>
-                )}
-              </View>
-            )}
-
-            {item?.condition && (
-              <View style={styles.detailRow}>
-                <Text style={styles.detailLabel}>Condition</Text>
-                <Text style={styles.detailValue}>{item.condition}</Text>
-              </View>
-            )}
-
-            {item?.category && (
-              <View style={styles.detailRow}>
-                <Text style={styles.detailLabel}>Category</Text>
-                <Text style={styles.detailValue}>{item.category}</Text>
-              </View>
-            )}
-          </View>
-
-          {/* Owner Info */}
-          {ownerInfo && (
-            <View style={styles.ownerCard}>
-              <View style={styles.ownerHeader}>
-                <Image
-                  source={{ uri: ownerInfo.avatarUrl }}
-                  style={styles.ownerAvatar}
-                />
-                <View style={styles.ownerDetails}>
-                  <Text style={styles.ownerName}>
-                    {ownerInfo.firstName && ownerInfo.lastName
-                      ? `${ownerInfo.firstName} ${ownerInfo.lastName}`
-                      : ownerInfo.username || "Unknown User"}
-                  </Text>
-                  <View style={styles.ratingContainer}>
-                    <Ionicons name="star" size={14} color="#FFB800" />
-                    <Text style={styles.rating}>
-                      {ownerInfo.rating?.toFixed(1) || "N/A"}
-                    </Text>
-                    <Text style={styles.tradeCount}>
-                      ({ownerInfo.tradeCount || 0} trades)
-                    </Text>
+        <ScrollView
+          contentContainerStyle={styles.scrollContent}
+          showsVerticalScrollIndicator={false}
+        >
+          {/* Image Carousel */}
+          <View style={styles.carouselContainer}>
+            <FlatList
+              horizontal
+              pagingEnabled
+              scrollEnabled={images.length > 1}
+              showsHorizontalScrollIndicator={false}
+              data={images}
+              keyExtractor={(_: any, index: number) => `image-${index}`}
+              renderItem={({ item: imageUrl }: { item: string }) => (
+                <LongPressGestureHandler
+                  onHandlerStateChange={({ nativeEvent }) =>
+                    handleImageLongPress(nativeEvent)
+                  }
+                  minDurationMs={500}
+                >
+                  <View style={styles.imageWrapper}>
+                    <Image
+                      source={{
+                        uri: imageUrl?.startsWith("blob:")
+                          ? "https://via.placeholder.com/400x200"
+                          : imageUrl,
+                      }}
+                      style={styles.carouselImage}
+                      resizeMode="contain"
+                      onError={() =>
+                        console.warn("Failed to load image:", imageUrl)
+                      }
+                    />
                   </View>
-                </View>
-              </View>
-              {ownerInfo.bio && <Text style={styles.bio}>{ownerInfo.bio}</Text>}
-            </View>
-          )}
-
-          {/* Like Button */}
-          <TouchableOpacity
-            style={[styles.likeButton, isLiked && styles.likeButtonActive]}
-            onPress={handleLike}
-            disabled={loading}
-          >
-            {loading ? (
-              <ActivityIndicator color={isLiked ? "#fff" : "#2e2d7c"} />
-            ) : (
-              <>
-                <Ionicons
-                  name={isLiked ? "heart" : "heart-outline"}
-                  size={20}
-                  color={isLiked ? "#fff" : "#2e2d7c"}
-                />
-                <Text
-                  style={[
-                    styles.likeButtonText,
-                    isLiked && styles.likeButtonTextActive,
-                  ]}
-                >
-                  {likeCount} {likeCount === 1 ? "Like" : "Likes"}
+                </LongPressGestureHandler>
+              )}
+              onMomentumScrollEnd={(event) => {
+                const index = Math.round(
+                  event.nativeEvent.contentOffset.x /
+                    event.nativeEvent.layoutMeasurement.width,
+                );
+                setCurrentImageIndex(index);
+              }}
+            />
+            {images.length > 1 && (
+              <View style={styles.pagination}>
+                {images.map((_: string, index: number) => (
+                  <View
+                    key={index}
+                    style={[
+                      styles.paginationDot,
+                      index === currentImageIndex && styles.paginationDotActive,
+                    ]}
+                  />
+                ))}
+                <Text style={styles.paginationText}>
+                  {`${currentImageIndex + 1} / ${images.length}`}
                 </Text>
-              </>
+              </View>
             )}
-          </TouchableOpacity>
+            <View style={styles.holdToSaveContainer}>
+              <Text style={styles.holdToSaveText}>{"Hold image to save"}</Text>
+            </View>
+          </View>
 
-          {/* Offer Trade Button */}
-          {currentUser !== item.ownerId && (
-            <TouchableOpacity
-              style={styles.tradeButton}
-              onPress={handleOpenTradeModal}
-            >
-              <Ionicons name="swap-horizontal" size={20} color="#fff" />
-              <Text style={styles.tradeButtonText}>Offer a Trade</Text>
-            </TouchableOpacity>
-          )}
+          {/* Content below carousel */}
+          <View style={styles.content}>
+            {/* Product Info */}
+            <View style={styles.productInfo}>
+              <Text style={styles.title}>{item?.title}</Text>
+            </View>
 
-          {/* Message Button */}
-          <TouchableOpacity
-            style={styles.messageButton}
-            onPress={handleSendMessage}
-          >
-            <Ionicons name="send" size={20} color="#fff" />
-            <Text style={styles.messageButtonText}>Send Owner a Message</Text>
-          </TouchableOpacity>
-        </View>
-      </ScrollView>
+            {/* Details Section */}
+            <View style={styles.detailsSection}>
+              <Text style={styles.detailsHeader}>{"Details"}</Text>
 
-      {/* ── Trade Offer Modal ─────────────────────────────────────────────── */}
-      <Modal
-        visible={showTradeModal}
-        transparent
-        animationType="slide"
-        onRequestClose={() => {
-          setShowTradeModal(false);
-          setSelectedOfferItem(null);
-        }}
-      >
-        <View style={styles.tradeModalOverlay}>
-          <View style={styles.tradeModalSheet}>
-            {/* Handle bar */}
-            <View style={styles.sheetHandle} />
-
-            <Text style={styles.tradeModalTitle}>Offer a Trade</Text>
-            <Text style={styles.tradeModalSubtitle}>
-              You want:{" "}
-              <Text style={{ fontWeight: "700", color: "#2e2d7c" }}>
-                {item?.title}
-              </Text>
-            </Text>
-            <Text style={styles.tradeModalPickLabel}>
-              Pick one of your items to offer:
-            </Text>
-
-            {loadingMyItems ? (
-              <View style={styles.tradeModalLoader}>
-                <ActivityIndicator size="large" color="#2e2d7c" />
-                <Text style={styles.tradeModalLoaderText}>
-                  Loading your items...
-                </Text>
-              </View>
-            ) : myItems.length === 0 ? (
-              <View style={styles.tradeModalEmpty}>
-                <Ionicons name="cube-outline" size={48} color="#ccc" />
-                <Text style={styles.tradeModalEmptyText}>
-                  You have no listed items to offer.
-                </Text>
-                <TouchableOpacity
-                  style={styles.tradeModalAddBtn}
-                  onPress={() => {
-                    setShowTradeModal(false);
-                    router.push("/add-item");
-                  }}
-                >
-                  <Text style={styles.tradeModalAddBtnText}>
-                    Add an Item First
+              {!!item?.description && (
+                <View style={styles.descriptionContainer}>
+                  <Text style={styles.descriptionText}>
+                    {descriptionExpanded
+                      ? item.description
+                      : item.description.length > 1000
+                        ? item.description.substring(0, 1000) + "..."
+                        : item.description}
                   </Text>
-                </TouchableOpacity>
-              </View>
-            ) : (
-              <FlatList
-                data={myItems}
-                keyExtractor={(i) => i.id}
-                numColumns={2}
-                columnWrapperStyle={{ gap: 10 }}
-                contentContainerStyle={styles.tradeItemGrid}
-                showsVerticalScrollIndicator={false}
-                renderItem={({ item: myItem }) => {
-                  const img =
-                    Array.isArray(myItem.images) && myItem.images.length > 0
-                      ? myItem.images[0]
-                      : myItem.image || "https://via.placeholder.com/120";
-                  const isSelected = selectedOfferItem?.id === myItem.id;
-                  return (
+                  {item.description.length > 1000 && (
                     <TouchableOpacity
-                      style={[
-                        styles.tradeItemCard,
-                        isSelected && styles.tradeItemCardSelected,
-                      ]}
-                      onPress={() => setSelectedOfferItem(myItem)}
-                      activeOpacity={0.8}
+                      onPress={() =>
+                        setDescriptionExpanded(!descriptionExpanded)
+                      }
+                      style={styles.seeMoreButton}
                     >
-                      {isSelected && (
-                        <View style={styles.tradeItemCheckBadge}>
-                          <Ionicons
-                            name="checkmark-circle"
-                            size={22}
-                            color="#2e2d7c"
-                          />
-                        </View>
-                      )}
-                      <Image
-                        source={{ 
-                          uri: img?.startsWith("blob:") ? "https://via.placeholder.com/120" : img
-                        }}
-                        style={styles.tradeItemImage}
-                        onError={() => console.warn("Failed to load trade item image:", img)}
-                      />
-                      <Text style={styles.tradeItemTitle} numberOfLines={2}>
-                        {myItem.title}
+                      <Text style={styles.seeMoreText}>
+                        {descriptionExpanded ? "See less" : "See more"}
                       </Text>
                     </TouchableOpacity>
-                  );
-                }}
-              />
+                  )}
+                </View>
+              )}
+
+              {!!item?.condition && (
+                <View style={styles.detailRow}>
+                  <Text style={styles.detailLabel}>{"Condition"}</Text>
+                  <Text style={styles.detailValue}>{item.condition}</Text>
+                </View>
+              )}
+
+              {!!item?.category && (
+                <View style={styles.detailRow}>
+                  <Text style={styles.detailLabel}>{"Category"}</Text>
+                  <Text style={styles.detailValue}>{item.category}</Text>
+                </View>
+              )}
+            </View>
+
+            {/* Owner Info */}
+            {!!ownerInfo && (
+              <View style={styles.ownerCard}>
+                <View style={styles.ownerHeader}>
+                  <Image
+                    source={{ uri: ownerInfo.avatarUrl }}
+                    style={styles.ownerAvatar}
+                  />
+                  {/* FIX: ownerDetails is a View — all children must be View or Text components, no bare strings */}
+                  <View style={styles.ownerDetails}>
+                    <Text style={styles.ownerName}>{ownerDisplayName}</Text>
+                    {/* FIX: ratingContainer — removed all whitespace between tags, all text in <Text> */}
+                    <View style={styles.ratingContainer}>
+                      <Ionicons name="star" size={14} color="#FFB800" />
+                      <Text style={styles.rating}>{ratingLabel}</Text>
+                      <Text style={styles.tradeCount}>{tradeCountLabel}</Text>
+                    </View>
+                  </View>
+                </View>
+                {/* FIX: use !! to prevent the string "" from rendering as a text node */}
+                {!!ownerInfo.bio && (
+                  <Text style={styles.bio}>{ownerInfo.bio}</Text>
+                )}
+              </View>
             )}
 
-            {/* Footer buttons */}
-            <View style={styles.tradeModalFooter}>
-              <TouchableOpacity
-                style={styles.tradeModalCancelBtn}
-                onPress={() => {
-                  setShowTradeModal(false);
-                  setSelectedOfferItem(null);
-                }}
-              >
-                <Text style={styles.tradeModalCancelText}>Cancel</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
+            {/* Like Button */}
+            <TouchableOpacity
+              style={[styles.likeButton, isLiked && styles.likeButtonActive]}
+              onPress={handleLike}
+              disabled={loading}
+            >
+              <Ionicons
+                name={isLiked ? "heart" : "heart-outline"}
+                size={20}
+                color={isLiked ? "#fff" : "#2f2f6f"}
+              />
+              <Text
                 style={[
-                  styles.tradeModalSubmitBtn,
-                  (!selectedOfferItem || tradeSubmitting) &&
-                    styles.tradeModalSubmitBtnDisabled,
+                  styles.likeButtonText,
+                  isLiked && styles.likeButtonTextActive,
                 ]}
-                onPress={handleSubmitTradeOffer}
-                disabled={!selectedOfferItem || tradeSubmitting}
               >
-                {tradeSubmitting ? (
-                  <ActivityIndicator color="#fff" size="small" />
-                ) : (
-                  <Text style={styles.tradeModalSubmitText}>Send Offer</Text>
-                )}
-              </TouchableOpacity>
+                {`${likeCount} ${likeCount === 1 ? "Like" : "Likes"}`}
+              </Text>
+            </TouchableOpacity>
+
+            {/* Action Buttons Row */}
+            {currentUser !== item.ownerId && (
+              <View style={styles.actionButtonsRow}>
+                <TouchableOpacity
+                  style={styles.messageButton}
+                  onPress={handleSendMessage}
+                >
+                  <Ionicons name="send" size={18} color="#fff" />
+                  <Text style={styles.messageButtonText}>{"Message"}</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={styles.tradeButton}
+                  onPress={handleOpenTradeModal}
+                >
+                  <Ionicons name="swap-horizontal" size={18} color="#fff" />
+                  <Text style={styles.tradeButtonText}>{"Propose Trade"}</Text>
+                </TouchableOpacity>
+              </View>
+            )}
+          </View>
+        </ScrollView>
+
+        {/* ── Trade Offer Modal ───────────────────────────────────────────── */}
+        <Modal
+          visible={showTradeModal}
+          transparent
+          animationType="slide"
+          onRequestClose={() => {
+            setShowTradeModal(false);
+            setSelectedOfferItem(null);
+          }}
+        >
+          <View style={styles.tradeModalOverlay}>
+            <View style={styles.tradeModalSheet}>
+              <View style={styles.sheetHandle} />
+
+              <Text style={styles.tradeModalTitle}>{"Offer a Trade"}</Text>
+              {/* FIX: Use a single Text with pre-computed string instead of nested Text with whitespace */}
+              <Text style={styles.tradeModalSubtitle}>
+                {tradeModalSubtitleText}
+              </Text>
+              <Text style={styles.tradeModalPickLabel}>
+                {"Pick one of your items to offer:"}
+              </Text>
+
+              {loadingMyItems ? (
+                <View style={styles.tradeModalLoader}>
+                  <ActivityIndicator size="large" color="#2f2f6f" />
+                  <Text style={styles.tradeModalLoaderText}>
+                    {"Loading your items..."}
+                  </Text>
+                </View>
+              ) : myItems.length === 0 ? (
+                <View style={styles.tradeModalEmpty}>
+                  {/* FIX: Ionicons directly in View is fine — the issue was whitespace text nodes between siblings */}
+                  <Ionicons name="cube-outline" size={48} color="#ccc" />
+                  <Text style={styles.tradeModalEmptyText}>
+                    {"You have no listed items to offer."}
+                  </Text>
+                  <TouchableOpacity
+                    style={styles.tradeModalAddBtn}
+                    onPress={() => {
+                      setShowTradeModal(false);
+                      router.push("/add-item");
+                    }}
+                  >
+                    <Text style={styles.tradeModalAddBtnText}>
+                      {"Add an Item First"}
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+              ) : (
+                <FlatList
+                  data={myItems}
+                  keyExtractor={(i) => i.id}
+                  numColumns={2}
+                  columnWrapperStyle={{ gap: 10 }}
+                  contentContainerStyle={styles.tradeItemGrid}
+                  showsVerticalScrollIndicator={false}
+                  renderItem={({ item: myItem }) => {
+                    const img =
+                      Array.isArray(myItem.images) && myItem.images.length > 0
+                        ? myItem.images[0]
+                        : myItem.image || "https://via.placeholder.com/120";
+                    const isSelected = selectedOfferItem?.id === myItem.id;
+                    return (
+                      <TouchableOpacity
+                        style={[
+                          styles.tradeItemCard,
+                          isSelected && styles.tradeItemCardSelected,
+                        ]}
+                        onPress={() => setSelectedOfferItem(myItem)}
+                        activeOpacity={0.8}
+                      >
+                        {isSelected && (
+                          <View style={styles.tradeItemCheckBadge}>
+                            <Ionicons
+                              name="checkmark-circle"
+                              size={22}
+                              color="#2f2f6f"
+                            />
+                          </View>
+                        )}
+                        <Image
+                          source={{
+                            uri: img?.startsWith("blob:")
+                              ? "https://via.placeholder.com/120"
+                              : img,
+                          }}
+                          style={styles.tradeItemImage}
+                          onError={() =>
+                            console.warn(
+                              "Failed to load trade item image:",
+                              img,
+                            )
+                          }
+                        />
+                        <Text style={styles.tradeItemTitle} numberOfLines={2}>
+                          {myItem.title}
+                        </Text>
+                      </TouchableOpacity>
+                    );
+                  }}
+                />
+              )}
+
+              <View style={styles.tradeModalFooter}>
+                <TouchableOpacity
+                  style={styles.tradeModalCancelBtn}
+                  onPress={() => {
+                    setShowTradeModal(false);
+                    setSelectedOfferItem(null);
+                  }}
+                >
+                  <Text style={styles.tradeModalCancelText}>{"Cancel"}</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[
+                    styles.tradeModalSubmitBtn,
+                    (!selectedOfferItem || tradeSubmitting) &&
+                      styles.tradeModalSubmitBtnDisabled,
+                  ]}
+                  onPress={handleSubmitTradeOffer}
+                  disabled={!selectedOfferItem || tradeSubmitting}
+                >
+                  {tradeSubmitting ? (
+                    <ActivityIndicator color="#fff" size="small" />
+                  ) : (
+                    <Text style={styles.tradeModalSubmitText}>
+                      {"Send Offer"}
+                    </Text>
+                  )}
+                </TouchableOpacity>
+              </View>
             </View>
           </View>
-        </View>
-      </Modal>
-      {/* ──────────────────────────────────────────────────────────────────── */}
-    </View>
+        </Modal>
+      </View>
+    </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
+  safeContainer: {
+    flex: 1,
+    backgroundColor: "#2f2f6f",
+  } as ViewStyle,
   container: {
     flex: 1,
     backgroundColor: "#F3F4F6",
+    paddingTop: 0,
+  } as ViewStyle,
+  stickyHeader: {
+    backgroundColor: "#2f2f6f",
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: 16,
+    paddingVertical: 13,
+  } as ViewStyle,
+  stickyBackButton: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: "rgba(255,255,255,0.15)",
+    justifyContent: "center",
+    alignItems: "center",
+  } as ViewStyle,
+  stickyHeaderTitle: {
+    fontSize: 17,
+    fontWeight: "800",
+    color: "#fff",
+    textAlign: "center",
+    flex: 1,
+    marginHorizontal: 8,
+  } as TextStyle,
+  stickyHeaderSpacer: {
+    width: 38,
+    height: 38,
   } as ViewStyle,
   scrollContent: {
-    paddingBottom: 40,
+    paddingBottom: 120,
+  } as ViewStyle,
+  headerBar: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    backgroundColor: "#fff",
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: "#f0f0f0",
   } as ViewStyle,
   closeButton: {
     position: "absolute",
@@ -622,7 +680,7 @@ const styles = StyleSheet.create({
   } as ViewStyle,
   errorText: {
     fontSize: 16,
-    color: "#2e2d7c",
+    color: "#2f2f6f",
     textAlign: "center",
     marginTop: 20,
   } as TextStyle,
@@ -744,7 +802,7 @@ const styles = StyleSheet.create({
   seeMoreText: {
     fontSize: 13,
     fontWeight: "600",
-    color: "#2e2d7c",
+    color: "#2f2f6f",
   } as TextStyle,
   ownerCard: {
     backgroundColor: "#F9FAFB",
@@ -799,47 +857,55 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     borderRadius: 12,
     borderWidth: 2,
-    borderColor: "#2e2d7c",
+    borderColor: "#2f2f6f",
     backgroundColor: "#fff",
   } as ViewStyle,
   likeButtonActive: {
-    backgroundColor: "#2e2d7c",
+    backgroundColor: "#2f2f6f",
   } as ViewStyle,
   likeButtonText: {
     fontSize: 16,
     fontWeight: "600",
-    color: "#2e2d7c",
+    color: "#2f2f6f",
   } as TextStyle,
   likeButtonTextActive: {
     color: "#fff",
   } as TextStyle,
   tradeButton: {
+    flex: 1,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
-    gap: 12,
+    gap: 8,
     paddingVertical: 14,
     paddingHorizontal: 16,
-    backgroundColor: "#5D5FEF",
+    backgroundColor: "#C9A227",
     borderRadius: 12,
   } as ViewStyle,
   tradeButtonText: {
-    fontSize: 16,
+    fontSize: 14,
     fontWeight: "600",
     color: "#fff",
+     backgroundColor: "#C9A227",
   } as TextStyle,
+  actionButtonsRow: {
+    flexDirection: "row",
+    gap: 12,
+    marginBottom: 16,
+  } as ViewStyle,
   messageButton: {
+    flex: 1,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
-    gap: 12,
+    gap: 8,
     paddingVertical: 14,
     paddingHorizontal: 16,
-    backgroundColor: "#2e2d7c",
+    backgroundColor: "#2f2f6f",
     borderRadius: 12,
   } as ViewStyle,
   messageButtonText: {
-    fontSize: 16,
+    fontSize: 14,
     fontWeight: "600",
     color: "#fff",
   } as TextStyle,
@@ -905,7 +971,7 @@ const styles = StyleSheet.create({
     textAlign: "center",
   } as TextStyle,
   tradeModalAddBtn: {
-    backgroundColor: "#2e2d7c",
+    backgroundColor: "#2f2f6f",
     paddingHorizontal: 20,
     paddingVertical: 10,
     borderRadius: 10,
@@ -930,7 +996,7 @@ const styles = StyleSheet.create({
     position: "relative",
   } as ViewStyle,
   tradeItemCardSelected: {
-    borderColor: "#2e2d7c",
+    borderColor: "#2f2f6f",
     backgroundColor: "#EEF0FF",
   } as ViewStyle,
   tradeItemCheckBadge: {
@@ -973,7 +1039,7 @@ const styles = StyleSheet.create({
     flex: 2,
     paddingVertical: 14,
     borderRadius: 12,
-    backgroundColor: "#2e2d7c",
+    backgroundColor: "#2f2f6f",
     alignItems: "center",
   } as ViewStyle,
   tradeModalSubmitBtnDisabled: {

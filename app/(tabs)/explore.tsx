@@ -3,41 +3,43 @@ import { useLocalSearchParams, useRouter } from "expo-router";
 import { onAuthStateChanged } from "firebase/auth";
 import React, { useEffect, useRef, useState } from "react";
 import {
-    ActivityIndicator,
-    Alert,
-    Dimensions,
-    FlatList,
-    Image,
-    Modal,
-    Pressable,
-    SafeAreaView,
-    ScrollView,
-    Share,
-    StyleSheet,
-    Text,
-    TextInput,
-    TouchableOpacity,
-    View,
+  ActivityIndicator,
+  Alert,
+  Dimensions,
+  FlatList,
+  Image,
+  Modal,
+  Pressable,
+  SafeAreaView,
+  ScrollView,
+  Share,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
 } from "react-native";
 import { ProposeTradeModal } from "../../components/ProposeTradeModal";
 import { auth } from "../../firebaseConfig";
 import {
-    addComment,
-    addCommentReply,
-    deleteComment,
-    getAllItems,
-    getUserSavedItems,
-    updateCommentLike,
-    updateItemLikes,
-    updateItemSave,
+  addComment,
+  addCommentReply,
+  deleteComment,
+  getAllItems,
+  getUserSavedItems,
+  updateCommentLike,
+  updateItemLikes,
+  updateItemSave,
 } from "../../services/itemService";
 import { sendMessage } from "../../services/messagingService";
 import {
-    getPersonalizedSuggestions,
-    getTrendingItems,
+  getPersonalizedSuggestions,
+  getTrendingItems,
 } from "../../services/trendingService";
 
 const { width: screenWidth, height: screenHeight } = Dimensions.get("window");
+
+const PLACEHOLDER = "https://via.placeholder.com/400x200?text=No+Image";
 
 const FILTER_CATEGORIES = [
   "All",
@@ -47,6 +49,24 @@ const FILTER_CATEGORIES = [
   "School/Office",
   "Household",
 ];
+
+// ── Centralised URI guard ────────────────────────────────────────────────────
+// Blocks blob:, file:, data: and any empty/non-string values.
+// Only http/https Cloudinary (or any remote) URLs pass through.
+function safeUri(uri: any): string {
+  if (!uri || typeof uri !== "string") return PLACEHOLDER;
+  if (uri.startsWith("blob:")) return PLACEHOLDER;
+  if (uri.startsWith("file:")) return PLACEHOLDER;
+  if (uri.startsWith("data:")) return PLACEHOLDER;
+  if (!uri.startsWith("http")) return PLACEHOLDER;
+  return uri;
+}
+
+function safeUriList(images: any): string[] {
+  const raw = Array.isArray(images) ? images : [];
+  return raw.map(safeUri).filter((u) => u !== PLACEHOLDER);
+}
+// ────────────────────────────────────────────────────────────────────────────
 
 export default function Screen() {
   const params = useLocalSearchParams<{ filter?: string; search?: string; type?: string }>();
@@ -61,6 +81,7 @@ export default function Screen() {
   const [refreshKey, setRefreshKey] = useState(0);
   const [typeFilter, setTypeFilter] = useState<"all" | "trending" | "personalized">("all");
   const [isInitialLoad, setIsInitialLoad] = useState(true);
+  const [searchPopupVisible, setSearchPopupVisible] = useState(false);
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (user) => {
@@ -72,20 +93,15 @@ export default function Screen() {
   useEffect(() => {
     const fetchItems = async () => {
       try {
-        // Only show loading on initial load, not on filter changes
-        if (isInitialLoad) {
-          setLoading(true);
-        }
+        if (isInitialLoad) setLoading(true);
         let items;
 
         if (typeFilter === "trending") {
           items = await getTrendingItems(50);
         } else if (typeFilter === "personalized") {
-          if (userId) {
-            items = await getPersonalizedSuggestions(userId, 50);
-          } else {
-            items = await getAllItems();
-          }
+          items = userId
+            ? await getPersonalizedSuggestions(userId, 50)
+            : await getAllItems();
         } else {
           items = await getAllItems();
         }
@@ -95,9 +111,7 @@ export default function Screen() {
       } catch (error) {
         console.error("Error fetching items:", error);
       } finally {
-        if (isInitialLoad) {
-          setLoading(false);
-        }
+        if (isInitialLoad) setLoading(false);
       }
     };
     fetchItems();
@@ -113,21 +127,16 @@ export default function Screen() {
       setFilter("All");
     }
     if (typeof params.search === "string") setSearch(params.search);
-    if (params.type === "trending") {
-      setTypeFilter("trending");
-    } else if (params.type === "personalized") {
-      setTypeFilter("personalized");
-    } else {
-      setTypeFilter("all");
-    }
+    if (params.type === "trending") setTypeFilter("trending");
+    else if (params.type === "personalized") setTypeFilter("personalized");
+    else setTypeFilter("all");
   }, [params.filter, params.search, params.type]);
 
   const filteredItems = allItems
     .filter((item) => {
       const matchSearch =
         search.length === 0 ||
-        (item.title &&
-          item.title.toLowerCase().includes(search.toLowerCase())) ||
+        (item.title && item.title.toLowerCase().includes(search.toLowerCase())) ||
         (item.description &&
           item.description.toLowerCase().includes(search.toLowerCase()));
       const matchFilter = filter === "All" || item.category === filter;
@@ -135,16 +144,14 @@ export default function Screen() {
     })
     .sort((a, b) => {
       if (sortType === "likes") return (b.likes || 0) - (a.likes || 0);
-      if (sortType === "name")
-        return (a.title || "").localeCompare(b.title || "");
+      if (sortType === "name") return (a.title || "").localeCompare(b.title || "");
       return 0;
     });
 
-  const handleSort = () => {
+  const handleSort = () =>
     setSortType((prev) =>
       prev === "none" ? "likes" : prev === "likes" ? "name" : "none",
     );
-  };
 
   const handleFilterToggle = () => setIsFilterOpen((prev) => !prev);
 
@@ -158,7 +165,7 @@ export default function Screen() {
       <SafeAreaView style={styles.container}>
         <View style={styles.loaderContainer}>
           <ActivityIndicator size="large" color="#5D5FEF" />
-          <Text style={styles.loadingText}>Loading items...</Text>
+          <Text style={styles.loadingText}>{"Loading items..."}</Text>
         </View>
       </SafeAreaView>
     );
@@ -177,19 +184,75 @@ export default function Screen() {
         )}
         ListHeaderComponent={
           <>
-            <View style={styles.searchContainer}>
-              <Ionicons
-                name="search-outline"
-                size={20}
-                color="#5B5B7B"
-                style={styles.searchIcon}
-              />
-              <TextInput
-                placeholder="Search for items..."
-                style={styles.searchInput}
-                value={search}
-                onChangeText={setSearch}
-              />
+            <View style={styles.searchWrapper}>
+              <View style={styles.searchContainer}>
+                <Ionicons
+                  name="search-outline"
+                  size={20}
+                  color="#5B5B7B"
+                  style={styles.searchIcon}
+                />
+                <TextInput
+                  placeholder="Search for items..."
+                  placeholderTextColor="#888"
+                  style={styles.searchInput}
+                  value={search}
+                  onChangeText={(text) => {
+                    setSearch(text);
+                    setSearchPopupVisible(text.length > 0);
+                  }}
+                  onSubmitEditing={() => setSearchPopupVisible(false)}
+                />
+              </View>
+
+              {searchPopupVisible && search.trim().length > 0 && (
+                <View style={styles.searchPopup}>
+                  {(() => {
+                    const results = allItems
+                      .filter(
+                        (item) =>
+                          item.title.toLowerCase().includes(search.toLowerCase()) ||
+                          item.category.toLowerCase().includes(search.toLowerCase()),
+                      )
+                      .slice(0, 5);
+                    return (
+                      <>
+                        <Text style={styles.popupTitle}>
+                          {results.length > 0
+                            ? `Found ${results.length} related posts`
+                            : "No related posts found"}
+                        </Text>
+                        {results.length > 0 ? (
+                          results.map((item) => (
+                            <TouchableOpacity
+                              key={item.id}
+                              style={styles.searchResultLink}
+                              onPress={() => {
+                                setSearch(item.title);
+                                setSearchPopupVisible(false);
+                              }}
+                              activeOpacity={0.7}
+                            >
+                              <View style={styles.searchResultItem}>
+                                <Text style={styles.searchResultText}>
+                                  {item.title}
+                                </Text>
+                                <Text style={styles.searchResultCategory}>
+                                  {item.category}
+                                </Text>
+                              </View>
+                            </TouchableOpacity>
+                          ))
+                        ) : (
+                          <Text style={styles.noResultsText}>
+                            {"Try a different keyword or category."}
+                          </Text>
+                        )}
+                      </>
+                    );
+                  })()}
+                </View>
+              )}
             </View>
 
             <View style={styles.typeFilterRow}>
@@ -211,7 +274,7 @@ export default function Screen() {
                     typeFilter === "all" && styles.typeFilterTextActive,
                   ]}
                 >
-                  All
+                  {"All"}
                 </Text>
               </Pressable>
 
@@ -233,7 +296,7 @@ export default function Screen() {
                     typeFilter === "trending" && styles.typeFilterTextActive,
                   ]}
                 >
-                  Trending
+                  {"Trending"}
                 </Text>
               </Pressable>
 
@@ -252,22 +315,21 @@ export default function Screen() {
                 <Text
                   style={[
                     styles.typeFilterText,
-                    typeFilter === "personalized" &&
-                      styles.typeFilterTextActive,
+                    typeFilter === "personalized" && styles.typeFilterTextActive,
                   ]}
                 >
-                  Suggested
+                  {"Suggested"}
                 </Text>
               </Pressable>
             </View>
 
             <View style={styles.filterRow}>
               <Pressable style={styles.filterBtn} onPress={handleSort}>
-                <Text style={styles.filterText}>Sort ({sortType})</Text>
+                <Text style={styles.filterText}>{`Sort (${sortType})`}</Text>
                 <Ionicons name="swap-vertical" size={14} />
               </Pressable>
               <Pressable style={styles.filterBtn} onPress={handleFilterToggle}>
-                <Text style={styles.filterText}>Filter ({filter})</Text>
+                <Text style={styles.filterText}>{`Filter (${filter})`}</Text>
                 <Ionicons
                   name={isFilterOpen ? "chevron-up" : "chevron-down"}
                   size={14}
@@ -300,11 +362,12 @@ export default function Screen() {
         ListEmptyComponent={
           <View style={styles.emptyContainer}>
             <Text style={styles.emptyText}>
-              No items found. Try adjusting your search or filters.
+              {"No items found. Try adjusting your search or filters."}
             </Text>
           </View>
         }
         showsVerticalScrollIndicator={false}
+        contentContainerStyle={{ paddingBottom: 100 }}
       />
     </SafeAreaView>
   );
@@ -324,44 +387,31 @@ function ItemCard({ item, onCommentAdded }: any) {
   const [commentsLoading, setCommentsLoading] = useState(false);
   const [showImageGallery, setShowImageGallery] = useState(false);
   const [currentImageIndex, setCurrentImageIndex] = useState(0);
-  const [replyingToCommentId, setReplyingToCommentId] = useState<string | null>(
-    null,
-  );
+  const [replyingToCommentId, setReplyingToCommentId] = useState<string | null>(null);
   const [replyText, setReplyText] = useState("");
   const [deleteToastVisible, setDeleteToastVisible] = useState(false);
   const [deletedCommentData, setDeletedCommentData] = useState<any>(null);
-  const deleteTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const deleteTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // ── Trade proposal state ──────────────────────────────────────────────────
   const [tradeModalVisible, setTradeModalVisible] = useState(false);
-  // ─────────────────────────────────────────────────────────────────────────
 
   const currentUser = auth.currentUser?.uid;
   const currentUserName = auth.currentUser?.displayName || "Anonymous";
   const currentUserPhotoURL =
     auth.currentUser?.photoURL || "https://i.pravatar.cc/150?img=1";
 
-  // Is this item owned by the current user?
   const isOwnItem = !!currentUser && currentUser === item?.ownerId;
 
-  // Filter out blob URLs and validate image URLs
-  const validateImageUrl = (url: string | undefined): boolean => {
-    if (!url) return false;
-    if (typeof url !== "string") return false;
-    if (url.startsWith("blob:")) return false;
-    return true;
-  };
-
+  // FIX: Use centralised safeUri / safeUriList — blocks blob:, file:, data: URIs
   const imagesList = (() => {
-    const imgs = (Array.isArray(item?.images) ? item.images : []).filter(
-      (img: string) => validateImageUrl(img),
-    );
-    if (imgs.length > 0) return imgs;
-    if (validateImageUrl(item?.image)) return [item.image];
-    return ["https://via.placeholder.com/400x200"];
+    const safe = safeUriList(item?.images);
+    if (safe.length > 0) return safe;
+    const single = safeUri(item?.image);
+    if (single !== PLACEHOLDER) return [single];
+    return [PLACEHOLDER];
   })();
 
-  const imageUrl = imagesList[0] || "https://via.placeholder.com/400x200";
+  const imageUrl = imagesList[0];
 
   useEffect(() => {
     if (currentUser && item?.likedBy?.includes(currentUser)) setIsLiked(true);
@@ -372,7 +422,7 @@ function ItemCard({ item, onCommentAdded }: any) {
     if (!currentUser) return;
     try {
       const saved = await getUserSavedItems(currentUser);
-      setIsSaved(saved.some((s) => s.id === item.id));
+      setIsSaved(saved.some((s: any) => s.id === item.id));
     } catch (error) {
       console.error("Error checking saved items:", error);
     }
@@ -388,7 +438,7 @@ function ItemCard({ item, onCommentAdded }: any) {
       await updateItemLikes(item.id, currentUser, !isLiked);
       setIsLiked(!isLiked);
       setLikes(isLiked ? likes - 1 : likes + 1);
-    } catch (error) {
+    } catch {
       Alert.alert("Error", "Failed to update like status");
     } finally {
       setLoading(false);
@@ -408,7 +458,7 @@ function ItemCard({ item, onCommentAdded }: any) {
         "Success",
         isSaved ? "Item removed from saved" : "Item saved successfully",
       );
-    } catch (error) {
+    } catch {
       Alert.alert("Error", "Failed to save item");
     } finally {
       setCommentsLoading(false);
@@ -434,7 +484,7 @@ function ItemCard({ item, onCommentAdded }: any) {
       );
       Alert.alert("Message sent", "Your message has been sent successfully");
       router.push("/inbox");
-    } catch (error) {
+    } catch {
       Alert.alert("Error", "Failed to send message");
     } finally {
       setCommentsLoading(false);
@@ -449,7 +499,7 @@ function ItemCard({ item, onCommentAdded }: any) {
         message: `Check out this image from ${item.title}`,
         title: item.title,
       });
-    } catch (error) {
+    } catch {
       Alert.alert("Error", "Failed to save image");
     }
   };
@@ -471,7 +521,7 @@ function ItemCard({ item, onCommentAdded }: any) {
       );
       setComments([...comments, newComment]);
       setCommentText("");
-    } catch (error) {
+    } catch {
       Alert.alert("Error", "Failed to add comment");
     } finally {
       setCommentsLoading(false);
@@ -516,17 +566,14 @@ function ItemCard({ item, onCommentAdded }: any) {
       setComments(updatedComments);
       setReplyText("");
       setReplyingToCommentId(null);
-    } catch (error) {
+    } catch {
       Alert.alert("Error", "Failed to add reply");
     } finally {
       setCommentsLoading(false);
     }
   };
 
-  const handleCommentLike = async (
-    commentId: string,
-    commentLiked: boolean,
-  ) => {
+  const handleCommentLike = async (commentId: string, commentLiked: boolean) => {
     if (!currentUser) {
       Alert.alert("Please log in", "You must be logged in to like comments");
       return;
@@ -549,7 +596,7 @@ function ItemCard({ item, onCommentAdded }: any) {
         return c;
       });
       setComments(updatedComments);
-    } catch (error) {
+    } catch {
       Alert.alert("Error", "Failed to update comment like");
     }
   };
@@ -565,7 +612,7 @@ function ItemCard({ item, onCommentAdded }: any) {
       deleteTimerRef.current = setTimeout(() => {
         setDeleteToastVisible(false);
       }, 5000);
-    } catch (error) {
+    } catch {
       Alert.alert("Error", "Failed to delete comment");
     }
   };
@@ -584,7 +631,7 @@ function ItemCard({ item, onCommentAdded }: any) {
         deletedCommentData.userName,
         deletedCommentData.userAvatar,
       );
-    } catch (error) {
+    } catch {
       Alert.alert("Error", "Failed to undo delete");
     }
   };
@@ -594,14 +641,13 @@ function ItemCard({ item, onCommentAdded }: any) {
 
   return (
     <View style={styles.card}>
-      {/* ── ProposeTradeModal — rendered last so it sits above everything ── */}
       <ProposeTradeModal
         visible={tradeModalVisible}
         targetItem={item}
         onClose={() => setTradeModalVisible(false)}
       />
 
-      {/* ── HEADER ── */}
+      {/* HEADER */}
       <View style={styles.cardHeader}>
         <TouchableOpacity
           style={styles.userInfo}
@@ -615,9 +661,7 @@ function ItemCard({ item, onCommentAdded }: any) {
           activeOpacity={0.8}
         >
           <Image
-            source={{
-              uri: item.userAvatar || "https://i.pravatar.cc/150?img=1",
-            }}
+            source={{ uri: safeUri(item.userAvatar) === PLACEHOLDER ? "https://i.pravatar.cc/150?img=1" : safeUri(item.userAvatar) }}
             style={styles.avatar}
           />
           <View style={styles.userDetails}>
@@ -639,10 +683,8 @@ function ItemCard({ item, onCommentAdded }: any) {
         style={styles.cardImageContainer}
         onPress={() => setShowImageGallery(true)}
       >
-        <Image 
-          source={{ 
-            uri: imageUrl?.startsWith("blob:") ? "https://via.placeholder.com/400x200" : imageUrl 
-          }} 
+        <Image
+          source={{ uri: imageUrl }}
           style={styles.cardImage}
           onError={() => console.warn("Failed to load image:", imageUrl)}
         />
@@ -652,6 +694,18 @@ function ItemCard({ item, onCommentAdded }: any) {
             <Ionicons name="image" size={12} color="white" />
           </View>
         )}
+        <TouchableOpacity
+          style={styles.fullscreenButton}
+          onPress={() =>
+            router.push({
+              pathname: "/product-details",
+              params: { itemId: item.id, item: JSON.stringify(item) },
+            })
+          }
+          activeOpacity={0.7}
+        >
+          <Ionicons name="expand" size={20} color="#fff" />
+        </TouchableOpacity>
       </TouchableOpacity>
 
       {/* IMAGE GALLERY MODAL */}
@@ -666,37 +720,28 @@ function ItemCard({ item, onCommentAdded }: any) {
             horizontal
             pagingEnabled
             onMomentumScrollEnd={(e) => {
-              const currentIndex = Math.round(
+              const idx = Math.round(
                 e.nativeEvent.contentOffset.x / screenWidth,
               );
-              setCurrentImageIndex(currentIndex);
+              setCurrentImageIndex(idx);
             }}
             style={styles.imageScroller}
           >
             {imagesList.map((img: string, idx: number) => (
               <Image
                 key={idx}
-                source={{ 
-                  uri: img?.startsWith("blob:") ? "https://via.placeholder.com/400x200" : (img || "https://via.placeholder.com/400x200")
-                }}
-                style={{
-                  width: screenWidth,
-                  height: screenHeight,
-                  resizeMode: "contain",
-                }}
-                onError={() => console.warn("Failed to load image:", img)}
+                source={{ uri: img }}
+                style={{ width: screenWidth, height: screenHeight, resizeMode: "contain" }}
+                onError={() => console.warn("Failed to load gallery image:", img)}
               />
             ))}
           </ScrollView>
           <View style={styles.galleryControls}>
-            <TouchableOpacity
-              style={styles.galleryBtn}
-              onPress={handleSaveImage}
-            >
+            <TouchableOpacity style={styles.galleryBtn} onPress={handleSaveImage}>
               <Ionicons name="download" size={24} color="white" />
             </TouchableOpacity>
             <Text style={styles.imageCounter}>
-              {currentImageIndex + 1} / {imagesList.length}
+              {`${currentImageIndex + 1} / ${imagesList.length}`}
             </Text>
             <TouchableOpacity
               style={styles.galleryBtn}
@@ -714,19 +759,13 @@ function ItemCard({ item, onCommentAdded }: any) {
         <Text style={styles.description}>{item.description}</Text>
       </View>
 
-      {/* ── ACTION BUTTONS ── */}
+      {/* ACTION BUTTONS */}
       {isOwnItem ? (
-        // Own item: show a neutral label instead
         <View style={styles.ownItemBanner}>
-          <Ionicons
-            name="information-circle-outline"
-            size={14}
-            color="#AAAAAA"
-          />
-          <Text style={styles.ownItemText}>Your listing</Text>
+          <Ionicons name="information-circle-outline" size={14} color="#AAAAAA" />
+          <Text style={styles.ownItemText}>{"Your listing"}</Text>
         </View>
       ) : (
-        // Other's item: Message + Propose Trade
         <View style={styles.actionButtons}>
           <TouchableOpacity
             style={styles.actionBtn}
@@ -735,7 +774,7 @@ function ItemCard({ item, onCommentAdded }: any) {
             activeOpacity={0.8}
           >
             <Ionicons name="send" size={14} color="#5D5FEF" />
-            <Text style={styles.actionBtnText}>Message</Text>
+            <Text style={styles.actionBtnText}>{"Message"}</Text>
           </TouchableOpacity>
 
           <TouchableOpacity
@@ -745,7 +784,7 @@ function ItemCard({ item, onCommentAdded }: any) {
           >
             <Ionicons name="swap-horizontal" size={14} color="#C9A227" />
             <Text style={[styles.actionBtnText, styles.actionBtnTextTrade]}>
-              Propose Trade
+              {"Propose Trade"}
             </Text>
           </TouchableOpacity>
         </View>
@@ -790,7 +829,7 @@ function ItemCard({ item, onCommentAdded }: any) {
       {showComments && (
         <View style={styles.commentsSection}>
           <Text style={styles.commentsTitle}>
-            Comments ({getTopLevelCommentCount()})
+            {`Comments (${getTopLevelCommentCount()})`}
           </Text>
           <View style={styles.commentInputContainer}>
             <TextInput
@@ -814,28 +853,19 @@ function ItemCard({ item, onCommentAdded }: any) {
             keyExtractor={(c) => c.id}
             scrollEnabled={false}
             renderItem={({ item: comment }) => {
-              const isCommentLiked = (comment.likedBy || []).includes(
-                currentUser,
-              );
+              const isCommentLiked = (comment.likedBy || []).includes(currentUser);
               return (
                 <View style={styles.commentItem}>
                   <Image
-                    source={{
-                      uri:
-                        comment.userAvatar || "https://i.pravatar.cc/150?img=1",
-                    }}
+                    source={{ uri: comment.userAvatar || "https://i.pravatar.cc/150?img=1" }}
                     style={styles.commentAvatar}
                   />
                   <View style={styles.commentContent}>
-                    <Text style={styles.commentUserName}>
-                      {comment.userName}
-                    </Text>
+                    <Text style={styles.commentUserName}>{comment.userName}</Text>
                     <Text style={styles.commentText}>{comment.text}</Text>
                     <View style={styles.commentActions}>
                       <Pressable
-                        onPress={() =>
-                          handleCommentLike(comment.id, isCommentLiked)
-                        }
+                        onPress={() => handleCommentLike(comment.id, isCommentLiked)}
                         style={styles.commentLikeBtn}
                       >
                         <Ionicons
@@ -850,15 +880,13 @@ function ItemCard({ item, onCommentAdded }: any) {
                       <Pressable
                         onPress={() =>
                           setReplyingToCommentId(
-                            replyingToCommentId === comment.id
-                              ? null
-                              : comment.id,
+                            replyingToCommentId === comment.id ? null : comment.id,
                           )
                         }
                         style={styles.commentReplyBtn}
                       >
                         <Ionicons name="arrow-redo" size={14} color="#5D5FEF" />
-                        <Text style={styles.commentReplyText}>Reply</Text>
+                        <Text style={styles.commentReplyText}>{"Reply"}</Text>
                       </Pressable>
                       {currentUser === comment.userId && (
                         <Pressable
@@ -875,17 +903,11 @@ function ItemCard({ item, onCommentAdded }: any) {
                         {comment.replies.map((reply: any) => (
                           <View key={reply.id} style={styles.replyItem}>
                             <Image
-                              source={{
-                                uri:
-                                  reply.userAvatar ||
-                                  "https://i.pravatar.cc/150?img=1",
-                              }}
+                              source={{ uri: reply.userAvatar || "https://i.pravatar.cc/150?img=1" }}
                               style={styles.replyAvatar}
                             />
                             <View style={styles.replyContent}>
-                              <Text style={styles.replyUserName}>
-                                {reply.userName}
-                              </Text>
+                              <Text style={styles.replyUserName}>{reply.userName}</Text>
                               <Text style={styles.replyText}>{reply.text}</Text>
                             </View>
                           </View>
@@ -923,10 +945,10 @@ function ItemCard({ item, onCommentAdded }: any) {
       {deleteToastVisible && (
         <View style={styles.deleteToast}>
           <Text style={styles.deleteToastText}>
-            1 comment deleted. Tap to undo.
+            {"1 comment deleted. Tap to undo."}
           </Text>
           <TouchableOpacity onPress={handleUndoDelete}>
-            <Text style={styles.deleteToastUndo}>Undo</Text>
+            <Text style={styles.deleteToastUndo}>{"Undo"}</Text>
           </TouchableOpacity>
         </View>
       )}
@@ -936,6 +958,14 @@ function ItemCard({ item, onCommentAdded }: any) {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#ECECEC" },
+  searchWrapper: {
+    marginHorizontal: 16,
+    marginTop: 30,
+    marginBottom: 4,
+    position: "relative",
+    overflow: "visible",
+    zIndex: 9999,
+  },
   searchContainer: {
     flexDirection: "row",
     alignItems: "center",
@@ -945,12 +975,32 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: "#E9E9E9",
     paddingHorizontal: 14,
-    marginHorizontal: 16,
-    marginTop: 14,
-    marginBottom: 16,
   },
   searchIcon: { marginRight: 10 },
   searchInput: { flex: 1, color: "#242424", fontSize: 15, paddingVertical: 8 },
+  searchPopup: {
+    position: "absolute",
+    top: 52,
+    left: 0,
+    right: 0,
+    borderRadius: 16,
+    backgroundColor: "#FFFFFF",
+    borderColor: "#E5E7EB",
+    borderWidth: 1,
+    padding: 14,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.12,
+    shadowRadius: 18,
+    elevation: 30,
+    zIndex: 10000,
+  },
+  popupTitle: { fontSize: 14, fontWeight: "700", color: "#111827", marginBottom: 10 },
+  searchResultLink: { width: "100%" },
+  searchResultItem: { paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: "#E5E7EB" },
+  searchResultText: { fontSize: 14, fontWeight: "600", color: "#111827" },
+  searchResultCategory: { fontSize: 12, color: "#6B7280", marginTop: 2 },
+  noResultsText: { color: "#6B7280", fontSize: 13, lineHeight: 20 },
   filterRow: { flexDirection: "row", marginHorizontal: 15, marginBottom: 10 },
   filterBtn: {
     flexDirection: "row",
@@ -962,12 +1012,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   filterText: { marginRight: 5, fontSize: 13 },
-  typeFilterRow: {
-    flexDirection: "row",
-    marginHorizontal: 12,
-    marginBottom: 16,
-    gap: 10,
-  },
+  typeFilterRow: { flexDirection: "row", marginHorizontal: 12, marginBottom: 16, gap: 10 },
   typeFilterBtn: {
     flexDirection: "row",
     alignItems: "center",
@@ -979,19 +1024,9 @@ const styles = StyleSheet.create({
     borderColor: "transparent",
     gap: 6,
   },
-  typeFilterBtnActive: {
-    backgroundColor: "#2f2f6f",
-    borderColor: "#2f2f6f",
-  },
-  typeFilterText: {
-    fontSize: 13,
-    fontWeight: "600",
-    color: "#666",
-  },
-  typeFilterTextActive: {
-    color: "#FFFFFF",
-    fontWeight: "700",
-  },
+  typeFilterBtnActive: { backgroundColor: "#2f2f6f", borderColor: "#2f2f6f" },
+  typeFilterText: { fontSize: 13, fontWeight: "600", color: "#666" },
+  typeFilterTextActive: { color: "#FFFFFF", fontWeight: "700" },
   filterDropdown: {
     marginHorizontal: 15,
     backgroundColor: "white",
@@ -1032,15 +1067,8 @@ const styles = StyleSheet.create({
   username: { fontWeight: "700", fontSize: 14, color: "#1F1F1F" },
   date: { fontSize: 12, color: "#999", marginTop: 2 },
   badgeContainer: { padding: 6 },
-
-  // Image
   cardImage: { width: "100%", height: 220, backgroundColor: "#F5F5F5" },
-  cardImageContainer: {
-    position: "relative",
-    width: "100%",
-    height: 220,
-    backgroundColor: "#F5F5F5",
-  },
+  cardImageContainer: { position: "relative", width: "100%", height: 220, backgroundColor: "#F5F5F5" },
   imageCountBadge: {
     position: "absolute",
     bottom: 10,
@@ -1054,6 +1082,17 @@ const styles = StyleSheet.create({
     gap: 6,
   },
   imageCountText: { color: "white", fontSize: 12, fontWeight: "700" },
+  fullscreenButton: {
+    position: "absolute",
+    top: 10,
+    right: 10,
+    backgroundColor: "rgba(0, 0, 0, 0.6)",
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    borderRadius: 8,
+    justifyContent: "center",
+    alignItems: "center",
+  },
   galleryContainer: { flex: 1, backgroundColor: "#000" },
   imageScroller: { flex: 1 },
   galleryControls: {
@@ -1074,20 +1113,10 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     alignItems: "center",
   },
-  imageCounter: {
-    color: "white",
-    fontSize: 16,
-    fontWeight: "600",
-    textAlign: "center",
-    flex: 1,
-  },
-
-  // Content
+  imageCounter: { color: "white", fontSize: 16, fontWeight: "600", textAlign: "center", flex: 1 },
   cardContent: { padding: 14 },
   title: { fontWeight: "700", fontSize: 16, color: "#1F1F1F", marginBottom: 6 },
   description: { fontSize: 13, color: "#666", lineHeight: 18 },
-
-  // ── Action buttons ──
   actionButtons: {
     flexDirection: "row",
     paddingHorizontal: 14,
@@ -1107,21 +1136,9 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     gap: 5,
   },
-  actionBtnTrade: {
-    backgroundColor: "#FEF9EC",
-    borderWidth: 1,
-    borderColor: "#F0D98A",
-  },
-  actionBtnText: {
-    fontSize: 12,
-    fontWeight: "600",
-    color: "#5D5FEF",
-  },
-  actionBtnTextTrade: {
-    color: "#C9A227",
-  },
-
-  // Own item banner
+  actionBtnTrade: { backgroundColor: "#FEF9EC", borderWidth: 1, borderColor: "#F0D98A" },
+  actionBtnText: { fontSize: 12, fontWeight: "600", color: "#5D5FEF" },
+  actionBtnTextTrade: { color: "#C9A227" },
   ownItemBanner: {
     flexDirection: "row",
     alignItems: "center",
@@ -1134,31 +1151,12 @@ const styles = StyleSheet.create({
     backgroundColor: "#FAFAFA",
   },
   ownItemText: { fontSize: 12, color: "#AAAAAA", fontWeight: "500" },
-
-  // Footer
-  cardFooter: {
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    borderTopWidth: 1,
-    borderTopColor: "#F0F0F0",
-  },
+  cardFooter: { paddingHorizontal: 14, paddingVertical: 12, borderTopWidth: 1, borderTopColor: "#F0F0F0" },
   statRow: { flexDirection: "row", justifyContent: "space-around" },
   stat: { alignItems: "center", paddingHorizontal: 12 },
   statText: { fontSize: 12, color: "#666", marginTop: 4 },
-
-  // Comments
-  commentsSection: {
-    borderTopWidth: 1,
-    borderTopColor: "#F0F0F0",
-    padding: 14,
-    backgroundColor: "#FAFAFA",
-  },
-  commentsTitle: {
-    fontSize: 14,
-    fontWeight: "700",
-    color: "#1F1F1F",
-    marginBottom: 12,
-  },
+  commentsSection: { borderTopWidth: 1, borderTopColor: "#F0F0F0", padding: 14, backgroundColor: "#FAFAFA" },
+  commentsTitle: { fontSize: 14, fontWeight: "700", color: "#1F1F1F", marginBottom: 12 },
   commentInputContainer: { flexDirection: "row", marginBottom: 14, gap: 8 },
   commentInput: {
     flex: 1,
@@ -1190,13 +1188,7 @@ const styles = StyleSheet.create({
   commentDeleteBtn: { padding: 4 },
   commentReplyBtn: { flexDirection: "row", alignItems: "center", gap: 4 },
   commentReplyText: { fontSize: 11, color: "#5D5FEF", fontWeight: "600" },
-  repliesContainer: {
-    marginTop: 10,
-    marginLeft: 10,
-    paddingLeft: 10,
-    borderLeftWidth: 2,
-    borderLeftColor: "#E0E0E0",
-  },
+  repliesContainer: { marginTop: 10, marginLeft: 10, paddingLeft: 10, borderLeftWidth: 2, borderLeftColor: "#E0E0E0" },
   replyItem: { flexDirection: "row", marginBottom: 10 },
   replyAvatar: { width: 28, height: 28, borderRadius: 14, marginRight: 8 },
   replyContent: { flex: 1 },
@@ -1222,16 +1214,9 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-
-  // Misc
   loaderContainer: { flex: 1, justifyContent: "center", alignItems: "center" },
   loadingText: { marginTop: 10, fontSize: 14, color: "#777" },
-  emptyContainer: {
-    flex: 1,
-    justifyContent: "center",
-    alignItems: "center",
-    marginVertical: 50,
-  },
+  emptyContainer: { flex: 1, justifyContent: "center", alignItems: "center", marginVertical: 50 },
   emptyText: { fontSize: 14, color: "#777", textAlign: "center" },
   deleteToast: {
     position: "absolute",
@@ -1253,10 +1238,5 @@ const styles = StyleSheet.create({
     zIndex: 1000,
   },
   deleteToastText: { fontSize: 14, color: "white", fontWeight: "500", flex: 1 },
-  deleteToastUndo: {
-    fontSize: 14,
-    fontWeight: "600",
-    color: "#5D5FEF",
-    marginLeft: 12,
-  },
+  deleteToastUndo: { fontSize: 14, fontWeight: "600", color: "#5D5FEF", marginLeft: 12 },
 });

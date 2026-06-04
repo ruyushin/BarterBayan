@@ -3,21 +3,22 @@ import * as ImagePicker from "expo-image-picker";
 import { useRouter } from "expo-router";
 import { useRef, useState } from "react";
 import {
-    ActivityIndicator,
-    Alert,
-    Animated,
-    Image,
-    ImageStyle,
-    Modal,
-    SafeAreaView,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TextInput,
-    TextStyle,
-    TouchableOpacity,
-    View,
-    ViewStyle,
+  ActivityIndicator,
+  Alert,
+  Animated,
+  Image,
+  ImageStyle,
+  Modal,
+  Platform,
+  SafeAreaView,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  TextStyle,
+  TouchableOpacity,
+  View,
+  ViewStyle,
 } from "react-native";
 import { auth } from "../firebaseConfig";
 import { addItem } from "../services/itemService";
@@ -38,6 +39,29 @@ const CONDITIONS = [
   { id: "3", label: "Used - Good" },
   { id: "4", label: "Used - Fair" },
 ];
+
+/**
+ * On web, ImagePicker returns a blob: URI which browsers refuse to load in
+ * an <Image> tag (cross-origin security restriction).  Convert it to a
+ * base64 data URI so it can be previewed locally AND uploaded to Cloudinary.
+ * On native the URI is a file:// path — return it unchanged.
+ */
+async function toSafeUri(uri: string): Promise<string> {
+  if (Platform.OS !== "web") return uri;
+
+  if (uri.startsWith("blob:")) {
+    const res = await fetch(uri);
+    const blob = await res.blob();
+    return new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onloadend = () => resolve(reader.result as string);
+      reader.onerror = reject;
+      reader.readAsDataURL(blob);
+    });
+  }
+
+  return uri;
+}
 
 export default function AddItemScreen() {
   const router = useRouter();
@@ -83,9 +107,11 @@ export default function AddItemScreen() {
     });
 
     if (!result.canceled && result.assets && result.assets.length > 0) {
-      const uri = result.assets[0].uri;
-      if (typeof uri === "string") {
-        setPhotos((prev) => [...prev, uri]);
+      const rawUri = result.assets[0].uri;
+      if (typeof rawUri === "string") {
+        // Convert blob:/file:// to base64 data URI on web so <Image> can display it
+        const safeUri = await toSafeUri(rawUri);
+        setPhotos((prev) => [...prev, safeUri]);
       }
     }
   };
@@ -99,36 +125,34 @@ export default function AddItemScreen() {
 
       const formData = new FormData();
 
-      if (
-        imageUri.startsWith("blob:") ||
-        imageUri.startsWith("data:") ||
+      if (imageUri.startsWith("data:")) {
+        // Base64 data URI (web preview path) — convert to Blob for upload
+        const res = await fetch(imageUri);
+        const blob = await res.blob();
+        formData.append("file", blob, "photo.jpg");
+      } else if (imageUri.startsWith("blob:")) {
+        // Raw blob URI (shouldn't reach here after toSafeUri, but handle defensively)
+        const res = await fetch(imageUri);
+        if (!res.ok) throw new Error(`Failed to fetch blob: ${res.status}`);
+        const blob = await res.blob();
+        formData.append("file", blob, "photo.jpg");
+      } else if (
         imageUri.startsWith("http://") ||
         imageUri.startsWith("https://")
       ) {
-        // Web platform — fetch the URI and convert to a real Blob
-        const fetchResponse = await fetch(imageUri);
-        if (!fetchResponse.ok) {
-          throw new Error(`Failed to fetch image: ${fetchResponse.status}`);
-        }
-        const blob = await fetchResponse.blob();
+        // Already a remote URL — re-fetch and upload
+        const res = await fetch(imageUri);
+        if (!res.ok) throw new Error(`Failed to fetch image: ${res.status}`);
+        const blob = await res.blob();
         formData.append("file", blob, "photo.jpg");
-      } else if (
-        imageUri.startsWith("file://") ||
-        imageUri.startsWith("/")
-      ) {
-        // Native platform (iOS / Android) — pass as a file URI object
-        const filename =
-          imageUri.split("/").pop() || `image-${Date.now()}.jpg`;
+      } else {
+        // Native file:// or absolute path
+        const filename = imageUri.split("/").pop() || `image-${Date.now()}.jpg`;
         formData.append("file", {
           uri: imageUri,
           type: "image/jpeg",
           name: filename,
         } as any);
-      } else {
-        // Fallback: try fetching as blob
-        const fetchResponse = await fetch(imageUri);
-        const blob = await fetchResponse.blob();
-        formData.append("file", blob, "photo.jpg");
       }
 
       formData.append("upload_preset", "barterbayan_items");
@@ -159,7 +183,6 @@ export default function AddItemScreen() {
   const showSuccessAnimation = () => {
     setSuccessModalVisible(true);
 
-    // Reset all values
     scaleAnim.setValue(0);
     opacityAnim.setValue(0);
     checkAnim.setValue(0);
@@ -170,7 +193,6 @@ export default function AddItemScreen() {
     sparkle3.setValue(0);
 
     Animated.sequence([
-      // Pop in the card
       Animated.parallel([
         Animated.spring(scaleAnim, {
           toValue: 1,
@@ -184,7 +206,6 @@ export default function AddItemScreen() {
           useNativeDriver: true,
         }),
       ]),
-      // Animate checkmark + text + sparkles together
       Animated.parallel([
         Animated.spring(checkAnim, {
           toValue: 1,
@@ -248,7 +269,6 @@ export default function AddItemScreen() {
 
     setIsLoading(true);
     try {
-      // Upload all images to Cloudinary
       const uploadedImages: string[] = [];
       for (const photo of photos) {
         const cloudinaryUrl = await uploadImageToCloudinary(photo);
@@ -294,7 +314,6 @@ export default function AddItemScreen() {
     setPhotoModalVisible(true);
   };
 
-  // Sparkle interpolations
   const sparkleStyle = (anim: Animated.Value, tx: number, ty: number) => ({
     opacity: anim,
     transform: [
@@ -321,7 +340,10 @@ export default function AddItemScreen() {
 
   return (
     <SafeAreaView style={styles.container}>
-      <ScrollView showsVerticalScrollIndicator={false}>
+      <ScrollView
+        showsVerticalScrollIndicator={false}
+        contentContainerStyle={{ paddingBottom: 100 }}
+      >
         {/* Header */}
         <View style={styles.header}>
           <TouchableOpacity
@@ -493,7 +515,10 @@ export default function AddItemScreen() {
             <Ionicons name="close" size={28} color="white" />
           </TouchableOpacity>
           {selectedPhoto && (
-            <Image source={{ uri: selectedPhoto }} style={styles.modalImage} />
+            <Image
+              source={{ uri: selectedPhoto }}
+              style={styles.modalImage}
+            />
           )}
         </View>
       </Modal>
@@ -512,17 +537,17 @@ export default function AddItemScreen() {
               <Animated.Text
                 style={[styles.sparkle, sparkleStyle(sparkle1, -38, -30)]}
               >
-                ✦
+                {"✦"}
               </Animated.Text>
               <Animated.Text
                 style={[styles.sparkle, sparkleStyle(sparkle2, 40, -38)]}
               >
-                ★
+                {"★"}
               </Animated.Text>
               <Animated.Text
                 style={[styles.sparkle, sparkleStyle(sparkle3, -10, -50)]}
               >
-                ✦
+                {"✦"}
               </Animated.Text>
             </View>
 
@@ -555,9 +580,7 @@ export default function AddItemScreen() {
               }}
             >
               <Text style={styles.successTitle}>Uploaded!</Text>
-              <Text style={styles.successSub}>
-                Your item is now live 🎉
-              </Text>
+              <Text style={styles.successSub}>{"Your item is now live 🎉"}</Text>
             </Animated.View>
 
             {/* Bottom pill */}

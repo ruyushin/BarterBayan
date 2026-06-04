@@ -1,6 +1,7 @@
+//profile.tsx
 import { Ionicons } from "@expo/vector-icons";
 import * as ImagePicker from "expo-image-picker";
-import { useFocusEffect, useRouter } from "expo-router";
+import { useRouter } from "expo-router";
 import { onAuthStateChanged, signOut, User } from "firebase/auth";
 import {
   collection,
@@ -18,6 +19,7 @@ import {
   Animated,
   Image,
   Linking,
+  Modal,
   ScrollView,
   StyleSheet,
   Text,
@@ -38,15 +40,11 @@ const MAX_RATING = 5;
 // ─── Types ────────────────────────────────────────────────────────────────────
 interface UserData {
   username?: string;
-  firstName?: string;
-  middleName?: string;
-  lastName?: string;
   email?: string;
   phone?: string;
   bio?: string;
   rating?: number;
   ratingCount?: number;
-  photo?: string;
   avatarUrl?: string;
   tradesCount?: number;
   exchangedCount?: number;
@@ -73,65 +71,6 @@ const REPORT_CATEGORIES: string[] = [
   "Other",
 ];
 
-// ─── Cross-platform Modal ─────────────────────────────────────────────────────
-// React Native's <Modal> is not supported on Expo Web; this renders an
-// absolutely-positioned overlay that works on web + iOS + Android.
-function AppModal({
-  visible,
-  onRequestClose,
-  children,
-}: {
-  visible: boolean;
-  onRequestClose?: () => void;
-  children: React.ReactNode;
-}) {
-  if (!visible) return null;
-  return (
-    <View
-      style={{
-        position: "absolute",
-        top: 0,
-        left: 0,
-        right: 0,
-        bottom: 0,
-        zIndex: 9999,
-        elevation: 99,
-      }}
-    >
-      {children}
-    </View>
-  );
-}
-
-// ─── Helper: Get display name ─────────────────────────────────────────────────
-function getDisplayName(userData: UserData | null): string {
-  if (!userData) return "N/A";
-  const parts = [
-    userData.firstName,
-    userData.middleName,
-    userData.lastName,
-  ].filter(Boolean);
-  if (parts.length > 0) return parts.join(" ");
-  return userData.username ?? "N/A";
-}
-
-// ─── Helper: Get avatar initials ──────────────────────────────────────────────
-function getInitials(userData: UserData | null): string {
-  if (!userData) return "?";
-  const first = userData.firstName?.[0] ?? "";
-  const last = userData.lastName?.[0] ?? "";
-  if (first || last) return (first + last).toUpperCase();
-  return (userData.username?.[0] ?? "U").toUpperCase();
-}
-
-// ─── Helper: Get avatar URI ───────────────────────────────────────────────────
-function getAvatarUri(userData: UserData | null): string | null {
-  if (!userData) return null;
-  const uri = userData.avatarUrl || userData.photo || null;
-  if (!uri || uri.trim() === "") return null;
-  return uri;
-}
-
 // ─── Helper: Star Rating Display ─────────────────────────────────────────────
 function StarRating({
   rating,
@@ -142,6 +81,7 @@ function StarRating({
   ratingCount?: number;
   size?: number;
 }) {
+  // When no ratings yet, show all empty stars
   const effectiveRating = (ratingCount ?? 0) > 0 ? rating : 0;
 
   const stars = Array.from({ length: MAX_RATING }, (_, i) => {
@@ -164,6 +104,7 @@ function StarRating({
         ))}
       </View>
       <View style={ratingStyles.ratingInfo}>
+        {/* FIX: Only show numeric rating when there are actual reviews */}
         {ratingCount && ratingCount > 0 ? (
           <>
             <Text style={ratingStyles.ratingNumber}>{rating.toFixed(1)}</Text>
@@ -186,7 +127,7 @@ function StatCard({
   count,
   onPress,
 }: {
-  iconName: keyof typeof Ionicons.glyphMap;
+  iconName: string;
   label: string;
   count: number | string;
   onPress?: () => void;
@@ -200,9 +141,11 @@ function StatCard({
 
   const inner = (
     <View style={styles.statCard}>
-      <Ionicons name={iconName} size={26} color={DARK_BLUE} style={{ marginBottom: 4 }} />
+      <Text style={styles.statTopLabel}>{label}</Text>
+      <Ionicons name={iconName as any} size={26} color="#2e2d7c" style={{ marginVertical: 2 }} />
       <Text style={styles.statCountNum}>{count}</Text>
       <Text style={styles.statCountLabel}>{label}</Text>
+      {/* FIX: Show chevron hint when tappable */}
       {onPress && <Text style={styles.statTapHint}>tap to view</Text>}
     </View>
   );
@@ -225,13 +168,11 @@ function StatCard({
 
 // ─── Helper: Settings Row ────────────────────────────────────────────────────
 function SettingsRow({
-  iconName,
   label,
   subtitle,
   danger,
   onPress,
 }: {
-  iconName: keyof typeof Ionicons.glyphMap;
   label: string;
   subtitle?: string;
   danger?: boolean;
@@ -253,30 +194,28 @@ function SettingsRow({
         onPressOut={handlePressOut}
         activeOpacity={0.7}
       >
-        <View style={styles.settingsRowLeft}>
-          <View style={[styles.settingsIconBox, danger && { backgroundColor: "#FEE2E2" }]}>
-            <Ionicons name={iconName} size={18} color={danger ? ACCENT_RED : DARK_BLUE} />
-          </View>
-          <View style={{ flex: 1 }}>
-            <Text style={[styles.settingsRowLabel, danger && { color: ACCENT_RED }]}>
-              {label}
-            </Text>
-            {subtitle ? (
-              <Text style={styles.settingsRowSubtitle}>{subtitle}</Text>
-            ) : null}
-          </View>
+        <View style={{ flex: 1 }}>
+          <Text
+            style={[styles.settingsRowLabel, danger && { color: ACCENT_RED }]}
+          >
+            {label}
+          </Text>
+          {subtitle ? (
+            <Text style={styles.settingsRowSubtitle}>{subtitle}</Text>
+          ) : null}
         </View>
-        <Ionicons
-          name="chevron-forward"
-          size={16}
-          color={danger ? ACCENT_RED : "#CCCCCC"}
-        />
+        <Text
+          style={[styles.settingsRowChevron, danger && { color: ACCENT_RED }]}
+        >
+          ›
+        </Text>
       </TouchableOpacity>
     </Animated.View>
   );
 }
 
 // ─── Overview Modal ───────────────────────────────────────────────────────────
+// FIX: Shows real recent reviews pulled from Firestore subcollection
 function OverviewModal({
   visible,
   userId,
@@ -320,11 +259,17 @@ function OverviewModal({
   const ratingCount = userData?.ratingCount ?? 0;
 
   return (
-    <AppModal visible={visible} onRequestClose={onClose}>
+    <Modal
+      visible={visible}
+      transparent
+      animationType="slide"
+      onRequestClose={onClose}
+    >
       <View style={modalStyles.overlay}>
         <View style={[modalStyles.sheet, { paddingBottom: 32 }]}>
           <Text style={modalStyles.title}>Account Overview</Text>
 
+          {/* Summary */}
           <View style={overviewStyles.summaryRow}>
             <View style={overviewStyles.summaryCard}>
               <Text style={overviewStyles.summaryNum}>
@@ -347,38 +292,59 @@ function OverviewModal({
           <Text style={overviewStyles.sectionTitle}>Recent Reviews</Text>
 
           {loadingReviews ? (
-            <ActivityIndicator color={DARK_BLUE} style={{ marginVertical: 20 }} />
+            <ActivityIndicator
+              color={DARK_BLUE}
+              style={{ marginVertical: 20 }}
+            />
           ) : reviews.length === 0 ? (
             <View style={overviewStyles.emptyBox}>
               <Ionicons name="chatbubble-outline" size={36} color="#D8D8D8" style={{ marginBottom: 8 }} />
               <Text style={overviewStyles.emptyText}>
-                No reviews yet. Complete trades to earn ratings from other traders.
+                No reviews yet. Complete trades to earn ratings from other
+                traders.
               </Text>
             </View>
           ) : (
-            <ScrollView style={{ maxHeight: 340 }} showsVerticalScrollIndicator={false}>
+            <ScrollView
+              style={{ maxHeight: 340 }}
+              showsVerticalScrollIndicator={false}
+            >
               {reviews.map((r) => (
                 <View key={r.id} style={overviewStyles.reviewCard}>
                   <View style={overviewStyles.reviewHeader}>
                     {r.reviewerAvatar ? (
-                      <Image source={{ uri: r.reviewerAvatar }} style={overviewStyles.reviewAvatar} />
+                      <Image
+                        source={{ uri: r.reviewerAvatar }}
+                        style={overviewStyles.reviewAvatar}
+                      />
                     ) : (
-                      <View style={[overviewStyles.reviewAvatar, overviewStyles.reviewAvatarPlaceholder]}>
+                      <View
+                        style={[
+                          overviewStyles.reviewAvatar,
+                          overviewStyles.reviewAvatarPlaceholder,
+                        ]}
+                      >
                         <Text style={overviewStyles.reviewAvatarInitial}>
                           {(r.reviewerName ?? "?")[0].toUpperCase()}
                         </Text>
                       </View>
                     )}
                     <View style={{ flex: 1 }}>
-                      <Text style={overviewStyles.reviewerName}>{r.reviewerName}</Text>
+                      <Text style={overviewStyles.reviewerName}>
+                        {r.reviewerName}
+                      </Text>
                       <View style={overviewStyles.reviewStars}>
                         {Array.from({ length: MAX_RATING }, (_, i) => (
-                          <Ionicons
+                          <Text
                             key={i}
-                            name={i + 1 <= r.rating ? "star" : "star-outline"}
-                            size={13}
-                            color={i + 1 <= r.rating ? STAR_FILLED : STAR_EMPTY}
-                          />
+                            style={{
+                              fontSize: 13,
+                              color:
+                                i + 1 <= r.rating ? STAR_FILLED : STAR_EMPTY,
+                            }}
+                          >
+                            ★
+                          </Text>
                         ))}
                       </View>
                     </View>
@@ -392,7 +358,9 @@ function OverviewModal({
                     )}
                   </View>
                   {r.comment ? (
-                    <Text style={overviewStyles.reviewComment}>{r.comment}</Text>
+                    <Text style={overviewStyles.reviewComment}>
+                      {r.comment}
+                    </Text>
                   ) : null}
                 </View>
               ))}
@@ -404,20 +372,30 @@ function OverviewModal({
           </TouchableOpacity>
         </View>
       </View>
-    </AppModal>
+    </Modal>
   );
 }
 
 // ─── Feedback Modal ───────────────────────────────────────────────────────────
-function FeedbackModal({ visible, onClose }: { visible: boolean; onClose: () => void }) {
+function FeedbackModal({
+  visible,
+  onClose,
+}: {
+  visible: boolean;
+  onClose: () => void;
+}) {
   const [feedback, setFeedback] = useState("");
   const [submitted, setSubmitted] = useState(false);
 
   const handleSubmit = () => {
     if (!feedback.trim()) {
-      Alert.alert("Empty feedback", "Please write something before submitting.");
+      Alert.alert(
+        "Empty feedback",
+        "Please write something before submitting.",
+      );
       return;
     }
+    // TODO: send feedback to your backend / Firestore
     setSubmitted(true);
     setTimeout(() => {
       setSubmitted(false);
@@ -427,7 +405,12 @@ function FeedbackModal({ visible, onClose }: { visible: boolean; onClose: () => 
   };
 
   return (
-    <AppModal visible={visible} onRequestClose={onClose}>
+    <Modal
+      visible={visible}
+      transparent
+      animationType="slide"
+      onRequestClose={onClose}
+    >
       <View style={modalStyles.overlay}>
         <View style={modalStyles.sheet}>
           <Text style={modalStyles.title}>Send Feedback</Text>
@@ -436,8 +419,9 @@ function FeedbackModal({ visible, onClose }: { visible: boolean; onClose: () => 
           </Text>
           {submitted ? (
             <View style={modalStyles.successBox}>
-              <Ionicons name="checkmark-circle" size={40} color="#22C55E" style={{ marginBottom: 8 }} />
-              <Text style={modalStyles.successText}>Thanks for your feedback!</Text>
+              <Text style={modalStyles.successText}>
+                Thanks for your feedback!
+              </Text>
             </View>
           ) : (
             <>
@@ -451,7 +435,10 @@ function FeedbackModal({ visible, onClose }: { visible: boolean; onClose: () => 
                 onChangeText={setFeedback}
                 textAlignVertical="top"
               />
-              <TouchableOpacity style={modalStyles.submitBtn} onPress={handleSubmit}>
+              <TouchableOpacity
+                style={modalStyles.submitBtn}
+                onPress={handleSubmit}
+              >
                 <Text style={modalStyles.submitText}>Submit</Text>
               </TouchableOpacity>
             </>
@@ -461,12 +448,18 @@ function FeedbackModal({ visible, onClose }: { visible: boolean; onClose: () => 
           </TouchableOpacity>
         </View>
       </View>
-    </AppModal>
+    </Modal>
   );
 }
 
 // ─── Report Modal ─────────────────────────────────────────────────────────────
-function ReportModal({ visible, onClose }: { visible: boolean; onClose: () => void }) {
+function ReportModal({
+  visible,
+  onClose,
+}: {
+  visible: boolean;
+  onClose: () => void;
+}) {
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
   const [details, setDetails] = useState("");
   const [photos, setPhotos] = useState<string[]>([]);
@@ -479,42 +472,68 @@ function ReportModal({ visible, onClose }: { visible: boolean; onClose: () => vo
     setSubmitted(false);
   };
 
-  const handleClose = () => { reset(); onClose(); };
+  const handleClose = () => {
+    reset();
+    onClose();
+  };
 
   const handlePickPhoto = async () => {
     if (photos.length >= 3) {
       Alert.alert("Limit reached", "You can attach up to 3 photos.");
       return;
     }
+
     const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (status !== "granted") {
-      Alert.alert("Permission required", "Please allow access to your photo library.", [
-        { text: "Cancel", style: "cancel" },
-        { text: "Open Settings", onPress: () => Linking.openSettings() },
-      ]);
+      Alert.alert(
+        "Permission required",
+        "Please allow access to your photo library in Settings to attach photos.",
+        [
+          { text: "Cancel", style: "cancel" },
+          { text: "Open Settings", onPress: () => Linking.openSettings() },
+        ],
+      );
       return;
     }
+
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ImagePicker.MediaTypeOptions.Images,
       allowsMultipleSelection: false,
       quality: 0.7,
     });
+
     if (!result.canceled && result.assets.length > 0) {
       setPhotos((prev) => [...prev, result.assets[0].uri]);
     }
   };
 
+  const handleRemovePhoto = (index: number) => {
+    setPhotos((prev) => prev.filter((_, i) => i !== index));
+  };
+
   const handleSubmit = () => {
     if (!selectedCategory) {
-      Alert.alert("No category selected", "Please select a category before submitting.");
+      Alert.alert(
+        "No category selected",
+        "Please select a category before submitting.",
+      );
       return;
     }
+    // TODO: upload photos and send report to your backend / Firestore
     setSubmitted(true);
-    setTimeout(() => { reset(); onClose(); }, 1500);
+    setTimeout(() => {
+      reset();
+      onClose();
+    }, 1500);
   };
 
   return (
-    <AppModal visible={visible} onRequestClose={handleClose}>
+    <Modal
+      visible={visible}
+      transparent
+      animationType="slide"
+      onRequestClose={handleClose}
+    >
       <View style={modalStyles.overlay}>
         <ScrollView
           contentContainerStyle={modalStyles.scrollSheet}
@@ -529,8 +548,9 @@ function ReportModal({ visible, onClose }: { visible: boolean; onClose: () => vo
 
             {submitted ? (
               <View style={modalStyles.successBox}>
-                <Ionicons name="checkmark-circle" size={40} color="#22C55E" style={{ marginBottom: 8 }} />
-                <Text style={modalStyles.successText}>Report submitted. Thank you!</Text>
+                <Text style={modalStyles.successText}>
+                  Report submitted. Thank you!
+                </Text>
               </View>
             ) : (
               <>
@@ -540,11 +560,19 @@ function ReportModal({ visible, onClose }: { visible: boolean; onClose: () => vo
                     return (
                       <TouchableOpacity
                         key={label}
-                        style={[reportStyles.categoryPill, isSelected && reportStyles.categoryPillSelected]}
+                        style={[
+                          reportStyles.categoryPill,
+                          isSelected && reportStyles.categoryPillSelected,
+                        ]}
                         onPress={() => setSelectedCategory(label)}
                         activeOpacity={0.75}
                       >
-                        <Text style={[reportStyles.categoryLabel, isSelected && reportStyles.categoryLabelSelected]}>
+                        <Text
+                          style={[
+                            reportStyles.categoryLabel,
+                            isSelected && reportStyles.categoryLabelSelected,
+                          ]}
+                        >
                           {label}
                         </Text>
                       </TouchableOpacity>
@@ -565,7 +593,9 @@ function ReportModal({ visible, onClose }: { visible: boolean; onClose: () => vo
 
                 <Text style={reportStyles.photoLabel}>
                   Attach Photos{" "}
-                  <Text style={reportStyles.photoLabelHint}>({photos.length}/3)</Text>
+                  <Text style={reportStyles.photoLabelHint}>
+                    ({photos.length}/3)
+                  </Text>
                 </Text>
 
                 <View style={reportStyles.photoRow}>
@@ -574,34 +604,45 @@ function ReportModal({ visible, onClose }: { visible: boolean; onClose: () => vo
                       <Image source={{ uri }} style={reportStyles.photoThumb} />
                       <TouchableOpacity
                         style={reportStyles.photoRemoveBtn}
-                        onPress={() => setPhotos((prev) => prev.filter((_, i) => i !== index))}
+                        onPress={() => handleRemovePhoto(index)}
                         hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
                       >
-                        <Ionicons name="close" size={14} color="#fff" />
+                        <Ionicons name="close" size={16} color="#fff" />
                       </TouchableOpacity>
                     </View>
                   ))}
+
                   {photos.length < 3 && (
-                    <TouchableOpacity style={reportStyles.photoAddBtn} onPress={handlePickPhoto} activeOpacity={0.7}>
-                      <Ionicons name="add" size={24} color="#AAAAAA" />
+                    <TouchableOpacity
+                      style={reportStyles.photoAddBtn}
+                      onPress={handlePickPhoto}
+                      activeOpacity={0.7}
+                    >
+                      <Text style={reportStyles.photoAddIcon}>+</Text>
                       <Text style={reportStyles.photoAddLabel}>Photo</Text>
                     </TouchableOpacity>
                   )}
                 </View>
 
-                <TouchableOpacity style={modalStyles.submitBtnR} onPress={handleSubmit}>
+                <TouchableOpacity
+                  style={modalStyles.submitBtnR}
+                  onPress={handleSubmit}
+                >
                   <Text style={modalStyles.submitText}>Submit Report</Text>
                 </TouchableOpacity>
               </>
             )}
 
-            <TouchableOpacity style={modalStyles.cancelBtn} onPress={handleClose}>
+            <TouchableOpacity
+              style={modalStyles.cancelBtn}
+              onPress={handleClose}
+            >
               <Text style={modalStyles.cancelText}>Cancel</Text>
             </TouchableOpacity>
           </View>
         </ScrollView>
       </View>
-    </AppModal>
+    </Modal>
   );
 }
 
@@ -615,41 +656,42 @@ export default function ProfileScreen() {
   const [feedbackVisible, setFeedbackVisible] = useState(false);
   const [reportVisible, setReportVisible] = useState(false);
   const [overviewVisible, setOverviewVisible] = useState(false);
-  const [avatarLoadError, setAvatarLoadError] = useState(false);
   const router = useRouter();
 
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const slideAnim = useRef(new Animated.Value(30)).current;
-  const initialFetchDone = useRef(false);
 
   const fetchProfile = useCallback(
     async (currentUser: User) => {
       setLoading(true);
-      setAvatarLoadError(false);
       try {
         const docRef = doc(db, "users", currentUser.uid);
         const docSnap = await getDoc(docRef);
 
         if (docSnap.exists()) {
           const data = docSnap.data();
+          // Calculate saved count from savedItems array
           const savedItems = data.savedItems || [];
           const savedCount = Array.isArray(savedItems) ? savedItems.length : 0;
-
+          
           setUserData({
             ...data,
-            rating: typeof data.rating === "number" ? data.rating : parseFloat(data.rating) || 0,
-            ratingCount: typeof data.ratingCount === "number" ? data.ratingCount : 0,
-            savedCount,
+            // FIX: ensure rating is always a proper number
+            rating:
+              typeof data.rating === "number"
+                ? data.rating
+                : parseFloat(data.rating) || 0,
+            ratingCount:
+              typeof data.ratingCount === "number" ? data.ratingCount : 0,
+            // FIX: calculate saved count from savedItems array
+            savedCount: savedCount,
           } as UserData);
           setError(null);
         } else {
-          console.warn("[Profile] No Firestore doc found for user:", currentUser.uid);
-          setError("Profile not set up yet.");
+          setError("Profile not found in database.");
           setUserData({
             email: currentUser.email ?? undefined,
-            firstName: currentUser.displayName?.split(" ")[0] ?? undefined,
-            lastName: currentUser.displayName?.split(" ").slice(1).join(" ") ?? undefined,
-            avatarUrl: currentUser.photoURL ?? undefined,
+            username: currentUser.displayName ?? "Unknown User",
             rating: 0,
             ratingCount: 0,
             tradesCount: 0,
@@ -659,17 +701,16 @@ export default function ProfileScreen() {
         }
       } catch (err: any) {
         const isOffline =
-          err?.code === "unavailable" || /client is offline/i.test(err?.message ?? "");
+          err?.code === "unavailable" ||
+          /client is offline/i.test(err?.message ?? "");
         setError(
           isOffline
             ? "You appear to be offline. Showing cached data."
-            : `Failed to load profile: ${err?.message ?? "Unknown error"}`,
+            : "Failed to load profile.",
         );
-        console.error("[Profile] fetchProfile error:", err);
         setUserData({
           email: currentUser.email ?? undefined,
-          firstName: currentUser.displayName ?? undefined,
-          avatarUrl: currentUser.photoURL ?? undefined,
+          username: currentUser.displayName ?? "Offline User",
           rating: 0,
           ratingCount: 0,
           tradesCount: 0,
@@ -678,8 +719,13 @@ export default function ProfileScreen() {
         });
       } finally {
         setLoading(false);
+        // Animate in
         Animated.parallel([
-          Animated.timing(fadeAnim, { toValue: 1, duration: 400, useNativeDriver: true }),
+          Animated.timing(fadeAnim, {
+            toValue: 1,
+            duration: 400,
+            useNativeDriver: true,
+          }),
           Animated.spring(slideAnim, { toValue: 0, useNativeDriver: true }),
         ]).start();
       }
@@ -687,31 +733,21 @@ export default function ProfileScreen() {
     [fadeAnim, slideAnim],
   );
 
-  // ── Auth listener (initial load + redirect guard) ──
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, async (currentUser: User | null) => {
-      setAuthInitialized(true);
-      if (!currentUser) {
-        router.replace("/login");
-        return;
-      }
-      setUserId(currentUser.uid);
-      await fetchProfile(currentUser);
-      initialFetchDone.current = true;
-    });
+    const unsubscribe = onAuthStateChanged(
+      auth,
+      async (currentUser: User | null) => {
+        setAuthInitialized(true);
+        if (!currentUser) {
+          router.replace("/login");
+          return;
+        }
+        setUserId(currentUser.uid);
+        await fetchProfile(currentUser);
+      },
+    );
     return () => unsubscribe();
   }, [router, fetchProfile]);
-
-  // ── Re-fetch whenever the screen comes back into focus ──
-  useFocusEffect(
-    useCallback(() => {
-      if (!initialFetchDone.current) return;
-      const currentUser = auth.currentUser;
-      if (currentUser) {
-        fetchProfile(currentUser);
-      }
-    }, [fetchProfile]),
-  );
 
   const handleLogout = async () => {
     try {
@@ -724,11 +760,19 @@ export default function ProfileScreen() {
 
   const handleRetry = async () => {
     const currentUser = auth.currentUser;
-    if (!currentUser) { router.replace("/login"); return; }
+    if (!currentUser) {
+      router.replace("/login");
+      return;
+    }
     setError(null);
     await fetchProfile(currentUser);
   };
 
+  const handleHelpCenter = () => {
+    router.push("/Faq" as any);
+  };
+
+  // FIX: Navigate to saved posts screen
   const handleSavedPress = () => {
     router.push("/saved-posts" as any);
   };
@@ -742,17 +786,40 @@ export default function ProfileScreen() {
     );
   }
 
-  const ratingValue = typeof userData?.rating === "number" ? userData.rating : 0;
+  if (error && !userData) {
+    return (
+      <View style={styles.errorContainer}>
+        <Ionicons name="alert-circle" size={48} color={ACCENT_RED} style={{ marginBottom: 12 }} />
+        <Text style={styles.errorTitle}>Something went wrong</Text>
+        <Text style={styles.errorMessage}>{error}</Text>
+        <TouchableOpacity style={styles.retryButton} onPress={handleRetry}>
+          <Text style={styles.retryText}>Try Again</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={styles.goLoginButton}
+          onPress={() => router.replace("/login")}
+        >
+          <Text style={styles.goLoginText}>Go to Login</Text>
+        </TouchableOpacity>
+      </View>
+    );
+  }
+
+  const ratingValue =
+    typeof userData?.rating === "number" ? userData.rating : 0;
   const ratingCount = userData?.ratingCount ?? 0;
-  const displayName = getDisplayName(userData);
-  const initials = getInitials(userData);
-  const avatarUri = getAvatarUri(userData);
-  const showAvatar = avatarUri && !avatarLoadError;
 
   return (
     <View style={styles.container}>
-      <FeedbackModal visible={feedbackVisible} onClose={() => setFeedbackVisible(false)} />
-      <ReportModal visible={reportVisible} onClose={() => setReportVisible(false)} />
+      <FeedbackModal
+        visible={feedbackVisible}
+        onClose={() => setFeedbackVisible(false)}
+      />
+      <ReportModal
+        visible={reportVisible}
+        onClose={() => setReportVisible(false)}
+      />
+      {/* FIX: Overview modal now shows real reviews */}
       <OverviewModal
         visible={overviewVisible}
         userId={userId}
@@ -762,13 +829,13 @@ export default function ProfileScreen() {
 
       {/* ── Header ── */}
       <View style={styles.header}>
-        <Text style={styles.headerTitle}>My Profile</Text>
+        <Text style={styles.headerTitle}>Profile</Text>
         <TouchableOpacity
           style={styles.editButton}
           onPress={() => router.push("/edit-profile" as any)}
           activeOpacity={0.75}
         >
-          <Ionicons name="create-outline" size={18} color="#FF6B6B" />
+          <Ionicons name="pencil" size={18} color="#FF6B6B" />
         </TouchableOpacity>
       </View>
 
@@ -776,64 +843,61 @@ export default function ProfileScreen() {
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
       >
-        <Animated.View style={{ opacity: fadeAnim, transform: [{ translateY: slideAnim }] }}>
-
-          {/* ── Error Banner ── */}
+        <Animated.View
+          style={{ opacity: fadeAnim, transform: [{ translateY: slideAnim }] }}
+        >
           {error && (
             <TouchableOpacity style={styles.errorBanner} onPress={handleRetry}>
-              <Ionicons name="alert-circle" size={16} color="#856404" />
-              <Text style={styles.errorBannerText}>{error} Tap to retry.</Text>
+              <Text style={styles.errorBannerText}>
+                ⚠️ {error} Tap to retry.
+              </Text>
             </TouchableOpacity>
           )}
 
-          {/* ── Profile Card ── */}
-          <View style={styles.profileCard}>
-            {/* Avatar */}
+          {/* ── Avatar + Identity ── */}
+          <View style={styles.avatarSection}>
             <View style={styles.avatarWrapper}>
-              {showAvatar ? (
+              {userData?.avatarUrl ? (
                 <Image
-                  source={{ uri: avatarUri! }}
+                  source={{ uri: userData.avatarUrl }}
                   style={styles.avatar}
-                  onError={() => setAvatarLoadError(true)}
                 />
               ) : (
                 <View style={styles.avatarPlaceholder}>
-                  <Text style={styles.avatarInitial}>{initials}</Text>
-                </View>
-              )}
-              {userData?.isVerified && (
-                <View style={styles.verifiedBadge}>
-                  <Ionicons name="checkmark" size={10} color="#fff" />
+                  <Text style={styles.avatarInitial}>
+                    {(userData?.username ?? "U")[0].toUpperCase()}
+                  </Text>
                 </View>
               )}
             </View>
 
-            {/* Name */}
-            <Text style={styles.username}>{displayName}</Text>
+            <View style={styles.nameRow}>
+              <Text style={styles.username}>{userData?.username ?? "N/A"}</Text>
+              {userData?.isVerified && (
+                <View style={styles.verifiedBadge}>
+                  <Text style={styles.verifiedText}>✔</Text>
+                </View>
+              )}
+            </View>
 
-            {/* Contact */}
             <Text style={styles.contactLine}>
               {userData?.phone ?? userData?.email ?? ""}
             </Text>
 
-            {/* ── Bio Card ── */}
+            {/* FIX: Bio displayed on profile */}
             {userData?.bio ? (
-              <View style={styles.bioCard}>
-                <View style={styles.bioHeader}>
-                  <Ionicons name="person-outline" size={14} color={DARK_BLUE} />
-                  <Text style={styles.bioLabel}>About me</Text>
-                </View>
-                <Text style={styles.bioText}>{userData.bio}</Text>
-              </View>
+              <Text style={styles.bioText}>{userData.bio}</Text>
             ) : null}
 
             {/* ── Rating Card ── */}
             <View style={styles.ratingSection}>
-              <View style={styles.ratingHeader}>
-                <Ionicons name="star" size={14} color={STAR_FILLED} />
-                <Text style={styles.ratingTitle}>Trader Rating</Text>
-              </View>
-              <StarRating rating={ratingValue} ratingCount={ratingCount} size={24} />
+              <Text style={styles.ratingTitle}>Trader Rating</Text>
+              {/* FIX: Pass ratingCount so StarRating shows correct empty/filled state */}
+              <StarRating
+                rating={ratingValue}
+                ratingCount={ratingCount}
+                size={24}
+              />
               {ratingCount === 0 && (
                 <Text style={styles.ratingNoData}>
                   Complete trades to start earning ratings.
@@ -842,23 +906,32 @@ export default function ProfileScreen() {
             </View>
 
             {/* ── Overview Badge ── */}
+            {/* FIX: Opens the Overview modal instead of routing */}
             <TouchableOpacity
               style={styles.overviewBadge}
               onPress={() => setOverviewVisible(true)}
               activeOpacity={0.8}
             >
-              <Ionicons name="bar-chart-outline" size={16} color="#fff" />
-              <Text style={styles.overviewText}>View Overview</Text>
-              <Ionicons name="star" size={14} color="#FFE066" />
+              <Text style={styles.overviewText}>Overview</Text>
+              <Ionicons name="star" size={18} color="#FFB800" />
             </TouchableOpacity>
           </View>
 
           {/* ── Stats ── */}
           <View style={styles.statsRow}>
-            <StatCard iconName="swap-horizontal" label="Trades" count={userData?.tradesCount ?? 0} />
+            <StatCard
+              iconName="swap-horizontal"
+              label="Trades"
+              count={userData?.tradesCount ?? 0}
+            />
             <View style={styles.statDivider} />
-            <StatCard iconName="arrow-forward-circle-outline" label="Exchanged" count={userData?.exchangedCount ?? 0} />
+            <StatCard
+              iconName="arrow-forward"
+              label="Exchanged"
+              count={userData?.exchangedCount ?? 0}
+            />
             <View style={styles.statDivider} />
+            {/* FIX: Saved stat card is now tappable → navigates to saved posts */}
             <StatCard
               iconName="bookmark"
               label="Saved"
@@ -868,53 +941,40 @@ export default function ProfileScreen() {
           </View>
 
           {/* ── Settings ── */}
-          <Text style={styles.sectionTitle}>Support</Text>
+          <Text style={styles.sectionTitle}>Settings</Text>
           <View style={styles.sectionCard}>
             <SettingsRow
-              iconName="help-circle-outline"
               label="FAQs"
               subtitle="Frequently Asked Questions"
-              onPress={() => router.push("/Faq" as any)}
+              onPress={handleHelpCenter}
             />
             <SettingsRow
-              iconName="flag-outline"
               label="Report an Issue"
               subtitle="Bugs, problems, or violations"
               onPress={() => setReportVisible(true)}
             />
             <SettingsRow
-              iconName="chatbubble-ellipses-outline"
               label="Send Feedback"
               subtitle="Share your thoughts with us"
               onPress={() => setFeedbackVisible(true)}
             />
           </View>
 
-          <Text style={styles.sectionTitle}>Account</Text>
+          {/* ── Trust & Safety ── */}
           <View style={styles.sectionCard}>
             <SettingsRow
-              iconName="time-outline"
               label="Trade History"
               subtitle="View all past trades"
               onPress={() => router.push("/trade-history" as any)}
             />
-            <SettingsRow
-              iconName="log-out-outline"
-              label="Log Out"
-              danger
-              onPress={handleLogout}
-            />
+            <SettingsRow label="Log Out" danger onPress={handleLogout} />
           </View>
 
           {/* ── Account Info Footer ── */}
           <View style={styles.footerCard}>
-            <Ionicons name="mail-outline" size={14} color="#AAAAAA" />
-            <View style={{ marginLeft: 8 }}>
-              <Text style={styles.footerLabel}>Account Email</Text>
-              <Text style={styles.footerValue}>{userData?.email ?? "—"}</Text>
-            </View>
+            <Text style={styles.footerLabel}>Account Email</Text>
+            <Text style={styles.footerValue}>{userData?.email ?? "—"}</Text>
           </View>
-
         </Animated.View>
       </ScrollView>
     </View>
@@ -923,20 +983,73 @@ export default function ProfileScreen() {
 
 // ─── Styles ───────────────────────────────────────────────────────────────────
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#F4F5F9" },
-  loadingContainer: { flex: 1, justifyContent: "center", alignItems: "center", backgroundColor: "#F4F5F9" },
-  loadingText: { color: "#888", fontSize: 14, marginTop: 12 },
-
-  header: {
+  container: {
+    flex: 1,
+    backgroundColor: "#F4F5F9",
+  },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+    backgroundColor: "#F4F5F9",
+  },
+  loadingText: {
+    color: "#888",
+    fontSize: 14,
+    marginTop: 12,
+  },
+  errorContainer: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+    padding: 32,
+    backgroundColor: "#F4F5F9",
+  },
+  errorIcon: { fontSize: 48, marginBottom: 12 },
+  errorTitle: {
+    fontSize: 20,
+    fontWeight: "800",
+    color: "#1A1A2E",
+    marginBottom: 8,
+  },
+  errorMessage: {
+    fontSize: 14,
+    color: "#888",
+    textAlign: "center",
+    marginBottom: 24,
+    lineHeight: 20,
+  },
+  retryButton: {
     backgroundColor: DARK_BLUE,
+    paddingVertical: 14,
+    paddingHorizontal: 40,
+    borderRadius: 12,
+    marginBottom: 12,
+  },
+  retryText: { color: "#fff", fontWeight: "700", fontSize: 15 },
+  goLoginButton: {
+    paddingVertical: 12,
+    paddingHorizontal: 32,
+    borderRadius: 12,
+    borderWidth: 1.5,
+    borderColor: DARK_BLUE,
+  },
+  goLoginText: { color: DARK_BLUE, fontWeight: "700", fontSize: 15 },
+  header: {
+    backgroundColor: "#2f2f6f",
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
     paddingHorizontal: 20,
-    paddingTop: 15,
+    paddingTop: 32,
     paddingBottom: 15,
   },
-  headerTitle: { color: "#fff", fontSize: 22, fontWeight: "800", letterSpacing: 0.4 },
+  headerTitle: {
+    color: "#fff",
+    fontSize: 22,
+    fontWeight: "800",
+    letterSpacing: 0.4,
+  },
   editButton: {
     width: 36,
     height: 36,
@@ -945,9 +1058,10 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     alignItems: "center",
   },
-
-  scrollContent: { paddingBottom: 40 },
-
+  editButtonText: { fontSize: 16 },
+  scrollContent: {
+    paddingBottom: 40,
+  },
   errorBanner: {
     backgroundColor: "#FFF3CD",
     padding: 12,
@@ -956,119 +1070,90 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     borderLeftWidth: 4,
     borderLeftColor: "#F5A623",
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
   },
-  errorBannerText: { color: "#856404", fontSize: 13, fontWeight: "500", flex: 1 },
-
-  profileCard: {
+  errorBannerText: {
+    color: "#856404",
+    fontSize: 13,
+    fontWeight: "500",
+  },
+  avatarSection: {
     alignItems: "center",
-    marginHorizontal: 16,
-    marginTop: 20,
-    marginBottom: 16,
-    backgroundColor: "#fff",
-    borderRadius: 20,
-    paddingVertical: 28,
+    marginTop: 44,
     paddingHorizontal: 20,
-    elevation: 3,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 3 },
-    shadowOpacity: 0.1,
-    shadowRadius: 8,
+    marginBottom: 4,
   },
-
   avatarWrapper: {
     width: 96,
     height: 96,
     borderRadius: 48,
-    borderWidth: 3,
-    borderColor: DARK_BLUE,
-    overflow: "visible",
-    marginBottom: 14,
-    position: "relative",
+    borderWidth: 4,
+    borderColor: "#fff",
+    overflow: "hidden",
+    backgroundColor: "#ddd",
+    elevation: 8,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.2,
+    shadowRadius: 8,
   },
-  avatar: { width: 90, height: 90, borderRadius: 45 },
+  avatar: { width: "100%", height: "100%" },
   avatarPlaceholder: {
-    width: 90,
-    height: 90,
-    borderRadius: 45,
+    flex: 1,
     backgroundColor: DARK_BLUE,
     justifyContent: "center",
     alignItems: "center",
   },
   avatarInitial: { color: "#fff", fontSize: 34, fontWeight: "800" },
-  verifiedBadge: {
-    position: "absolute",
-    bottom: 2,
-    right: 2,
-    width: 22,
-    height: 22,
-    borderRadius: 11,
-    backgroundColor: "#1877F2",
-    justifyContent: "center",
+  nameRow: {
+    flexDirection: "row",
     alignItems: "center",
-    borderWidth: 2,
-    borderColor: "#fff",
+    marginTop: 12,
+    gap: 7,
   },
-
   username: {
-    fontSize: 22,
+    fontSize: 21,
     fontWeight: "800",
     color: "#1A1A2E",
     letterSpacing: 0.2,
-    textAlign: "center",
   },
+  verifiedBadge: {
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    backgroundColor: "#1877F2",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  verifiedText: { color: "#fff", fontSize: 11, fontWeight: "800" },
   contactLine: {
     color: "#888",
     fontSize: 13.5,
-    marginTop: 4,
-    marginBottom: 4,
+    marginTop: 3,
+  },
+  // FIX: Bio text style
+  bioText: {
+    color: "#555",
+    fontSize: 13.5,
+    marginTop: 8,
     textAlign: "center",
+    lineHeight: 19,
+    paddingHorizontal: 12,
+    fontStyle: "italic",
   },
-
-  bioCard: {
-    width: "100%",
-    backgroundColor: "#F8F9FF",
-    borderRadius: 14,
-    borderWidth: 1.5,
-    borderColor: "#DDE0F5",
-    paddingVertical: 14,
-    paddingHorizontal: 16,
-    marginTop: 14,
-    marginBottom: 4,
-  },
-  bioHeader: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
-    marginBottom: 6,
-  },
-  bioLabel: {
-    fontSize: 11,
-    fontWeight: "700",
-    color: DARK_BLUE,
-    textTransform: "uppercase",
-    letterSpacing: 0.8,
-  },
-  bioText: { color: "#444", fontSize: 14, lineHeight: 20, fontWeight: "400" },
-
   ratingSection: {
     alignItems: "center",
     marginTop: 16,
-    width: "100%",
-    backgroundColor: "#FAFBFF",
+    marginBottom: 4,
+    backgroundColor: "#fff",
     borderRadius: 14,
-    borderWidth: 1,
-    borderColor: "#ECECF8",
-    paddingVertical: 14,
-    paddingHorizontal: 20,
-  },
-  ratingHeader: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
-    marginBottom: 8,
+    paddingVertical: 16,
+    paddingHorizontal: 24,
+    elevation: 2,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.07,
+    shadowRadius: 6,
+    width: "100%",
   },
   ratingTitle: {
     fontSize: 11,
@@ -1076,6 +1161,7 @@ const styles = StyleSheet.create({
     color: "#888",
     textTransform: "uppercase",
     letterSpacing: 1,
+    marginBottom: 8,
   },
   ratingNoData: {
     fontSize: 12,
@@ -1084,30 +1170,34 @@ const styles = StyleSheet.create({
     fontStyle: "italic",
     textAlign: "center",
   },
-
   overviewBadge: {
     flexDirection: "row",
     alignItems: "center",
     backgroundColor: GOLD,
     borderRadius: 20,
-    paddingVertical: 9,
+    paddingVertical: 8,
     paddingHorizontal: 20,
-    marginTop: 16,
-    gap: 7,
+    marginTop: 14,
+    gap: 6,
     elevation: 4,
     shadowColor: GOLD,
     shadowOffset: { width: 0, height: 3 },
     shadowOpacity: 0.35,
     shadowRadius: 5,
   },
-  overviewText: { color: "#fff", fontWeight: "700", fontSize: 14, letterSpacing: 0.3 },
-
+  overviewText: {
+    color: "#fff",
+    fontWeight: "700",
+    fontSize: 14,
+    letterSpacing: 0.3,
+  },
+  overviewStar: { fontSize: 14 },
   statsRow: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
     marginHorizontal: 16,
-    marginBottom: 20,
+    marginVertical: 18,
     backgroundColor: "#fff",
     borderRadius: 16,
     paddingVertical: 18,
@@ -1118,10 +1208,35 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.07,
     shadowRadius: 6,
   },
-  statCard: { flex: 1, alignItems: "center", gap: 2 },
-  statDivider: { width: 1, height: 50, backgroundColor: "#ECECEC" },
-  statCountNum: { fontSize: 17, fontWeight: "800", color: DARK_BLUE },
-  statCountLabel: { fontSize: 11, color: "#999", fontWeight: "500" },
+  statCard: {
+    flex: 1,
+    alignItems: "center",
+    gap: 3,
+  },
+  statDivider: {
+    width: 1,
+    height: 50,
+    backgroundColor: "#ECECEC",
+  },
+  statTopLabel: {
+    fontSize: 11,
+    color: "#999",
+    fontWeight: "600",
+    textTransform: "uppercase",
+    letterSpacing: 0.5,
+  },
+  statEmoji: { fontSize: 26, marginVertical: 2 },
+  statCountNum: {
+    fontSize: 17,
+    fontWeight: "800",
+    color: DARK_BLUE,
+  },
+  statCountLabel: {
+    fontSize: 11,
+    color: "#999",
+    fontWeight: "500",
+  },
+  // FIX: "tap to view" hint on tappable stat cards
   statTapHint: {
     fontSize: 9,
     color: GOLD,
@@ -1130,22 +1245,19 @@ const styles = StyleSheet.create({
     letterSpacing: 0.4,
     marginTop: 1,
   },
-
   sectionTitle: {
-    fontSize: 13,
+    fontSize: 16,
     fontWeight: "800",
-    color: "#888",
-    textTransform: "uppercase",
-    letterSpacing: 0.8,
+    color: "#1A1A2E",
     marginHorizontal: 20,
     marginBottom: 8,
-    marginTop: 4,
+    marginTop: 2,
   },
   sectionCard: {
     marginHorizontal: 16,
     backgroundColor: "#fff",
     borderRadius: 14,
-    marginBottom: 16,
+    marginBottom: 20,
     overflow: "hidden",
     elevation: 1,
     shadowColor: "#000",
@@ -1158,54 +1270,87 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
     alignItems: "center",
     paddingVertical: 14,
-    paddingHorizontal: 16,
+    paddingHorizontal: 18,
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: "#ECECEC",
   },
-  settingsRowLeft: { flexDirection: "row", alignItems: "center", flex: 1, gap: 12 },
-  settingsIconBox: {
-    width: 34,
-    height: 34,
-    borderRadius: 10,
-    backgroundColor: "#EEF0FB",
-    justifyContent: "center",
-    alignItems: "center",
+  settingsRowLabel: {
+    fontSize: 15,
+    color: "#1A1A2E",
+    fontWeight: "600",
   },
-  settingsRowLabel: { fontSize: 15, color: "#1A1A2E", fontWeight: "600" },
-  settingsRowSubtitle: { fontSize: 12, color: "#AAAAAA", marginTop: 2 },
-
+  settingsRowSubtitle: {
+    fontSize: 12,
+    color: "#AAAAAA",
+    marginTop: 2,
+  },
+  settingsRowChevron: {
+    fontSize: 22,
+    color: "#CCCCCC",
+  },
   footerCard: {
     marginHorizontal: 16,
-    marginBottom: 24,
+    marginBottom: 20,
     backgroundColor: "#fff",
     borderRadius: 14,
-    padding: 16,
-    flexDirection: "row",
-    alignItems: "center",
+    padding: 18,
     elevation: 1,
     shadowColor: "#000",
     shadowOffset: { width: 0, height: 1 },
     shadowOpacity: 0.06,
     shadowRadius: 4,
   },
-  footerLabel: { fontSize: 11, color: "#AAAAAA", fontWeight: "600", textTransform: "uppercase", letterSpacing: 0.8 },
-  footerValue: { fontSize: 14, color: "#333", fontWeight: "500", marginTop: 2 },
+  footerLabel: {
+    fontSize: 11,
+    color: "#AAAAAA",
+    fontWeight: "600",
+    textTransform: "uppercase",
+    letterSpacing: 0.8,
+    marginBottom: 4,
+  },
+  footerValue: {
+    fontSize: 14,
+    color: "#333",
+    fontWeight: "500",
+  },
 });
 
 // ─── Rating Sub-Styles ────────────────────────────────────────────────────────
 const ratingStyles = StyleSheet.create({
   wrapper: { alignItems: "center", gap: 6 },
   starsRow: { flexDirection: "row", gap: 3 },
+  star: { lineHeight: 30 },
   ratingInfo: { flexDirection: "row", alignItems: "baseline", gap: 6 },
-  ratingNumber: { fontSize: 20, fontWeight: "800", color: "#1A1A2E" },
-  ratingCount: { fontSize: 12, color: "#AAAAAA", fontWeight: "500" },
-  ratingEmpty: { fontSize: 14, color: "#CCCCCC", fontWeight: "500", fontStyle: "italic" },
+  ratingNumber: {
+    fontSize: 20,
+    fontWeight: "800",
+    color: "#1A1A2E",
+  },
+  ratingCount: {
+    fontSize: 12,
+    color: "#AAAAAA",
+    fontWeight: "500",
+  },
+  // FIX: Style for the empty rating state
+  ratingEmpty: {
+    fontSize: 14,
+    color: "#CCCCCC",
+    fontWeight: "500",
+    fontStyle: "italic",
+  },
 });
 
 // ─── Modal Styles ─────────────────────────────────────────────────────────────
 const modalStyles = StyleSheet.create({
-  overlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.45)", justifyContent: "flex-end" },
-  scrollSheet: { justifyContent: "flex-end", flexGrow: 1 },
+  overlay: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.45)",
+    justifyContent: "flex-end",
+  },
+  scrollSheet: {
+    justifyContent: "flex-end",
+    flexGrow: 1,
+  },
   sheet: {
     backgroundColor: "#fff",
     borderTopLeftRadius: 24,
@@ -1213,8 +1358,18 @@ const modalStyles = StyleSheet.create({
     padding: 28,
     paddingBottom: 40,
   },
-  title: { fontSize: 20, fontWeight: "800", color: "#1A1A2E", marginBottom: 6 },
-  subtitle: { fontSize: 13, color: "#888", marginBottom: 16, lineHeight: 18 },
+  title: {
+    fontSize: 20,
+    fontWeight: "800",
+    color: "#1A1A2E",
+    marginBottom: 6,
+  },
+  subtitle: {
+    fontSize: 13,
+    color: "#888",
+    marginBottom: 16,
+    lineHeight: 18,
+  },
   input: {
     borderWidth: 1.5,
     borderColor: "#E0E0E0",
@@ -1226,18 +1381,38 @@ const modalStyles = StyleSheet.create({
     backgroundColor: "#FAFAFA",
     marginBottom: 16,
   },
-  submitBtn: { backgroundColor: DARK_BLUE, paddingVertical: 14, borderRadius: 12, alignItems: "center", marginBottom: 10 },
-  submitBtnR: { backgroundColor: "#7c0303", paddingVertical: 14, borderRadius: 12, alignItems: "center", marginBottom: 10 },
+  submitBtn: {
+    backgroundColor: DARK_BLUE,
+    paddingVertical: 14,
+    borderRadius: 12,
+    alignItems: "center",
+    marginBottom: 10,
+  },
+  submitBtnR: {
+    backgroundColor: "#7c0303",
+    paddingVertical: 14,
+    borderRadius: 12,
+    alignItems: "center",
+    marginBottom: 10,
+  },
   submitText: { color: "#fff", fontWeight: "700", fontSize: 15 },
   cancelBtn: { paddingVertical: 12, alignItems: "center" },
   cancelText: { color: "#888", fontWeight: "600", fontSize: 14 },
-  successBox: { paddingVertical: 32, alignItems: "center" },
+  successBox: {
+    paddingVertical: 32,
+    alignItems: "center",
+  },
   successText: { fontSize: 18, fontWeight: "700", color: "#1A1A2E" },
 });
 
-// ─── Report Styles ────────────────────────────────────────────────────────────
+// ─── Report-specific Styles ───────────────────────────────────────────────────
 const reportStyles = StyleSheet.create({
-  categoryGrid: { flexDirection: "row", flexWrap: "wrap", gap: 10, marginBottom: 16 },
+  categoryGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 10,
+    marginBottom: 16,
+  },
   categoryPill: {
     paddingVertical: 8,
     paddingHorizontal: 14,
@@ -1246,14 +1421,45 @@ const reportStyles = StyleSheet.create({
     borderColor: "#E0E0E0",
     backgroundColor: "#FAFAFA",
   },
-  categoryPillSelected: { borderColor: DARK_BLUE, backgroundColor: "#ECEDF8" },
-  categoryLabel: { fontSize: 13, fontWeight: "600", color: "#555" },
-  categoryLabelSelected: { color: DARK_BLUE },
-  photoLabel: { fontSize: 13, fontWeight: "700", color: "#1A1A2E", marginBottom: 10 },
-  photoLabelHint: { fontWeight: "500", color: "#AAAAAA" },
-  photoRow: { flexDirection: "row", gap: 10, marginBottom: 20, flexWrap: "wrap" },
-  photoThumbWrapper: { position: "relative", width: 72, height: 72 },
-  photoThumb: { width: 72, height: 72, borderRadius: 10, backgroundColor: "#E0E0E0" },
+  categoryPillSelected: {
+    borderColor: DARK_BLUE,
+    backgroundColor: "#ECEDF8",
+  },
+  categoryLabel: {
+    fontSize: 13,
+    fontWeight: "600",
+    color: "#555",
+  },
+  categoryLabelSelected: {
+    color: DARK_BLUE,
+  },
+  photoLabel: {
+    fontSize: 13,
+    fontWeight: "700",
+    color: "#1A1A2E",
+    marginBottom: 10,
+  },
+  photoLabelHint: {
+    fontWeight: "500",
+    color: "#AAAAAA",
+  },
+  photoRow: {
+    flexDirection: "row",
+    gap: 10,
+    marginBottom: 20,
+    flexWrap: "wrap",
+  },
+  photoThumbWrapper: {
+    position: "relative",
+    width: 72,
+    height: 72,
+  },
+  photoThumb: {
+    width: 72,
+    height: 72,
+    borderRadius: 10,
+    backgroundColor: "#E0E0E0",
+  },
   photoRemoveBtn: {
     position: "absolute",
     top: -6,
@@ -1266,6 +1472,12 @@ const reportStyles = StyleSheet.create({
     alignItems: "center",
     elevation: 3,
   },
+  photoRemoveText: {
+    color: "#fff",
+    fontSize: 10,
+    fontWeight: "800",
+    lineHeight: 12,
+  },
   photoAddBtn: {
     width: 72,
     height: 72,
@@ -1276,26 +1488,117 @@ const reportStyles = StyleSheet.create({
     backgroundColor: "#FAFAFA",
     justifyContent: "center",
     alignItems: "center",
+    gap: 2,
   },
-  photoAddLabel: { fontSize: 11, color: "#AAAAAA", fontWeight: "600" },
+  photoAddIcon: {
+    fontSize: 22,
+    color: "#AAAAAA",
+    lineHeight: 26,
+  },
+  photoAddLabel: {
+    fontSize: 11,
+    color: "#AAAAAA",
+    fontWeight: "600",
+  },
 });
 
 // ─── Overview Modal Styles ────────────────────────────────────────────────────
 const overviewStyles = StyleSheet.create({
-  summaryRow: { flexDirection: "row", gap: 10, marginBottom: 20, marginTop: 4 },
-  summaryCard: { flex: 1, backgroundColor: "#F4F5F9", borderRadius: 12, paddingVertical: 12, alignItems: "center" },
-  summaryNum: { fontSize: 22, fontWeight: "800", color: DARK_BLUE },
-  summaryLabel: { fontSize: 11, color: "#888", fontWeight: "600", marginTop: 2, textTransform: "uppercase", letterSpacing: 0.5 },
-  sectionTitle: { fontSize: 13, fontWeight: "800", color: "#888", textTransform: "uppercase", letterSpacing: 0.8, marginBottom: 12 },
-  emptyBox: { alignItems: "center", paddingVertical: 28 },
-  emptyText: { fontSize: 13, color: "#AAAAAA", textAlign: "center", lineHeight: 18, paddingHorizontal: 16, fontStyle: "italic", marginTop: 8 },
-  reviewCard: { backgroundColor: "#F9F9FB", borderRadius: 12, padding: 12, marginBottom: 10 },
-  reviewHeader: { flexDirection: "row", alignItems: "center", gap: 10, marginBottom: 6 },
-  reviewAvatar: { width: 36, height: 36, borderRadius: 18, backgroundColor: "#ddd" },
-  reviewAvatarPlaceholder: { backgroundColor: DARK_BLUE, justifyContent: "center", alignItems: "center" },
-  reviewAvatarInitial: { color: "#fff", fontSize: 15, fontWeight: "800" },
-  reviewerName: { fontSize: 13, fontWeight: "700", color: "#1A1A2E" },
-  reviewStars: { flexDirection: "row", gap: 1, marginTop: 2 },
-  reviewDate: { fontSize: 11, color: "#AAAAAA", fontWeight: "500" },
-  reviewComment: { fontSize: 13, color: "#555", lineHeight: 18, marginLeft: 46 },
+  summaryRow: {
+    flexDirection: "row",
+    gap: 10,
+    marginBottom: 20,
+    marginTop: 4,
+  },
+  summaryCard: {
+    flex: 1,
+    backgroundColor: "#F4F5F9",
+    borderRadius: 12,
+    paddingVertical: 12,
+    alignItems: "center",
+  },
+  summaryNum: {
+    fontSize: 22,
+    fontWeight: "800",
+    color: DARK_BLUE,
+  },
+  summaryLabel: {
+    fontSize: 11,
+    color: "#888",
+    fontWeight: "600",
+    marginTop: 2,
+    textTransform: "uppercase",
+    letterSpacing: 0.5,
+  },
+  sectionTitle: {
+    fontSize: 13,
+    fontWeight: "800",
+    color: "#888",
+    textTransform: "uppercase",
+    letterSpacing: 0.8,
+    marginBottom: 12,
+  },
+  emptyBox: {
+    alignItems: "center",
+    paddingVertical: 28,
+    gap: 8,
+  },
+  emptyEmoji: { fontSize: 36 },
+  emptyText: {
+    fontSize: 13,
+    color: "#AAAAAA",
+    textAlign: "center",
+    lineHeight: 18,
+    paddingHorizontal: 16,
+    fontStyle: "italic",
+  },
+  reviewCard: {
+    backgroundColor: "#F9F9FB",
+    borderRadius: 12,
+    padding: 12,
+    marginBottom: 10,
+  },
+  reviewHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    marginBottom: 6,
+  },
+  reviewAvatar: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: "#ddd",
+  },
+  reviewAvatarPlaceholder: {
+    backgroundColor: DARK_BLUE,
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  reviewAvatarInitial: {
+    color: "#fff",
+    fontSize: 15,
+    fontWeight: "800",
+  },
+  reviewerName: {
+    fontSize: 13,
+    fontWeight: "700",
+    color: "#1A1A2E",
+  },
+  reviewStars: {
+    flexDirection: "row",
+    gap: 1,
+    marginTop: 2,
+  },
+  reviewDate: {
+    fontSize: 11,
+    color: "#AAAAAA",
+    fontWeight: "500",
+  },
+  reviewComment: {
+    fontSize: 13,
+    color: "#555",
+    lineHeight: 18,
+    marginLeft: 46,
+  },
 });

@@ -2,24 +2,24 @@ import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import { onAuthStateChanged, User } from "firebase/auth";
 import {
-  collection,
-  limit,
-  onSnapshot,
-  orderBy,
-  query,
-  where,
+    collection,
+    limit,
+    onSnapshot,
+    orderBy,
+    query,
+    where,
 } from "firebase/firestore";
 import React, { useEffect, useRef, useState } from "react";
 import {
-  ActivityIndicator,
-  Animated,
-  Linking,
-  RefreshControl,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TouchableOpacity,
-  View,
+    ActivityIndicator,
+    Animated,
+    Linking,
+    RefreshControl,
+    ScrollView,
+    StyleSheet,
+    Text,
+    TouchableOpacity,
+    View,
 } from "react-native";
 import { auth, db } from "../firebaseConfig.ts";
 
@@ -629,7 +629,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "space-between",
     paddingHorizontal: 16,
-    paddingTop: 15,
+    paddingTop: 32,
     paddingBottom: 15,
   },
   backButton: {
@@ -672,7 +672,7 @@ const styles = StyleSheet.create({
     fontWeight: "500",
     flex: 1,
   },
-  scrollContent: { paddingBottom: 48 },
+  scrollContent: { paddingBottom: 100 },
   tabsScroll: { marginTop: 16 },
   tabsContainer: { paddingHorizontal: 16, gap: 8 },
   tab: {

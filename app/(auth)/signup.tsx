@@ -1,8 +1,8 @@
 import FontAwesome from '@expo/vector-icons/FontAwesome';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
+import { GoogleSignin } from '@react-native-google-signin/google-signin';
 import { makeRedirectUri } from 'expo-auth-session';
 import * as Facebook from 'expo-auth-session/providers/facebook';
-import * as Google from 'expo-auth-session/providers/google';
 import Constants from 'expo-constants';
 import { useRouter } from 'expo-router';
 import * as WebBrowser from 'expo-web-browser';
@@ -32,6 +32,11 @@ import {
 } from 'react-native';
 import { auth, db } from '../../firebaseConfig';
 
+// Configure Google Sign In once
+GoogleSignin.configure({
+  webClientId: '1081232685961-ej4te66gtudrhi4l70jjm37ffball2b6.apps.googleusercontent.com',
+});
+
 export default function SignUpScreen() {
   WebBrowser.maybeCompleteAuthSession();
   const useProxy = Platform.OS !== 'web' && Constants.appOwnership === 'expo';
@@ -40,26 +45,12 @@ export default function SignUpScreen() {
     ...(useProxy ? { useProxy: true } : {}),
   } as any);
 
-  // --- Google Auth Request ---
-  const [request, response, promptAsync] = Google.useAuthRequest({ // eslint-disable-line @typescript-eslint/no-unused-vars
-    clientId: '1081232685961-ej4te66gtudrhi4l70jjm37ffball2b6.apps.googleusercontent.com',
-    redirectUri,
-    responseType: 'id_token',
-    scopes: ['profile', 'email'],
-  });
-
-  // --- Facebook Auth Request ---
+  // --- Facebook Auth Request (keep expo-auth-session for Facebook only) ---
   const [facebookRequest, facebookResponse, facebookPromptAsync] = Facebook.useAuthRequest({ // eslint-disable-line @typescript-eslint/no-unused-vars
     clientId: '848759694896379',
     redirectUri,
     scopes: ['public_profile', 'email'],
   });
-
-  useEffect(() => {
-    if (Platform.OS === 'web' && response?.type === 'error') {
-      console.warn('Google Web auth response error', response.error);
-    }
-  }, [response]);
 
   useEffect(() => {
     if (Platform.OS === 'web' && facebookResponse?.type === 'error') {
@@ -94,15 +85,6 @@ export default function SignUpScreen() {
     setConfirm('');
     setErrors({});
   };
-
-  // When Google response comes back
-  useEffect(() => {
-    if (response?.type === 'success') {
-      const { id_token } = response.params;
-      handleGoogleSignUp(id_token);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [response]);
 
   // When Facebook response comes back
   useEffect(() => {
@@ -154,37 +136,17 @@ export default function SignUpScreen() {
     }, 1200);
   }
 
-  // --- Helper: extract email from a Firebase auth error (multiple fallback sources) ---
   const extractEmailFromError = (error: any): string | null => {
-    console.log('Extracting email from error:', error);
-    // Firebase Web SDK v9+ top-level customData
-    if (error?.customData?.email) {
-      console.log('Found email in customData.email:', error.customData.email);
-      return error.customData.email;
-    }
-    // Firebase Web SDK — nested inside token response (common for Facebook on web)
-    if (error?.customData?._tokenResponse?.email) {
-      console.log('Found email in customData._tokenResponse.email:', error.customData._tokenResponse.email);
-      return error.customData._tokenResponse.email;
-    }
-    // Direct property (some SDK versions)
-    if (error?.email) {
-      console.log('Found email in error.email:', error.email);
-      return error.email;
-    }
-    // Last-resort: regex parse any email address from the message string
+    if (error?.customData?.email) return error.customData.email;
+    if (error?.customData?._tokenResponse?.email) return error.customData._tokenResponse.email;
+    if (error?.email) return error.email;
     if (error?.message) {
       const match = error.message.match(/([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/);
-      if (match) {
-        console.log('Found email in error message:', match[1]);
-        return match[1];
-      }
+      if (match) return match[1];
     }
-    console.log('No email found in error');
     return null;
   };
 
-  // --- Helper: handle account linking with user confirmation ---
   const handleAccountLinking = async (email: string, credential: any, providerName: string): Promise<any> => {
     return new Promise((resolve: (user: any) => void, reject: (error: Error) => void) => {
       Alert.alert(
@@ -195,18 +157,14 @@ export default function SignUpScreen() {
             text: 'Link Accounts',
             onPress: async () => {
               try {
-                console.log(`Linking ${providerName} credential to existing account...`);
-                // Get the existing user and link the new credential
                 const existingUser = auth.currentUser;
                 if (existingUser) {
                   await linkWithCredential(existingUser, credential);
-                  console.log(`Successfully linked ${providerName} to existing account`);
                   resolve(existingUser);
                 } else {
                   reject(new Error('No existing user to link to'));
                 }
               } catch (error) {
-                console.error(`Failed to link ${providerName}:`, error);
                 reject(error instanceof Error ? error : new Error(String(error)));
               }
             },
@@ -214,7 +172,6 @@ export default function SignUpScreen() {
           {
             text: 'Use Existing Account',
             onPress: () => {
-              // Return the existing user so they can go through verify → terms → profile-setup
               const user = auth.currentUser;
               resolve(user);
             },
@@ -231,7 +188,6 @@ export default function SignUpScreen() {
     });
   };
 
-  // --- Helper: create / update Firestore user document ---
   const ensureFirestoreDoc = async (user: any, extraFields: Record<string, any> = {}) => {
     try {
       const userDocRef = doc(db, 'users', user.uid);
@@ -254,47 +210,52 @@ export default function SignUpScreen() {
     }
   };
 
-  // --- Google sign-up ---
-  const handleGoogleSignUp = async (idToken: string) => {
+  // --- Google sign-up (uses native GoogleSignin for Android) ---
+  const handleGoogleSignUp = async () => {
     setIsSubmitting(true);
     try {
+      await GoogleSignin.hasPlayServices();
+      const userInfo = await GoogleSignin.signIn();
+      const idToken = userInfo.data?.idToken;
+
+      if (!idToken) {
+        Alert.alert('Google Sign-In Error', 'No ID token returned. Please try again.');
+        return;
+      }
+
       await signOut(auth).catch(() => {});
       const credential = GoogleAuthProvider.credential(idToken);
-      
+
       try {
         const userCredential = await signInWithCredential(auth, credential);
         const user = userCredential.user;
         console.log('Google sign-in successful');
 
         await ensureFirestoreDoc(user);
-        
-        // Send verification email (even though Google already verified the email)
+
         try {
           await sendEmailVerification(user);
         } catch (err: any) {
           console.error('Email verification send error:', err);
         }
-        
-        // All paths go through: verify → terms → profile-setup
+
         router.push('/(auth)/verify');
       } catch (error: any) {
         if (
           error?.code === 'auth/account-exists-with-different-credential' ||
           error?.message?.includes('account-exists-with-different-credential')
         ) {
-          console.log('Account exists with different credential - attempting to link');
           const extractedEmail = extractEmailFromError(error);
           const googleCredential = GoogleAuthProvider.credential(idToken);
-          
+
           if (!extractedEmail) {
             Alert.alert('Error', 'Could not extract email for account linking');
             return;
           }
-          
+
           try {
             const linkedUser = await handleAccountLinking(extractedEmail, googleCredential, 'Google');
             if (linkedUser) {
-              // Send verification email for linked account
               try {
                 await sendEmailVerification(linkedUser);
               } catch (err: any) {
@@ -303,7 +264,6 @@ export default function SignUpScreen() {
               router.push('/(auth)/verify');
             }
           } catch (linkError: any) {
-            console.error('Account linking failed:', linkError);
             Alert.alert('Error', (linkError instanceof Error ? linkError.message : String(linkError)) || 'Failed to link accounts');
           }
         } else {
@@ -320,27 +280,16 @@ export default function SignUpScreen() {
 
   // --- Facebook sign-up ---
   const handleFacebookSignUp = async (accessToken: string) => {
-    console.log('handleFacebookSignUp called with token:', accessToken?.substring(0, 20) + '...');
     setIsSubmitting(true);
     try {
-      // Sign in directly — no preflight graph.facebook.com fetch
-      // (that fetch can hang or CORS-block in Expo web dev environment).
-      // We get the email from the Firebase user object after sign-in instead.
-      console.log('Signing out any existing user...');
       await signOut(auth).catch(() => {});
-      
-      console.log('Creating Facebook credential...');
       const credential = FacebookAuthProvider.credential(accessToken);
-      
+
       try {
-        console.log('Signing in with Facebook credential...');
         const userCredential = await signInWithCredential(auth, credential);
         const user = userCredential.user;
-        console.log('Firebase sign-in successful. User:', user.email);
 
-        // Guard: if Facebook didn't supply an email, bail out cleanly
         if (!user.email) {
-          console.warn('User has no email from Facebook');
           await signOut(auth).catch(() => {});
           Alert.alert(
             'Email Required',
@@ -349,37 +298,31 @@ export default function SignUpScreen() {
           return;
         }
 
-        console.log('Creating Firestore doc for user:', user.uid);
         await ensureFirestoreDoc(user);
 
-        // Send verification email
         try {
           await sendEmailVerification(user);
         } catch (err: any) {
           console.error('Email verification send error:', err);
         }
 
-        // All paths go through: verify → terms → profile-setup
-        console.log('Navigating to verify...');
         router.push('/(auth)/verify');
       } catch (error: any) {
         if (
           error?.code === 'auth/account-exists-with-different-credential' ||
           error?.message?.includes('account-exists-with-different-credential')
         ) {
-          console.log('Account exists with different credential - attempting to link');
           const extractedEmail = extractEmailFromError(error);
           const facebookCredential = FacebookAuthProvider.credential(accessToken);
-          
+
           if (!extractedEmail) {
             Alert.alert('Error', 'Could not extract email for account linking');
             return;
           }
-          
+
           try {
             const linkedUser = await handleAccountLinking(extractedEmail, facebookCredential, 'Facebook');
             if (linkedUser) {
-              // Send verification email for linked account
               try {
                 await sendEmailVerification(linkedUser);
               } catch (err: any) {
@@ -388,7 +331,6 @@ export default function SignUpScreen() {
               router.push('/(auth)/verify');
             }
           } catch (linkError: any) {
-            console.error('Account linking failed:', linkError);
             Alert.alert('Error', (linkError instanceof Error ? linkError.message : String(linkError)) || 'Failed to link accounts');
           }
         } else {
@@ -396,11 +338,6 @@ export default function SignUpScreen() {
         }
       }
     } catch (error: any) {
-      console.error('Facebook Signup Error Full:', error);
-      console.log('Error code:', error?.code);
-      console.log('Error message:', error?.message);
-      console.log('Error customData:', error?.customData);
-      
       console.error('Facebook Signup Error:', error);
       Alert.alert('Facebook Signup Error', error?.message || String(error));
     } finally {
@@ -464,11 +401,8 @@ export default function SignUpScreen() {
     await ensureFirestoreDoc(user);
 
     try {
-      console.log('📨 Sending email verification to:', user.email);
       await sendEmailVerification(user);
-      console.log('✅ Verification email sent successfully!');
     } catch (error: any) {
-      console.error('❌ Email verification send error:', error);
       Alert.alert('Verification Email Failed', error?.message || 'Unable to send a verification email. Please try again.');
     }
 
@@ -477,8 +411,6 @@ export default function SignUpScreen() {
     setConfirm('');
     setErrors({});
     setIsSubmitting(false);
-    // Email/password users must verify their email
-    console.log('→ Navigating to verify screen...');
     router.push('/(auth)/verify');
   };
 
@@ -581,42 +513,28 @@ export default function SignUpScreen() {
 
           {/* Social Buttons */}
           <View style={styles.socialContainer}>
-            <SocialButton 
-              name="google" 
-              onPress={() => {
-                if (promptAsync) {
-                  promptAsync({ useProxy } as any).catch(err => console.error('Google prompt error:', err));
-                } else {
-                  Alert.alert('Error', 'Google Sign-In not ready');
-                }
-              }} 
+            <SocialButton
+              name="google"
+              onPress={handleGoogleSignUp}
             />
-            <SocialButton 
-              name="facebook" 
+            <SocialButton
+              name="facebook"
               onPress={() => {
-                console.log('Facebook button pressed', { facebookRequest, facebookPromptAsync });
-                if (facebookPromptAsync && facebookRequest) {
-                  facebookPromptAsync({ useProxy } as any).catch(err => {
-                    console.error('Facebook prompt error:', err);
-                    Alert.alert('Facebook Error', err?.message || 'Failed to open Facebook login');
-                  });
-                } else if (facebookPromptAsync) {
+                if (facebookPromptAsync) {
                   facebookPromptAsync({ useProxy } as any).catch(err => {
                     console.error('Facebook prompt error:', err);
                     Alert.alert('Facebook Error', err?.message || 'Failed to open Facebook login');
                   });
                 } else {
                   Alert.alert('Error', 'Facebook Sign-In not ready. Please try again.');
-                  console.error('facebookPromptAsync is null or undefined');
                 }
-              }} 
+              }}
             />
           </View>
 
           {/* Footer */}
           <View style={styles.footer}>
             <Text style={[styles.footerText, { color: textColor }]}>Already have an account? </Text>
-            {/* FIX: was `() => ('/login')` — missing router.push */}
             <TouchableOpacity onPress={() => router.push('/login')}>
               <Text style={styles.footerLink}>Log In</Text>
             </TouchableOpacity>

@@ -1,7 +1,7 @@
 import { Ionicons } from "@expo/vector-icons";
 import { useFocusEffect } from "@react-navigation/native";
 import { useRouter } from "expo-router";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -27,7 +27,6 @@ import {
   markConversationAsRead,
   markConversationAsUnread,
   muteConversation,
-  subscribeToUserConversations,
   unarchiveConversation,
   unmuteConversation
 } from "../../services/messagingService";
@@ -1032,6 +1031,7 @@ export default function InboxScreen() {
                     showsVerticalScrollIndicator={false}
                     onRefresh={loadConversations}
                     refreshing={convLoading}
+                    contentContainerStyle={{ paddingBottom: 100 }}
                   />
                 )
               ) : filteredConversations.length === 0 ? (
@@ -1051,6 +1051,7 @@ export default function InboxScreen() {
                   showsVerticalScrollIndicator={false}
                   onRefresh={loadConversations}
                   refreshing={convLoading}
+                  contentContainerStyle={{ paddingBottom: 100 }}
                 />
               )}
             </>
@@ -1163,7 +1164,7 @@ export default function InboxScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#e8e8f0" },
   inner: { flex: 1, flexDirection: "row" },
-  sidebar: { width: 60, paddingTop: 16, alignItems: "center", gap: 10 },
+  sidebar: { width: 60, paddingTop: 32, alignItems: "center", gap: 10 },
   sideIcon: {
     width: 46,
     height: 46,
@@ -1196,7 +1197,7 @@ const styles = StyleSheet.create({
     margin: 8,
     padding: 16,
   },
-  heading: { fontSize: 24, fontWeight: "700", color: NAVY },
+  heading: { fontSize: 24, fontWeight: "700", color: NAVY, marginTop: 16 },
   centered: { flex: 1, justifyContent: "center", alignItems: "center", gap: 8 },
   emptyText: { fontSize: 14, color: "#999" },
   searchContainer: {
@@ -1364,7 +1365,7 @@ const styles = StyleSheet.create({
   tradeChatLoaderText: { fontSize: 12, color: "#888" },
   notifRow: {
     flexDirection: "row",
-    alignItems: "flex-start",
+    alignItems: "center",
     backgroundColor: "#fff",
     borderRadius: 14,
     padding: 12,
