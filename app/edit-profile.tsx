@@ -2,26 +2,26 @@ import { Ionicons } from "@expo/vector-icons";
 import * as ImagePicker from "expo-image-picker";
 import { useRouter } from "expo-router";
 import {
-  onAuthStateChanged,
-  updateProfile,
-  User
+    onAuthStateChanged,
+    updateProfile,
+    User
 } from "firebase/auth";
 import { doc, getDoc, updateDoc } from "firebase/firestore";
 import React, { useEffect, useRef, useState } from "react";
 import {
-  ActivityIndicator,
-  Alert,
-  Animated,
-  Image,
-  KeyboardAvoidingView,
-  Linking,
-  Platform,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  View,
+    ActivityIndicator,
+    Alert,
+    Animated,
+    Image,
+    KeyboardAvoidingView,
+    Linking,
+    Platform,
+    ScrollView,
+    StyleSheet,
+    Text,
+    TextInput,
+    TouchableOpacity,
+    View,
 } from "react-native";
 import { auth, db } from "../firebaseConfig";
 import { DeleteAccountModal } from "./DeleteAccountModal";
@@ -123,7 +123,15 @@ async function uploadAvatarToCloudinary(
 ): Promise<string> {
   if (!CLOUDINARY_CLOUD_NAME || !CLOUDINARY_UPLOAD_PRESET) {
     throw new Error(
-      "Cloudinary is not configured. Set EXPO_PUBLIC_CLOUDINARY_CLOUD_NAME and EXPO_PUBLIC_CLOUDINARY_UPLOAD_PRESET.",
+      "Cloudinary is not configured.\n\n" +
+      "Environment variables missing:\n" +
+      (CLOUDINARY_CLOUD_NAME ? "" : "- EXPO_PUBLIC_CLOUDINARY_CLOUD_NAME\n") +
+      (CLOUDINARY_UPLOAD_PRESET ? "" : "- EXPO_PUBLIC_CLOUDINARY_UPLOAD_PRESET\n") +
+      "\nMake sure these are set in your .env file.\n" +
+      "If you recently added them, restart your Expo dev server with:\n" +
+      "1. Press Ctrl+C in terminal\n" +
+      "2. Run: npx expo start -c (to clear cache)\n" +
+      "3. Restart the app",
     );
   }
 

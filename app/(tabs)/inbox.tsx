@@ -1,6 +1,7 @@
 import { Ionicons } from "@expo/vector-icons";
+import { useFocusEffect } from "@react-navigation/native";
 import { useRouter } from "expo-router";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -34,17 +35,22 @@ import {
   deleteNotifications,
   getNotifications,
   markAllNotificationsRead,
-  markNotificationRead,
 } from "../../services/notificationService";
-
-// ─── Constants ────────────────────────────────────────────────────────────────
+// ── NEW: needed to fetch the trade and open TradeChatModal ──
+import { TradeChatModal } from "../../components/TradeChatModal";
+import { TradeOffer, getTradeOffer } from "../../services/tradeService";
+// ─── Constants
 const NAVY = "#2e2d7c";
 const ACCENT = "#f5c518";
 const PAGE_SIZE = 10;
-
-// ─── Types ────────────────────────────────────────────────────────────────────
-type NotifType = "trade_offer" | "trade_accepted" | "message" | "generic";
-
+// ─── Types
+// CHANGED: added "trade_message" so inbox knows how to route it
+type NotifType =
+  | "trade_offer"
+  | "trade_accepted"
+  | "trade_message"
+  | "message"
+  | "generic";
 interface Notification {
   id: string;
   type: NotifType;
@@ -57,18 +63,13 @@ interface Notification {
   conversationId?: string;
   otherUserId?: string;
 }
-
 interface SheetOption {
   label: string;
   icon: string;
   destructive?: boolean;
   onPress: () => void;
 }
-
-// ─── Helpers ──────────────────────────────────────────────────────────────────
-
-// FIX #1: Handles Firestore Timestamp, plain Date,
-//         {seconds, nanoseconds} objects, and raw strings/numbers.
+// ─── Helpers
 const tsToDate = (timestamp: any): Date => {
   if (!timestamp) return new Date(0);
   if (timestamp instanceof Date) return timestamp;
@@ -78,7 +79,6 @@ const tsToDate = (timestamp: any): Date => {
   const parsed = new Date(timestamp);
   return isNaN(parsed.getTime()) ? new Date(0) : parsed;
 };
-
 const formatTime = (timestamp: any): string => {
   try {
     const date = tsToDate(timestamp);
@@ -97,7 +97,6 @@ const formatTime = (timestamp: any): string => {
     return "";
   }
 };
-
 const AVATAR_COLORS = [
   "#e05c5c",
   "#e07a5c",
@@ -106,27 +105,25 @@ const AVATAR_COLORS = [
   "#7a5ce0",
   "#5ce07a",
 ];
-
 const letterAvatarColor = (name: string): string => {
   const index = (name?.charCodeAt(0) ?? 0) % AVATAR_COLORS.length;
   return AVATAR_COLORS[index];
 };
-
+// CHANGED: added trade_message icon
 const notifIcon = (type: NotifType): any => {
   switch (type) {
     case "trade_offer":
       return "swap-horizontal";
     case "trade_accepted":
       return "checkmark-circle";
+    case "trade_message":
+      return "chatbubble-ellipses";
     case "message":
       return "mail";
     default:
       return "notifications";
   }
 };
-
-// FIX #2: Resolve avatar — checks every possible field name,
-//         only returns if it looks like a real HTTP(S) URL.
 const resolveAvatar = (info: any): string | null => {
   const url =
     info?.avatarUrl ||
@@ -140,10 +137,6 @@ const resolveAvatar = (info: any): string | null => {
   if (url && typeof url === "string" && url.startsWith("http")) return url;
   return null;
 };
-
-// ─── Avatar component with onError fallback ───────────────────────────────────
-// FIX #3: If the image URI fails to load, immediately falls back to
-//         the letter/colour avatar instead of showing a broken image.
 function AvatarWithFallback({
   uri,
   name,
@@ -166,7 +159,6 @@ function AvatarWithFallback({
     borderRadius: size / 2,
     backgroundColor: "#ddd",
   };
-
   if (uri && !failed) {
     return (
       <Image
@@ -196,8 +188,6 @@ function AvatarWithFallback({
     </View>
   );
 }
-
-// ─── Notification avatar with fallback ───────────────────────────────────────
 function NotifAvatarWithFallback({
   uri,
   title,
@@ -208,7 +198,6 @@ function NotifAvatarWithFallback({
   type: NotifType;
 }) {
   const [failed, setFailed] = useState(false);
-
   if (uri && !failed) {
     return (
       <Image
@@ -229,8 +218,6 @@ function NotifAvatarWithFallback({
     </View>
   );
 }
-
-// ─── Bottom Sheet ─────────────────────────────────────────────────────────────
 function BottomSheet({
   visible,
   title,
@@ -293,7 +280,6 @@ function BottomSheet({
     </Modal>
   );
 }
-
 const sheet = StyleSheet.create({
   overlay: {
     flex: 1,
@@ -326,14 +312,12 @@ const sheet = StyleSheet.create({
   },
   cancelLabel: { fontSize: 16, fontWeight: "600", color: "#333" },
 });
-
-// ─── Main Component ───────────────────────────────────────────────────────────
+// ─── Main Component
 export default function InboxScreen() {
   const [activeTab, setActiveTab] = useState<
     "messages" | "archived" | "notifications"
   >("messages");
-
-  // ── Messages state ──
+  // ── Messages state
   const [conversations, setConversations] = useState<any[]>([]);
   const [archivedConversations, setArchivedConversations] = useState<any[]>([]);
   const [convLoading, setConvLoading] = useState(false);
@@ -341,129 +325,52 @@ export default function InboxScreen() {
     [key: string]: Date;
   }>({});
   const [searchQuery, setSearchQuery] = useState<string>("");
-
-  // ── Bottom sheet ──
+  // ── Bottom sheet
   const [sheetVisible, setSheetVisible] = useState(false);
   const [sheetOptions, setSheetOptions] = useState<SheetOption[]>([]);
   const [sheetTitle, setSheetTitle] = useState<string | undefined>();
-
-  // ── Delete confirmation modal ──
+  // ── Delete confirmation modal
   const [deleteModalVisible, setDeleteModalVisible] = useState(false);
   const [conversationToDelete, setConversationToDelete] = useState<any>(null);
-
-  // ── Notifications state ──
+  // ── Notifications state
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
   const [notifLoading, setNotifLoading] = useState(false);
   const [markingRead, setMarkingRead] = useState(false);
-
-  // ── Selection mode ──
+  // ── Selection mode
   const [selectionMode, setSelectionMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
-
+  // ── NEW: TradeChatModal state — opened when a trade_message notif is tapped
+  const [tradeChatVisible, setTradeChatVisible] = useState(false);
+  const [tradeChatOffer, setTradeChatOffer] = useState<TradeOffer | null>(null);
+  const [tradeChatLoading, setTradeChatLoading] = useState(false);
   const router = useRouter();
   const currentUserId = auth.currentUser?.uid;
   const conversationUnsubscribeRef = useRef<(() => void) | null>(null);
-
   const openSheet = (title: string | undefined, options: SheetOption[]) => {
     setSheetTitle(title);
     setSheetOptions(options);
     setSheetVisible(true);
   };
-
-  // ─── Data loaders - Real-time listeners ────────────────────────────────────
-  useEffect(() => {
-    if (!currentUserId) return;
-
-    const setupConversationListener = async () => {
-      conversationUnsubscribeRef.current?.();
-      conversationUnsubscribeRef.current = subscribeToUserConversations(
-        currentUserId,
-        async (convs: any) => {
-          if (!convs || convs.length === 0) {
-            setConversations([]);
-            setArchivedConversations([]);
-            setMutedConversations({});
-            setConvLoading(false);
-            return;
-          }
-
-          const enriched = await Promise.all(
-            convs.map(async (conv: any) => {
-              try {
-                const otherUserId = getOtherUserInConversation(
-                  conv.id,
-                  currentUserId!,
-                );
-                if (!otherUserId) return conv;
-                const userInfo: any = await getUserInfo(otherUserId).catch(
-                  () => null,
-                );
-                const avatarUri = resolveAvatar(userInfo);
-                // Get unread message count for this conversation
-                const unreadCount = await getUnreadMessageCount(conv.id, currentUserId!).catch(
-                  () => 0,
-                );
-                return {
-                  ...conv,
-                  otherUserId,
-                  userName: userInfo?.username || userInfo?.displayName || "User",
-                  userAvatar: avatarUri,
-                  unreadCount,
-                };
-              } catch {
-                return { ...conv, userName: "User", userAvatar: null, unreadCount: 0 };
-              }
-            }),
-          );
-
-          const newMuted: { [key: string]: Date } = {};
-          enriched.forEach((conv: any) => {
-            const mutedTs = conv.mutedBy?.[currentUserId!];
-            if (mutedTs) {
-              const until = tsToDate(mutedTs);
-              if (until.getTime() > Date.now()) {
-                newMuted[conv.id] = until;
-              }
-            }
-          });
-          setMutedConversations(newMuted);
-
-          const active = enriched.filter(
-            (conv) => !conv.archivedBy || !conv.archivedBy.includes(currentUserId!),
-          );
-          const archived = enriched.filter(
-            (conv) => conv.archivedBy && conv.archivedBy.includes(currentUserId!),
-          );
-          setConversations(active);
-          setArchivedConversations(archived);
-          setConvLoading(false);
-        }
-      );
-    };
-
-    setConvLoading(true);
-    setupConversationListener();
-    loadNotifications();
-
-    return () => {
-      conversationUnsubscribeRef.current?.();
-    };
-  }, [currentUserId]);
-
-  // Keep loadConversations for manual refresh
-  const loadConversations = async () => {
+  // ─── Data loaders ─────────────────────────────────────────────────────────
+  useFocusEffect(
+    useCallback(() => {
+      if (currentUserId) {
+        loadConversations();
+        loadNotifications();
+      }
+    }, [currentUserId]),
+  );
+  const loadConversations = useCallback(async () => {
     try {
       setConvLoading(true);
       const convs = await getUserConversations(currentUserId!);
-
       if (!convs || convs.length === 0) {
         setConversations([]);
         setArchivedConversations([]);
         setMutedConversations({});
         return;
       }
-
       const enriched = await Promise.all(
         convs.map(async (conv: any) => {
           try {
@@ -492,9 +399,6 @@ export default function InboxScreen() {
           }
         }),
       );
-
-      // FIX #4: Sync mute state from Firestore on every load so changes
-      //         made in chat.tsx are reflected here immediately on return.
       const newMuted: { [key: string]: Date } = {};
       enriched.forEach((conv: any) => {
         const mutedTs = conv.mutedBy?.[currentUserId!];
@@ -506,7 +410,6 @@ export default function InboxScreen() {
         }
       });
       setMutedConversations(newMuted);
-
       const active = enriched.filter(
         (conv) => !conv.archivedBy || !conv.archivedBy.includes(currentUserId!),
       );
@@ -522,9 +425,8 @@ export default function InboxScreen() {
     } finally {
       setConvLoading(false);
     }
-  };
-
-  const loadNotifications = async () => {
+  }, [currentUserId]);
+  const loadNotifications = useCallback(async () => {
     try {
       setNotifLoading(true);
       const data = await getNotifications(currentUserId!);
@@ -535,9 +437,8 @@ export default function InboxScreen() {
     } finally {
       setNotifLoading(false);
     }
-  };
-
-  // ─── Mark all read ────────────────────────────────────────────────────────
+  }, [currentUserId]);
+  // ─── Mark all read
   const handleMarkAllRead = async () => {
     if (markingRead) return;
     const unreadIds = notifications.filter((n) => !n.read).map((n) => n.id);
@@ -552,43 +453,66 @@ export default function InboxScreen() {
       setMarkingRead(false);
     }
   };
-
-  // ─── Notification press ───────────────────────────────────────────────────
+  // ─── Notification press
+  // CHANGED: trade_message opens TradeChatModal instead of the regular chat
+  // ── Shared helper: fetch a trade by ID and open TradeChatModal
+  const openTradeChat = async (tradeId: string) => {
+    setTradeChatLoading(true);
+    try {
+      const trade = await getTradeOffer(tradeId);
+      if (trade) {
+        setTradeChatOffer(trade);
+        setTradeChatVisible(true);
+      } else {
+        Alert.alert("Not found", "This trade could not be loaded.");
+      }
+    } catch (err: any) {
+      console.error("openTradeChat failed:", err);
+      Alert.alert("Error", err?.message ?? "Could not open trade chat.");
+    } finally {
+      setTradeChatLoading(false);
+    }
+  };
   const handleNotifPress = async (item: Notification) => {
+    console.log("NOTIF TAPPED type=" + item.type + " tradeId=" + item.tradeId);
     if (selectionMode) {
       toggleSelect(item.id);
       return;
     }
+    // Mark as read
     if (!item.read) {
+      const { markNotificationRead } =
+        await import("../../services/notificationService");
       markNotificationRead(item.id).catch(console.error);
       setNotifications((prev) =>
         prev.map((n) => (n.id === item.id ? { ...n, read: true } : n)),
       );
     }
+    // If ANY notification carries a tradeId open trade chat —
+    // covers both "trade_message" and legacy "message" typed notifications.
+    if (item.tradeId) {
+      await openTradeChat(item.tradeId);
+      return;
+    }
     switch (item.type) {
       case "trade_offer":
       case "trade_accepted":
-        if (item.tradeId)
-          router.push({
-            pathname: "/trade",
-            params: { tradeId: item.tradeId },
-          });
+        router.push({ pathname: "/trade", params: {} });
         break;
       case "message":
-        if (item.otherUserId)
+        if (item.otherUserId) {
           router.push({
             pathname: "/chat",
             params: { ownerUserId: item.otherUserId },
           });
+        }
         break;
     }
   };
-
   const handleNotifLongPress = (id: string) => {
     setSelectionMode(true);
     setSelectedIds(new Set([id]));
   };
-
   const toggleSelect = (id: string) => {
     setSelectedIds((prev) => {
       const next = new Set(prev);
@@ -598,16 +522,13 @@ export default function InboxScreen() {
       return next;
     });
   };
-
   const cancelSelection = () => {
     setSelectionMode(false);
     setSelectedIds(new Set());
   };
-
   const handleDeleteSelected = () => {
     setDeleteModalVisible(true);
   };
-
   const confirmDeleteSelected = async () => {
     try {
       await deleteNotifications([...selectedIds]);
@@ -619,14 +540,12 @@ export default function InboxScreen() {
       setDeleteModalVisible(false);
     }
   };
-
-  // ─── Conversation menu ────────────────────────────────────────────────────
+  // ─── Conversation menu
   const handleConversationMenu = (item: any) => {
     const isMuted = mutedConversations[item.id];
     const isMutedActive = isMuted && new Date() < isMuted;
     const isRead =
       item.readBy?.includes(currentUserId!) || item.isRead === true;
-
     const options: SheetOption[] = [
       {
         label: isRead ? "Mark as Unread" : "Mark as Read",
@@ -645,7 +564,6 @@ export default function InboxScreen() {
         },
       },
     ];
-
     if (isMutedActive) {
       options.push({
         label: "Unmute Notifications",
@@ -670,7 +588,6 @@ export default function InboxScreen() {
         onPress: () => openMuteSheet(item),
       });
     }
-
     const isArchived =
       item.archivedBy && item.archivedBy.includes(currentUserId!);
     if (isArchived) {
@@ -700,7 +617,6 @@ export default function InboxScreen() {
         },
       });
     }
-
     options.push({
       label: "Delete",
       icon: "trash-outline",
@@ -710,10 +626,8 @@ export default function InboxScreen() {
         setDeleteModalVisible(true);
       },
     });
-
     openSheet(item.userName, options);
   };
-
   const confirmDeleteConversation = async () => {
     if (!conversationToDelete) return;
     try {
@@ -727,7 +641,6 @@ export default function InboxScreen() {
       setConversationToDelete(null);
     }
   };
-
   const openMuteSheet = (item: any) => {
     const mute = async (ms: number) => {
       const muteUntil = new Date(Date.now() + ms);
@@ -766,25 +679,22 @@ export default function InboxScreen() {
       },
     ]);
   };
-
-  // ─── Search filtering ─────────────────────────────────────────────────────
+  // ─── Search filtering
   const filteredConversations = conversations.filter(
     (conv) =>
       conv.userName?.toLowerCase().includes(searchQuery.toLowerCase()) ||
       conv.lastMessage?.toLowerCase().includes(searchQuery.toLowerCase()),
   );
-
   const filteredArchivedConversations = archivedConversations.filter(
     (conv) =>
       conv.userName?.toLowerCase().includes(searchQuery.toLowerCase()) ||
       conv.lastMessage?.toLowerCase().includes(searchQuery.toLowerCase()),
   );
-
-  // ─── Pagination ───────────────────────────────────────────────────────────
+  // ─── Pagination
   const visibleNotifs = notifications.slice(0, visibleCount);
   const hasMore = notifications.length > visibleCount;
   const loadMore = () => setVisibleCount((c) => c + PAGE_SIZE);
-  
+
   // Count unique unread conversations in notifications (deduplicate messages + reactions)
   const unreadNotificationConversations = new Set(
     notifications
@@ -793,35 +703,29 @@ export default function InboxScreen() {
   );
   const unreadCount = Math.min(unreadNotificationConversations.size, 99);
   const unreadNotificationBadge = unreadCount > 99 ? "99+" : unreadCount.toString();
-  
+
   // Calculate unread conversations based on ACTUAL unread messages (not conversation read state)
   // Count conversations with unreadCount > 0 to match the badge display
   const unreadConversationsCount = conversations.filter(
     (conv) => (conv.unreadCount || 0) > 0
   ).length;
   const totalUnreadBadge = unreadConversationsCount > 99 ? "99+" : unreadConversationsCount.toString();
-
-  // ─── Renders ──────────────────────────────────────────────────────────────
+  // ─── Renders
   const renderMessage = ({ item }: any) => {
     const isMuted = mutedConversations[item.id];
     const isMutedActive = isMuted && new Date() < isMuted;
     // Determine read state based on actual unread message count
     const isRead = (item.unreadCount || 0) === 0;
     const name = item.userName || "User";
-
-    // Build the last-message line — only include the dot separator if there's
-    // both a message text AND a non-empty time string.
     const timeStr = item.lastMessageTime
       ? formatTime(item.lastMessageTime)
       : "";
     const lastLine = timeStr
       ? `${item.lastMessage || "No messages"} · ${timeStr}`
       : item.lastMessage || "No messages";
-
     // Get actual unread message count and format for display (capped at 99+)
     const unreadCount = item.unreadCount || 0;
     const unreadBadgeText = unreadCount > 99 ? "99+" : unreadCount.toString();
-
     return (
       <View
         style={[styles.messageRowContainer, !isRead && styles.messageRowUnread]}
@@ -838,7 +742,7 @@ export default function InboxScreen() {
             activeOpacity={0.75}
           >
             {/* FIX #3: AvatarWithFallback replaces the bare <Image> */}
-            <View style={[styles.avatarWrap, { position: "relative" }]}>
+            <View style={styles.avatarWrap}>
               <AvatarWithFallback
                 uri={item.userAvatar}
                 name={name}
@@ -852,7 +756,6 @@ export default function InboxScreen() {
                 </View>
               )}
             </View>
-
             <View style={styles.messageInfo}>
               <View style={styles.messageNameRow}>
                 <Text
@@ -872,7 +775,6 @@ export default function InboxScreen() {
                   />
                 )}
               </View>
-              {/* FIX #1: lastLine always shows the correct formatted time */}
               <Text
                 style={[
                   styles.messageLast,
@@ -899,7 +801,6 @@ export default function InboxScreen() {
       </View>
     );
   };
-
   const renderNotification = ({ item }: { item: Notification }) => {
     const isSelected = selectedIds.has(item.id);
     return (
@@ -920,7 +821,6 @@ export default function InboxScreen() {
           </View>
         )}
         <View style={styles.notifIconWrap}>
-          {/* FIX #3: NotifAvatarWithFallback replaces bare <Image> */}
           <NotifAvatarWithFallback
             uri={item.avatar}
             title={item.title}
@@ -935,7 +835,6 @@ export default function InboxScreen() {
           <Text style={styles.notifBody} numberOfLines={2}>
             {item.body}
           </Text>
-          {/* FIX #1: Only render time text when it's non-empty */}
           {formatTime(item.createdAt) ? (
             <Text style={styles.notifTime}>{formatTime(item.createdAt)}</Text>
           ) : null}
@@ -943,7 +842,6 @@ export default function InboxScreen() {
       </TouchableOpacity>
     );
   };
-
   const renderNotifFooter = () => {
     if (!hasMore) return null;
     return (
@@ -955,20 +853,16 @@ export default function InboxScreen() {
       </TouchableOpacity>
     );
   };
-
-  // ─── UI ───────────────────────────────────────────────────────────────────
+  // ─── UI
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.inner}>
-        {/* ── Bottom Sheet ── */}
         <BottomSheet
           visible={sheetVisible}
           title={sheetTitle}
           options={sheetOptions}
           onClose={() => setSheetVisible(false)}
         />
-
-        {/* ── Delete Confirmation Modal ── */}
         <Modal
           visible={deleteModalVisible}
           transparent
@@ -1025,8 +919,7 @@ export default function InboxScreen() {
             </Pressable>
           </Pressable>
         </Modal>
-
-        {/* ── Sidebar ── */}
+        {/* Sidebar */}
         <View style={styles.sidebar}>
           <TouchableOpacity
             style={[
@@ -1091,8 +984,7 @@ export default function InboxScreen() {
             )}
           </TouchableOpacity>
         </View>
-
-        {/* ── Main content ── */}
+        {/* Main content */}
         <View style={styles.content}>
           {activeTab === "messages" || activeTab === "archived" ? (
             <>
@@ -1211,11 +1103,16 @@ export default function InboxScreen() {
                   )}
                 </View>
               )}
-
               {!selectionMode && notifications.length > 0 && (
                 <Text style={styles.hintText}>Hold to select &amp; delete</Text>
               )}
-
+              {/* Loading spinner for trade chat fetch */}
+              {tradeChatLoading && (
+                <View style={styles.tradeChatLoader}>
+                  <ActivityIndicator size="small" color={NAVY} />
+                  <Text style={styles.tradeChatLoaderText}>Opening chat…</Text>
+                </View>
+              )}
               {notifLoading ? (
                 <View style={styles.centered}>
                   <ActivityIndicator size="large" color={NAVY} />
@@ -1241,15 +1138,31 @@ export default function InboxScreen() {
           )}
         </View>
       </View>
+      {/* NEW: TradeChatModal — opened when a trade_message notification is tapped */}
+      <TradeChatModal
+        visible={tradeChatVisible}
+        trade={tradeChatOffer}
+        isOwner={
+          tradeChatOffer != null &&
+          auth.currentUser?.uid === tradeChatOffer.ownerId
+        }
+        onClose={() => {
+          setTradeChatVisible(false);
+          setTradeChatOffer(null);
+        }}
+        onStatusChange={(tradeId, newStatus) => {
+          setTradeChatOffer((prev) =>
+            prev ? { ...prev, status: newStatus } : prev,
+          );
+        }}
+      />
     </SafeAreaView>
   );
 }
-
-// ─── Styles ───────────────────────────────────────────────────────────────────
+// ─── Styles
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#e8e8f0" },
   inner: { flex: 1, flexDirection: "row" },
-
   sidebar: { width: 60, paddingTop: 16, alignItems: "center", gap: 10 },
   sideIcon: {
     width: 46,
@@ -1276,7 +1189,6 @@ const styles = StyleSheet.create({
     borderColor: "#e8e8f0",
   },
   badgePillText: { color: "#fff", fontSize: 10, fontWeight: "700" },
-
   content: {
     flex: 1,
     backgroundColor: "#f0f0f5",
@@ -1287,7 +1199,6 @@ const styles = StyleSheet.create({
   heading: { fontSize: 24, fontWeight: "700", color: NAVY },
   centered: { flex: 1, justifyContent: "center", alignItems: "center", gap: 8 },
   emptyText: { fontSize: 14, color: "#999" },
-
   searchContainer: {
     flexDirection: "row",
     alignItems: "center",
@@ -1301,8 +1212,6 @@ const styles = StyleSheet.create({
   },
   searchIcon: { marginRight: 10 },
   searchInput: { flex: 1, fontSize: 15, color: "#242424", paddingVertical: 8 },
-
-  // ── Message rows ────────────────────────────────────────────────────────────
   messageRowContainer: {
     flexDirection: "row",
     alignItems: "center",
@@ -1319,7 +1228,6 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
   },
   messageRowBgUnread: { backgroundColor: "#ffffff" },
-
   avatarWrap: { position: "relative", marginRight: 12 },
   statusDot: {
     position: "absolute",
@@ -1331,7 +1239,6 @@ const styles = StyleSheet.create({
     borderWidth: 2,
     borderColor: "#f0f0f5",
   },
-
   messageInfo: { flex: 1 },
   messageNameRow: { flexDirection: "row", alignItems: "center" },
   messageName: {
@@ -1359,8 +1266,6 @@ const styles = StyleSheet.create({
   },
   unreadBadgeMessageText: { color: "#fff", fontSize: 10, fontWeight: "700" },
   moreButton: { padding: 8, marginLeft: 8 },
-
-  // ── Delete modal ────────────────────────────────────────────────────────────
   modalOverlay: {
     flex: 1,
     backgroundColor: "rgba(0,0,0,0.45)",
@@ -1414,8 +1319,6 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   modalDeleteText: { fontWeight: "600", color: "#fff", fontSize: 15 },
-
-  // ── Notifications ────────────────────────────────────────────────────────────
   notifHeader: {
     flexDirection: "row",
     alignItems: "center",
@@ -1433,7 +1336,6 @@ const styles = StyleSheet.create({
   },
   markReadBtnDisabled: { opacity: 0.6 },
   markReadText: { color: "#fff", fontSize: 12, fontWeight: "600" },
-
   selectionHeader: {
     flexDirection: "row",
     alignItems: "center",
@@ -1451,9 +1353,15 @@ const styles = StyleSheet.create({
   },
   deleteBtnDisabled: { opacity: 0.4 },
   deleteBtnText: { color: "#fff", fontSize: 13, fontWeight: "700" },
-
   hintText: { fontSize: 11, color: "#aaa", marginBottom: 10, marginTop: 2 },
-
+  // NEW: small inline loader while fetching trade for chat
+  tradeChatLoader: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    marginBottom: 8,
+  },
+  tradeChatLoaderText: { fontSize: 12, color: "#888" },
   notifRow: {
     flexDirection: "row",
     alignItems: "flex-start",
@@ -1477,7 +1385,6 @@ const styles = StyleSheet.create({
     borderColor: NAVY,
     borderWidth: 1.5,
   },
-
   checkbox: {
     width: 22,
     height: 22,
@@ -1490,7 +1397,6 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   checkboxChecked: { backgroundColor: NAVY, borderColor: NAVY },
-
   notifIconWrap: { position: "relative", marginRight: 12 },
   notifAvatar: {
     width: 44,
@@ -1516,7 +1422,6 @@ const styles = StyleSheet.create({
     borderWidth: 1.5,
     borderColor: "#eef0ff",
   },
-
   notifContent: { flex: 1 },
   notifTitle: {
     fontSize: 13,
@@ -1526,7 +1431,6 @@ const styles = StyleSheet.create({
   },
   notifBody: { fontSize: 12, color: "#555", lineHeight: 17 },
   notifTime: { fontSize: 11, color: "#aaa", marginTop: 4 },
-
   loadMoreBtn: {
     marginTop: 4,
     marginBottom: 8,
