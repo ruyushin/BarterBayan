@@ -9,6 +9,7 @@ import {
     Animated,
     FlatList,
     Image,
+    Keyboard,
     KeyboardAvoidingView,
     Modal,
     PanResponder,
@@ -825,19 +826,20 @@ function SwipeableMessage({
       onMoveShouldSetPanResponder: (_: any, gs: any) =>
         Math.abs(gs.dx) > 8 && Math.abs(gs.dx) > Math.abs(gs.dy) * 1.5,
       onPanResponderMove: (_: any, gs: any) => {
+        // Swipe right to reveal timestamps
         if (gs.dx < 0) {
-          const value = Math.max(gs.dx, -(THRESHOLD + 20));
+          const value = Math.min(-gs.dx, THRESHOLD + 20);
           translateX.setValue(value);
         }
       },
       onPanResponderRelease: (_: any, gs: any) => {
-        if (gs.dx <= -THRESHOLD && !triggered.current) {
+        if (gs.dx >= THRESHOLD && !triggered.current) {
           triggered.current = true;
           onSwipeReply();
         }
         Animated.spring(translateX, {
           toValue: 0,
-          useNativeDriver: true,
+          useNativeDriver: Platform.OS !== 'web',
           tension: 80,
           friction: 10,
         }).start(() => {
@@ -847,7 +849,7 @@ function SwipeableMessage({
       onPanResponderTerminate: () => {
         Animated.spring(translateX, {
           toValue: 0,
-          useNativeDriver: true,
+          useNativeDriver: Platform.OS !== 'web',
         }).start(() => {
           triggered.current = false;
         });
@@ -856,38 +858,39 @@ function SwipeableMessage({
   ).current;
 
   const opacity = translateX.interpolate({
-    inputRange: [-THRESHOLD, 0],
-    outputRange: [1, 0],
+    inputRange: [0, THRESHOLD],
+    outputRange: [0, 1],
     extrapolate: "clamp",
   });
 
   return (
     <View style={{ position: "relative" }}>
+      {/* Timestamp appears on left when swiping right */}
+      {timeStr && (
+        <Animated.View
+          style={[
+            styles.swipeTimeOverlay,
+            styles.swipeTimeLeft,
+            { opacity },
+          ]}
+        >
+          {isMe && (
+            <Ionicons
+              name={readStatus ? "checkmark-done" : "checkmark"}
+              size={16}
+              color="#999"
+              style={{ marginRight: 4 }}
+            />
+          )}
+          <Text style={styles.swipeTimeText}>{timeStr}</Text>
+        </Animated.View>
+      )}
       <Animated.View
         {...panResponder.panHandlers}
         style={{ transform: [{ translateX }] }}
       >
         {children}
       </Animated.View>
-      {timeStr && (
-        <Animated.View
-          style={[
-            styles.swipeTimeOverlay,
-            styles.swipeTimeRight,
-            { opacity },
-          ]}
-        >
-          <Text style={styles.swipeTimeText}>{timeStr}</Text>
-          {isMe && (
-            <Ionicons
-              name={readStatus ? "checkmark-done" : "checkmark"}
-              size={16}
-              color="#999"
-              style={{ marginLeft: 4 }}
-            />
-          )}
-        </Animated.View>
-      )}
     </View>
   );
 }
@@ -1026,7 +1029,7 @@ export default function ChatScreen() {
         Animated.timing(conversationSwipeRef, {
           toValue: 0,
           duration: 200,
-          useNativeDriver: true,
+          useNativeDriver: Platform.OS !== 'web',
         }).start();
       },
       onPanResponderTerminate: () => {
@@ -1035,7 +1038,7 @@ export default function ChatScreen() {
         Animated.timing(conversationSwipeRef, {
           toValue: 0,
           duration: 200,
-          useNativeDriver: true,
+          useNativeDriver: Platform.OS !== 'web',
         }).start();
       },
     }),
@@ -1369,7 +1372,7 @@ export default function ChatScreen() {
   const avatarUri = resolveAvatar(ownerInfo);
   const ownerName = ownerInfo?.username || ownerInfo?.displayName || "User";
 
-  const renderItem = ({ item }: { item: ListItem }) => {
+  const renderItem = ({ item, index }: { item: ListItem; index?: number }) => {
     if (item.type === "separator") {
       return (
         <View style={styles.dateSep}>
@@ -1379,6 +1382,10 @@ export default function ChatScreen() {
         </View>
       );
     }
+
+    // Count message items to track the first 5 messages (excluding separators)
+    const messageCount = listData.slice(0, index).filter(i => i.type === "message").length;
+    const isFirstFiveMessages = messageCount < 5;
 
     const isMe = item.senderId === currentUserId || item.sender === "me";
     const timeStr = formatMessageTime(item.timestamp);
@@ -1393,7 +1400,11 @@ export default function ChatScreen() {
 
     const messageContent = (
       <View
-        style={[styles.messageWrap, isMe ? styles.myWrap : styles.theirWrap]}
+        style={[
+          styles.messageWrap,
+          isMe ? styles.myWrap : styles.theirWrap,
+          isFirstFiveMessages && styles.firstFiveMessagesPadding,
+        ]}
         onLayout={(e) => {
           messageLayoutsRef.current[item.id] = e.nativeEvent.layout.y;
         }}
@@ -1554,11 +1565,7 @@ export default function ChatScreen() {
             </SwipeableMessage>
           </View>
           {/* ── FIX: timestamp only visible while holding the whole-conversation swipe ── */}
-          {showAllTimestamps && (
-            <Text style={styles.messageTimestampRight}>
-              {timeStr}
-            </Text>
-          )}
+          
         </View>
       );
     }
@@ -1833,7 +1840,11 @@ export default function ChatScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#f5f5f7" },
+  container: { 
+    flex: 1, 
+    backgroundColor: "#f5f5f7",
+    paddingBottom: 0,
+  },
   centered: { flex: 1, justifyContent: "center", alignItems: "center" },
   header: {
     flexDirection: "row",
@@ -1884,7 +1895,7 @@ const styles = StyleSheet.create({
   },
   offerLabel: { fontSize: 11, color: "#999", marginBottom: 2 },
   offerTitle: { fontSize: 14, fontWeight: "700", color: "#111" },
-  messagesList: { paddingVertical: 12, paddingHorizontal: 12, flexGrow: 1 },
+  messagesList: { paddingVertical: 12, paddingHorizontal: 12, paddingBottom: 100, flexGrow: 1 },
   emptyChat: {
     flex: 1,
     justifyContent: "center",
@@ -1911,6 +1922,10 @@ const styles = StyleSheet.create({
   },
   myWrap: { justifyContent: "flex-end" },
   theirWrap: { justifyContent: "flex-start" },
+  firstFiveMessagesPadding: {
+    paddingHorizontal: 8,
+    paddingVertical: 6,
+  },
   msgAvatarWrap: { marginRight: 6 },
   myBubbleCol: { alignItems: "flex-end", maxWidth: "75%" },
   theirBubbleCol: { alignItems: "flex-start", maxWidth: "75%" },
@@ -2042,7 +2057,6 @@ const styles = StyleSheet.create({
     position: "absolute",
     top: 0,
     bottom: 0,
-    right: 0,
     paddingHorizontal: 12,
     paddingVertical: 8,
     flexDirection: "row",
@@ -2051,6 +2065,7 @@ const styles = StyleSheet.create({
     gap: 6,
   },
   swipeTimeRight: { right: 0 },
+  swipeTimeLeft: { left: 0, justifyContent: "flex-start" },
   swipeTimeText: {
     fontSize: 12,
     fontWeight: "600",

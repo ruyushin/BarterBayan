@@ -50,9 +50,7 @@ const FILTER_CATEGORIES = [
   "Household",
 ];
 
-// ── Centralised URI guard ────────────────────────────────────────────────────
-// Blocks blob:, file:, data: and any empty/non-string values.
-// Only http/https Cloudinary (or any remote) URLs pass through.
+// ── Centralised URI guard ─────────────────────────────────────────────────────
 function safeUri(uri: any): string {
   if (!uri || typeof uri !== "string") return PLACEHOLDER;
   if (uri.startsWith("blob:")) return PLACEHOLDER;
@@ -66,7 +64,7 @@ function safeUriList(images: any): string[] {
   const raw = Array.isArray(images) ? images : [];
   return raw.map(safeUri).filter((u) => u !== PLACEHOLDER);
 }
-// ────────────────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
 
 export default function Screen() {
   const params = useLocalSearchParams<{ filter?: string; search?: string; type?: string }>();
@@ -91,31 +89,42 @@ export default function Screen() {
   }, []);
 
   useEffect(() => {
-    const fetchItems = async () => {
-      try {
-        if (isInitialLoad) setLoading(true);
-        let items;
+  const fetchItems = async () => {
+    try {
+      if (isInitialLoad) setLoading(true);
+      let items;
 
-        if (typeFilter === "trending") {
-          items = await getTrendingItems(50);
-        } else if (typeFilter === "personalized") {
-          items = userId
-            ? await getPersonalizedSuggestions(userId, 50)
-            : await getAllItems();
-        } else {
-          items = await getAllItems();
-        }
-
-        setAllItems(items);
-        setIsInitialLoad(false);
-      } catch (error) {
-        console.error("Error fetching items:", error);
-      } finally {
-        if (isInitialLoad) setLoading(false);
+      if (typeFilter === "trending") {
+        items = await getTrendingItems(50);
+      } else if (typeFilter === "personalized") {
+        items = userId
+          ? await getPersonalizedSuggestions(userId, 50)
+          : await getAllItems();
+      } else {
+        items = await getAllItems();
       }
-    };
-    fetchItems();
-  }, [refreshKey, userId, typeFilter]);
+
+      // ── Enrich items that are missing userName/userAvatar ──
+      const allEnriched = await getAllItems();
+      const enrichMap = Object.fromEntries(allEnriched.map((i: any) => [i.id, i]));
+      items = items.map((item: any) => ({
+        ...enrichMap[item.id],   // pulls userName, userAvatar from getAllItems
+        ...item,                 // keeps trending/personalized-specific fields
+        userName: enrichMap[item.id]?.userName || item.userName || "Unknown User",
+        userAvatar: enrichMap[item.id]?.userAvatar || item.userAvatar || "",
+      }));
+      // ──────────────────────────────────────────────────────
+
+      setAllItems(items);
+      setIsInitialLoad(false);
+    } catch (error) {
+      console.error("Error fetching items:", error);
+    } finally {
+      if (isInitialLoad) setLoading(false);
+    }
+  };
+  fetchItems();
+}, [refreshKey, userId, typeFilter]);
 
   useEffect(() => {
     if (
@@ -164,7 +173,7 @@ export default function Screen() {
     return (
       <SafeAreaView style={styles.container}>
         <View style={styles.loaderContainer}>
-          <ActivityIndicator size="large" color="#5D5FEF" />
+          <ActivityIndicator size="large" color="#2f2f6f" />
           <Text style={styles.loadingText}>{"Loading items..."}</Text>
         </View>
       </SafeAreaView>
@@ -184,6 +193,7 @@ export default function Screen() {
         )}
         ListHeaderComponent={
           <>
+            {/* ── Search Bar ── */}
             <View style={styles.searchWrapper}>
               <View style={styles.searchContainer}>
                 <Ionicons
@@ -211,8 +221,12 @@ export default function Screen() {
                     const results = allItems
                       .filter(
                         (item) =>
-                          item.title.toLowerCase().includes(search.toLowerCase()) ||
-                          item.category.toLowerCase().includes(search.toLowerCase()),
+                          item.title
+                            .toLowerCase()
+                            .includes(search.toLowerCase()) ||
+                          item.category
+                            .toLowerCase()
+                            .includes(search.toLowerCase()),
                       )
                       .slice(0, 5);
                     return (
@@ -402,7 +416,6 @@ function ItemCard({ item, onCommentAdded }: any) {
 
   const isOwnItem = !!currentUser && currentUser === item?.ownerId;
 
-  // FIX: Use centralised safeUri / safeUriList — blocks blob:, file:, data: URIs
   const imagesList = (() => {
     const safe = safeUriList(item?.images);
     if (safe.length > 0) return safe;
@@ -661,7 +674,12 @@ function ItemCard({ item, onCommentAdded }: any) {
           activeOpacity={0.8}
         >
           <Image
-            source={{ uri: safeUri(item.userAvatar) === PLACEHOLDER ? "https://i.pravatar.cc/150?img=1" : safeUri(item.userAvatar) }}
+            source={{
+              uri:
+                safeUri(item.userAvatar) === PLACEHOLDER
+                  ? "https://i.pravatar.cc/150?img=1"
+                  : safeUri(item.userAvatar),
+            }}
             style={styles.avatar}
           />
           <View style={styles.userDetails}>
@@ -773,7 +791,7 @@ function ItemCard({ item, onCommentAdded }: any) {
             disabled={commentsLoading}
             activeOpacity={0.8}
           >
-            <Ionicons name="send" size={14} color="#5D5FEF" />
+            <Ionicons name="send" size={14} color="#2f2f6f" />
             <Text style={styles.actionBtnText}>{"Message"}</Text>
           </TouchableOpacity>
 
@@ -818,7 +836,7 @@ function ItemCard({ item, onCommentAdded }: any) {
             <FontAwesome
               name={isSaved ? "bookmark" : "bookmark-o"}
               size={16}
-              color={isSaved ? "#5D5FEF" : "#666"}
+              color={isSaved ? "#2f2f6f" : "#666"}
             />
             <Text style={styles.statText}>{isSaved ? "Saved" : "Save"}</Text>
           </Pressable>
@@ -844,7 +862,7 @@ function ItemCard({ item, onCommentAdded }: any) {
               onPress={handleAddComment}
               disabled={commentsLoading || !commentText.trim()}
             >
-              <Ionicons name="send" size={16} color="#5D5FEF" />
+              <Ionicons name="send" size={16} color="#2f2f6f" />
             </TouchableOpacity>
           </View>
 
@@ -857,7 +875,9 @@ function ItemCard({ item, onCommentAdded }: any) {
               return (
                 <View style={styles.commentItem}>
                   <Image
-                    source={{ uri: comment.userAvatar || "https://i.pravatar.cc/150?img=1" }}
+                    source={{
+                      uri: comment.userAvatar || "https://i.pravatar.cc/150?img=1",
+                    }}
                     style={styles.commentAvatar}
                   />
                   <View style={styles.commentContent}>
@@ -885,7 +905,7 @@ function ItemCard({ item, onCommentAdded }: any) {
                         }
                         style={styles.commentReplyBtn}
                       >
-                        <Ionicons name="arrow-redo" size={14} color="#5D5FEF" />
+                        <Ionicons name="arrow-redo" size={14} color="#2f2f6f" />
                         <Text style={styles.commentReplyText}>{"Reply"}</Text>
                       </Pressable>
                       {currentUser === comment.userId && (
@@ -903,7 +923,11 @@ function ItemCard({ item, onCommentAdded }: any) {
                         {comment.replies.map((reply: any) => (
                           <View key={reply.id} style={styles.replyItem}>
                             <Image
-                              source={{ uri: reply.userAvatar || "https://i.pravatar.cc/150?img=1" }}
+                              source={{
+                                uri:
+                                  reply.userAvatar ||
+                                  "https://i.pravatar.cc/150?img=1",
+                              }}
                               style={styles.replyAvatar}
                             />
                             <View style={styles.replyContent}>
@@ -929,7 +953,7 @@ function ItemCard({ item, onCommentAdded }: any) {
                           onPress={() => handleAddReply(comment.id)}
                           disabled={commentsLoading || !replyText.trim()}
                         >
-                          <Ionicons name="send" size={14} color="#5D5FEF" />
+                          <Ionicons name="send" size={14} color="#2f2f6f" />
                         </TouchableOpacity>
                       </View>
                     )}
@@ -1012,7 +1036,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   filterText: { marginRight: 5, fontSize: 13 },
-  typeFilterRow: { flexDirection: "row", marginHorizontal: 12, marginBottom: 16, gap: 10 },
+  typeFilterRow: { flexDirection: "row", marginHorizontal: 12, marginBottom: 16, gap: 10, marginTop: 12 },
   typeFilterBtn: {
     flexDirection: "row",
     alignItems: "center",
@@ -1039,8 +1063,6 @@ const styles = StyleSheet.create({
   dropdownItem: { paddingVertical: 12, paddingHorizontal: 15 },
   dropdownText: { fontSize: 13, color: "#333" },
   dropdownTextActive: { fontWeight: "700", color: "#5E3EA1" },
-
-  // Card
   card: {
     backgroundColor: "#FFFFFF",
     marginHorizontal: 12,
@@ -1137,7 +1159,7 @@ const styles = StyleSheet.create({
     gap: 5,
   },
   actionBtnTrade: { backgroundColor: "#FEF9EC", borderWidth: 1, borderColor: "#F0D98A" },
-  actionBtnText: { fontSize: 12, fontWeight: "600", color: "#5D5FEF" },
+  actionBtnText: { fontSize: 12, fontWeight: "600", color: "#2f2f6f" },
   actionBtnTextTrade: { color: "#C9A227" },
   ownItemBanner: {
     flexDirection: "row",
@@ -1187,7 +1209,7 @@ const styles = StyleSheet.create({
   commentLikeText: { fontSize: 11, color: "#999" },
   commentDeleteBtn: { padding: 4 },
   commentReplyBtn: { flexDirection: "row", alignItems: "center", gap: 4 },
-  commentReplyText: { fontSize: 11, color: "#5D5FEF", fontWeight: "600" },
+  commentReplyText: { fontSize: 11, color: "#2f2f6f", fontWeight: "600" },
   repliesContainer: { marginTop: 10, marginLeft: 10, paddingLeft: 10, borderLeftWidth: 2, borderLeftColor: "#E0E0E0" },
   replyItem: { flexDirection: "row", marginBottom: 10 },
   replyAvatar: { width: 28, height: 28, borderRadius: 14, marginRight: 8 },
@@ -1238,5 +1260,5 @@ const styles = StyleSheet.create({
     zIndex: 1000,
   },
   deleteToastText: { fontSize: 14, color: "white", fontWeight: "500", flex: 1 },
-  deleteToastUndo: { fontSize: 14, fontWeight: "600", color: "#5D5FEF", marginLeft: 12 },
+  deleteToastUndo: { fontSize: 14, fontWeight: "600", color: "#2f2f6f", marginLeft: 12 },
 });

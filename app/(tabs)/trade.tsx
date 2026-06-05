@@ -2,27 +2,27 @@ import { Ionicons } from "@expo/vector-icons";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useEffect, useRef, useState } from "react";
 import {
-    ActivityIndicator,
-    Alert,
-    Animated,
-    FlatList,
-    Image,
-    Modal,
-    SafeAreaView,
-    StyleSheet,
-    Text,
-    TextInput,
-    TouchableOpacity,
-    View,
+  ActivityIndicator,
+  Alert,
+  Animated,
+  FlatList,
+  Image,
+  Modal,
+  SafeAreaView,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
 } from "react-native";
 import { TradeChatModal } from "../../components/TradeChatModal";
 import { TradeOffersModal } from "../../components/TradeOffersModal";
 import { auth } from "../../firebaseConfig";
-import { getAllItems } from "../../services/itemService";
+import { deleteItem, getAllItems } from "../../services/itemService";
 import {
-    TradeOffer,
-    cancelTradeOffer,
-    subscribeToSentOffers,
+  TradeOffer,
+  cancelTradeOffer,
+  subscribeToSentOffers,
 } from "../../services/tradeService";
 
 const FILTER_CATEGORIES = [
@@ -66,6 +66,12 @@ export default function TradeScreen() {
   const [selectedOffer, setSelectedOffer] = useState<TradeOffer | null>(null);
 
   const [chatModalVisible, setChatModalVisible] = useState(false);
+
+  // ── Delete state ─────────────────────────────────────────────────────────
+  const [deleteModalVisible, setDeleteModalVisible] = useState(false);
+  const [itemToDelete, setItemToDelete] = useState<any>(null);
+  const [deletingItemId, setDeletingItemId] = useState<string | null>(null);
+  // ─────────────────────────────────────────────────────────────────────────
 
   const router = useRouter();
   const fadeAnim = useRef(new Animated.Value(1)).current;
@@ -124,6 +130,35 @@ export default function TradeScreen() {
   const handleSeeOffers = (item: any) => {
     setSelectedItemForOffers(item);
     setOffersModalVisible(true);
+  };
+
+  const handleDeletePress = (item: any) => {
+    setItemToDelete(item);
+    setDeleteModalVisible(true);
+  };
+
+  const handleConfirmDelete = async () => {
+    if (!itemToDelete) return;
+    setDeletingItemId(itemToDelete.id);
+    setDeleteModalVisible(false);
+    try {
+      await deleteItem(itemToDelete.id);
+      setUserItems((prev) => prev.filter((i) => i.id !== itemToDelete.id));
+    } catch (err: any) {
+      console.error("deleteItem failed:", err);
+      Alert.alert(
+        "Error",
+        err?.message ?? "Failed to delete the item. Please try again.",
+      );
+    } finally {
+      setDeletingItemId(null);
+      setItemToDelete(null);
+    }
+  };
+
+  const handleCancelDelete = () => {
+    setDeleteModalVisible(false);
+    setItemToDelete(null);
   };
 
   const executeCancelOffer = async (offerId: string) => {
@@ -249,22 +284,39 @@ export default function TradeScreen() {
       return "https://via.placeholder.com/200";
     })();
 
+    const isDeleting = deletingItemId === item.id;
+
     return (
-      <View style={styles.card}>
-        <Image 
-          source={{ uri: imageUrl }} 
+      <View style={[styles.card, isDeleting && styles.cardDeleting]}>
+        <Image
+          source={{ uri: imageUrl }}
           style={styles.image}
           onError={() => console.warn("Failed to load trade item image:", imageUrl)}
         />
         <Text style={styles.itemName} numberOfLines={2}>
           {item.title || item.name}
         </Text>
-        <TouchableOpacity
-          style={styles.offerButton}
-          onPress={() => handleSeeOffers(item)}
-        >
-          <Text style={styles.offerText}>See Offers</Text>
-        </TouchableOpacity>
+        <View style={styles.cardActions}>
+          <TouchableOpacity
+            style={styles.offerButton}
+            onPress={() => handleSeeOffers(item)}
+            disabled={isDeleting}
+          >
+            <Text style={styles.offerText}>See Offers</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.deleteButton}
+            onPress={() => handleDeletePress(item)}
+            disabled={isDeleting}
+            activeOpacity={0.7}
+          >
+            {isDeleting ? (
+              <ActivityIndicator size="small" color="#E11D48" />
+            ) : (
+              <Ionicons name="trash-outline" size={16} color="#E11D48" />
+            )}
+          </TouchableOpacity>
+        </View>
       </View>
     );
   };
@@ -568,6 +620,47 @@ export default function TradeScreen() {
         }}
       />
 
+      {/* Delete confirmation modal */}
+      <Modal
+        visible={deleteModalVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={handleCancelDelete}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.deleteModalSheet}>
+            <View style={styles.deleteIconWrapper}>
+              <Ionicons name="trash" size={32} color="#E11D48" />
+            </View>
+            <Text style={styles.deleteModalTitle}>Delete Item?</Text>
+            <Text style={styles.deleteModalBody}>
+              Are you sure you want to delete{" "}
+              <Text style={styles.deleteModalItemName}>
+                "{itemToDelete?.title || itemToDelete?.name}"
+              </Text>
+              ? This action cannot be undone.
+            </Text>
+            <View style={styles.deleteModalActions}>
+              <TouchableOpacity
+                style={styles.deleteModalCancelBtn}
+                onPress={handleCancelDelete}
+                activeOpacity={0.8}
+              >
+                <Text style={styles.deleteModalCancelText}>Keep Item</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.deleteModalConfirmBtn}
+                onPress={handleConfirmDelete}
+                activeOpacity={0.8}
+              >
+                <Ionicons name="trash-outline" size={15} color="#fff" />
+                <Text style={styles.deleteModalConfirmText}>Delete</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
       {/* Status detail modal */}
       <Modal
         visible={statusModalVisible}
@@ -846,6 +939,14 @@ const styles = StyleSheet.create({
     marginBottom: 10,
     marginHorizontal: 16,
   },
+  cardDeleting: {
+    opacity: 0.5,
+  },
+  cardActions: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
   image: { width: 55, height: 55, borderRadius: 8, marginRight: 10 },
   itemName: { flex: 1, fontWeight: "600", color: "#222" },
   offerButton: {
@@ -855,6 +956,16 @@ const styles = StyleSheet.create({
     borderRadius: 7,
   },
   offerText: { fontSize: 12, color: "#fff", fontWeight: "600" },
+  deleteButton: {
+    width: 32,
+    height: 32,
+    borderRadius: 8,
+    backgroundColor: "#FFF1F2",
+    borderWidth: 1.5,
+    borderColor: "#FECDD3",
+    alignItems: "center",
+    justifyContent: "center",
+  },
   offerCard: {
     backgroundColor: "#fff",
     borderRadius: 14,
@@ -960,6 +1071,76 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(0,0,0,0.5)",
     justifyContent: "flex-end",
   },
+  // ── Delete modal styles ──────────────────────────────────────────────────
+  deleteModalSheet: {
+    backgroundColor: "#fff",
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    paddingHorizontal: 24,
+    paddingTop: 28,
+    paddingBottom: 40,
+    alignItems: "center",
+  },
+  deleteIconWrapper: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    backgroundColor: "#FFF1F2",
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: 16,
+  },
+  deleteModalTitle: {
+    fontSize: 20,
+    fontWeight: "700",
+    color: "#111827",
+    marginBottom: 10,
+  },
+  deleteModalBody: {
+    fontSize: 14,
+    color: "#6B7280",
+    textAlign: "center",
+    lineHeight: 22,
+    marginBottom: 28,
+  },
+  deleteModalItemName: {
+    fontWeight: "700",
+    color: "#374151",
+  },
+  deleteModalActions: {
+    flexDirection: "row",
+    gap: 12,
+    width: "100%",
+  },
+  deleteModalCancelBtn: {
+    flex: 1,
+    paddingVertical: 14,
+    borderRadius: 12,
+    backgroundColor: "#F3F4F6",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  deleteModalCancelText: {
+    fontSize: 15,
+    fontWeight: "600",
+    color: "#374151",
+  },
+  deleteModalConfirmBtn: {
+    flex: 1,
+    flexDirection: "row",
+    paddingVertical: 14,
+    borderRadius: 12,
+    backgroundColor: "#E11D48",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+  },
+  deleteModalConfirmText: {
+    fontSize: 15,
+    fontWeight: "700",
+    color: "#fff",
+  },
+  // ────────────────────────────────────────────────────────────────────────
   modalSheet: {
     backgroundColor: "#fff",
     borderTopLeftRadius: 24,

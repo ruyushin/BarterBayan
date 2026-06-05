@@ -2,26 +2,26 @@ import { Ionicons } from "@expo/vector-icons";
 import * as ImagePicker from "expo-image-picker";
 import { useRouter } from "expo-router";
 import {
-    onAuthStateChanged,
-    updateProfile,
-    User
+  onAuthStateChanged,
+  updateProfile,
+  User
 } from "firebase/auth";
 import { doc, getDoc, updateDoc } from "firebase/firestore";
 import React, { useEffect, useRef, useState } from "react";
 import {
-    ActivityIndicator,
-    Alert,
-    Animated,
-    Image,
-    KeyboardAvoidingView,
-    Linking,
-    Platform,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TextInput,
-    TouchableOpacity,
-    View,
+  ActivityIndicator,
+  Alert,
+  Animated,
+  Image,
+  KeyboardAvoidingView,
+  Linking,
+  Platform,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
 } from "react-native";
 import { auth, db } from "../firebaseConfig";
 import { DeleteAccountModal } from "./DeleteAccountModal";
@@ -1012,14 +1012,19 @@ export default function EditProfileScreen() {
 
 // ─── Styles ───────────────────────────────────────────────────────────────────
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: LIGHT_BG },
+  container: {
+    flex: 1,
+    backgroundColor: LIGHT_BG,
+    paddingTop: 0,
+    paddingBottom: 0,
+  },
   header: {
     backgroundColor: HEADER_BG,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
     paddingHorizontal: 16,
-    paddingTop: 15,
+    paddingTop: 30,
     paddingBottom: 15,
   },
   backButton: {
@@ -1042,7 +1047,7 @@ const styles = StyleSheet.create({
   },
   loadingContainer: { flex: 1, justifyContent: "center", alignItems: "center" },
   loadingText: { marginTop: 12, fontSize: 14, color: "#888" },
-  scrollContent: { paddingBottom: 56 },
+  scrollContent: { paddingBottom: 100, flexGrow: 1 },
 
   avatarSection: {
     alignItems: "center",
@@ -1242,6 +1247,7 @@ const inputStyles = StyleSheet.create({
     fontWeight: "500",
     padding: 0,
     minHeight: 28,
+    backgroundColor: "#FAFAFA",
   },
   phoneCounter: { fontSize: 10, color: "#CCCCCC", fontWeight: "600", paddingLeft: 8 },
   label: {
@@ -1270,6 +1276,7 @@ const inputStyles = StyleSheet.create({
     paddingTop: 2,
     paddingBottom: 0,
     minHeight: 28,
+    backgroundColor: "#FAFAFA",
   },
   inputMultiline: { minHeight: 64, paddingTop: 4 },
   inputDisabled: { color: "#AAAAAA" },

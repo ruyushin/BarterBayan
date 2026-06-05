@@ -246,7 +246,7 @@ export default function HomeScreen() {
                 onPress={() => router.push("/trade")}
                 activeOpacity={0.8}
               >
-                <Ionicons name="checkmark-circle" size={16} color="#3F51F4" />
+                <Ionicons name="checkmark-circle" size={16} color="#2f2f6f" />
                 <Text style={styles.bannerButtonText}>View Trades</Text>
               </TouchableOpacity>
             )}
@@ -257,7 +257,7 @@ export default function HomeScreen() {
                 onPress={() => router.push("/add-item")}
                 activeOpacity={0.8}
               >
-                <Ionicons name="add-circle" size={16} color="#3F51F4" />
+                <Ionicons name="add-circle" size={16} color="#2f2f6f" />
                 <Text style={styles.bannerButtonText}>Add an Item</Text>
               </TouchableOpacity>
             )}
@@ -350,16 +350,15 @@ export default function HomeScreen() {
 
 const styles = StyleSheet.create({
   container: {
-    flex: 1,
-    backgroundColor: "#FFFFFF",
-    paddingBottom: 24,
+  flex: 1,
+  backgroundColor: "#FFFFFF",
   },
   scrollView: {
     backgroundColor: "#FFFFFF",
   },
   scrollContent: {
     paddingTop: 0,
-    paddingBottom: 100,
+    paddingBottom: 16,
   },
 
   // ── Header ──────────────────────────────────────────────────────────────────
@@ -548,7 +547,7 @@ const styles = StyleSheet.create({
     gap: 6,
   },
   bannerButtonText: {
-    color: "#3F51F4",
+    color: "#2f2f6f",
     fontSize: 13,
     fontWeight: "700",
   },
@@ -568,7 +567,7 @@ const styles = StyleSheet.create({
     marginBottom: 14,
   },
   sectionTitle: { fontSize: 20, fontWeight: "700", color: "#111827" },
-  seeAllText: { color: "#5D5FEF", fontSize: 14, fontWeight: "700" },
+  seeAllText: { color: "#2f2f6f", fontSize: 14, fontWeight: "700" },
 
   // ── Lists ────────────────────────────────────────────────────────────────────
   loaderContainer: { paddingVertical: 24, alignItems: "center" },

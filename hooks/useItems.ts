@@ -2,9 +2,9 @@ import { collection, getDocs, limit, query } from 'firebase/firestore';
 import { useEffect, useState } from 'react';
 import { auth, db } from '../firebaseConfig';
 import {
-    getPersonalizedSuggestions,
-    getTrendingItems,
-    TrendingItem,
+  getPersonalizedSuggestions,
+  getTrendingItems,
+  TrendingItem,
 } from '../services/trendingService';
 
 // Define the shape of your data
@@ -18,6 +18,7 @@ export interface Item {
   ownerId: string;
   likes?: number;
   likedBy?: string[]; // Array of user IDs who liked this item
+  condition?: string;
   description?: string;
   views?: number;
   viewedBy?: string[];
@@ -64,6 +65,7 @@ export const useItems = (type: 'trending' | 'all' | 'personalized' = 'all') => {
               ownerId: data.ownerId,
               likes: data.likes || 0,
               likedBy: data.likedBy || [],
+              condition: data.condition,
               description: data.description,
               views: data.views || 0,
               viewedBy: data.viewedBy || [],
@@ -88,6 +90,7 @@ export const useItems = (type: 'trending' | 'all' | 'personalized' = 'all') => {
           ownerId: item.ownerId,
           likes: item.likes || 0,
           likedBy: item.likedBy || [],
+          condition: item.condition,
           description: item.description,
           views: item.views || 0,
           viewedBy: item.viewedBy || [],

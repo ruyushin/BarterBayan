@@ -1,12 +1,13 @@
 import {
-    addDoc,
-    arrayRemove,
-    arrayUnion,
-    collection,
-    doc,
-    getDoc,
-    getDocs,
-    updateDoc,
+  addDoc,
+  arrayRemove,
+  arrayUnion,
+  collection,
+  deleteDoc,
+  doc,
+  getDoc,
+  getDocs,
+  updateDoc,
 } from "firebase/firestore";
 import { db } from "../firebaseConfig";
 
@@ -127,6 +128,18 @@ export const getItemDetails = async (itemId: string) => {
     }
   } catch (error) {
     console.error("Error getting item details:", error);
+    throw error;
+  }
+};
+
+/**
+ * Delete an item by its document ID
+ */
+export const deleteItem = async (itemId: string): Promise<void> => {
+  try {
+    await deleteDoc(doc(db, "items", itemId));
+  } catch (error) {
+    console.error("Error deleting item:", error);
     throw error;
   }
 };

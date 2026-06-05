@@ -2,25 +2,25 @@ import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import React, { useEffect, useRef, useState } from "react";
 import {
-  ActivityIndicator,
-  FlatList,
-  Image,
-  KeyboardAvoidingView,
-  Modal,
-  Platform,
-  StyleSheet,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  View,
+    ActivityIndicator,
+    FlatList,
+    Image,
+    KeyboardAvoidingView,
+    Modal,
+    Platform,
+    StyleSheet,
+    Text,
+    TextInput,
+    TouchableOpacity,
+    View,
 } from "react-native";
 import { auth } from "../firebaseConfig";
 import {
-  TradeMessage,
-  TradeOffer,
-  sendTradeMessage,
-  subscribeToTradeMessages,
-  updateTradeStatus,
+    TradeMessage,
+    TradeOffer,
+    sendTradeMessage,
+    subscribeToTradeMessages,
+    updateTradeStatus,
 } from "../services/tradeService";
 
 const NAVY = "#2f2f6f";
@@ -699,13 +699,15 @@ const styles = StyleSheet.create({
 
   // ── Input bar ──
   inputRow: {
+    paddingTop: Platform.OS === "ios" ? 56 : 36,
+    paddingHorizontal: 24,
+    paddingBottom: 16,
     flexDirection: "row",
-    alignItems: "flex-end",
-    paddingHorizontal: 16,
-    paddingVertical: 10,
+    alignItems: "center",
+    gap: 12,
+    backgroundColor: "#fff",
     borderTopWidth: 1,
     borderTopColor: "#F0F0F0",
-    gap: 10,
   },
   input: {
     flex: 1,
@@ -718,6 +720,7 @@ const styles = StyleSheet.create({
     color: "#1A1A2E",
     maxHeight: 100,
     backgroundColor: "#FAFAFA",
+    placeholderTextColor: "#AAAAAA",
   },
   sendBtn: {
     width: 42,

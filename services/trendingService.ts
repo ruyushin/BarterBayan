@@ -1,10 +1,10 @@
 import {
-    arrayUnion,
-    collection,
-    doc,
-    getDoc,
-    getDocs,
-    updateDoc
+  arrayUnion,
+  collection,
+  doc,
+  getDoc,
+  getDocs,
+  updateDoc
 } from 'firebase/firestore';
 import { db } from '../firebaseConfig';
 
@@ -12,6 +12,7 @@ export interface TrendingItem {
   id: string;
   title: string;
   category: string;
+  condition?: string;
   description?: string;
   images?: string[];
   image?: string;
@@ -43,7 +44,6 @@ export const calculateTrendingScore = (item: TrendingItem): number => {
   score += likesScore;
 
   // Recency (weighted: 30%)
-  // Items from today get full points, degrading over time
   const createdAt = item.createdAt?.toDate?.() || new Date(item.createdAt);
   const daysSinceCreation = Math.max(
     0,
@@ -56,7 +56,7 @@ export const calculateTrendingScore = (item: TrendingItem): number => {
   const viewsScore = (item.views || 0) * 5;
   score += viewsScore;
 
-  // Popularity multiplier (items with high engagement get boosted)
+  // Popularity multiplier
   const engagementRate = (item.likes || 0) + (item.views || 0) / 100;
   if (engagementRate > 10) {
     score *= 1.2;
@@ -79,6 +79,7 @@ export const getTrendingItems = async (limit_: number = 20): Promise<TrendingIte
         id: doc.id,
         title: data.title,
         category: data.category,
+        condition: data.condition,
         description: data.description,
         images: data.images,
         image: data.image,
@@ -91,7 +92,6 @@ export const getTrendingItems = async (limit_: number = 20): Promise<TrendingIte
       } as TrendingItem;
     });
 
-    // Calculate score for each item and sort
     const itemsWithScores = items.map(item => ({
       ...item,
       trendingScore: calculateTrendingScore(item),
@@ -122,7 +122,6 @@ export const trackItemView = async (
       const viewedBy = data.viewedBy || [];
       const views = data.views || 0;
 
-      // Only count once per user
       if (!viewedBy.includes(userId)) {
         await updateDoc(itemRef, {
           viewedBy: arrayUnion(userId),
@@ -130,7 +129,6 @@ export const trackItemView = async (
         });
       }
 
-      // Track in user activity
       await trackUserActivity(userId, 'view', itemId, data.category);
     }
   } catch (error) {
@@ -156,7 +154,6 @@ export const trackUserActivity = async (
         lastViewedAt: new Date(),
       });
 
-      // Update category preferences
       if (category) {
         await updateDoc(userRef, {
           [`categoryPreferences.${category}`]: (await getDoc(userRef)).data()
@@ -186,7 +183,6 @@ export const getPersonalizedSuggestions = async (
     const userSnap = await getDoc(userRef);
 
     if (!userSnap.exists()) {
-      // If no user data, return trending items
       return getTrendingItems(limit_);
     }
 
@@ -195,7 +191,6 @@ export const getPersonalizedSuggestions = async (
     const viewedItems = userData.viewedItems || [];
     const categoryPreferences = userData.categoryPreferences || {};
 
-    // Get all items
     const itemsRef = collection(db, 'items');
     const snapshot = await getDocs(itemsRef);
 
@@ -205,6 +200,7 @@ export const getPersonalizedSuggestions = async (
         id: doc.id,
         title: data.title,
         category: data.category,
+        condition: data.condition,
         description: data.description,
         images: data.images,
         image: data.image,
@@ -217,22 +213,18 @@ export const getPersonalizedSuggestions = async (
       } as TrendingItem;
     });
 
-    // Filter out already viewed/liked items
     const unseenItems = allItems.filter(
       item => !likedItems.includes(item.id) && !viewedItems.includes(item.id)
     );
 
-    // Calculate personalized score
     const scoredItems = unseenItems.map(item => {
       let personalScore = calculateTrendingScore(item);
 
-      // Boost items in user's preferred categories
       const categoryBoost = (categoryPreferences[item.category] || 0) * 5;
       personalScore += categoryBoost;
 
-      // Boost items from categories they've viewed most
       const topCategories = Object.entries(categoryPreferences)
-        .sort((a, b) => b[1] - a[1])
+        .sort((a, b) => (b as any)[1] - (a as any)[1])
         .slice(0, 3)
         .map(([cat]) => cat);
 
@@ -273,7 +265,6 @@ export const getSimilarItems = async (
     const baseItem = itemSnap.data();
     const baseCategory = baseItem.category;
 
-    // Get all items in the same category
     const itemsRef = collection(db, 'items');
     const snapshot = await getDocs(itemsRef);
 
@@ -288,6 +279,7 @@ export const getSimilarItems = async (
           id: doc.id,
           title: data.title,
           category: data.category,
+          condition: data.condition,
           description: data.description,
           images: data.images,
           image: data.image,

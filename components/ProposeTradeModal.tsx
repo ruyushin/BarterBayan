@@ -1,16 +1,18 @@
 import { Ionicons } from "@expo/vector-icons";
 import React, { useEffect, useState } from "react";
 import {
-  ActivityIndicator,
-  Alert,
-  FlatList,
-  Image,
-  Modal,
-  StyleSheet,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  View,
+    ActivityIndicator,
+    Alert,
+    FlatList,
+    Image,
+    KeyboardAvoidingView,
+    Modal,
+    Platform,
+    StyleSheet,
+    Text,
+    TextInput,
+    TouchableOpacity,
+    View,
 } from "react-native";
 import { auth } from "../firebaseConfig";
 import { getUserPostedItems } from "../services/itemService";
@@ -165,7 +167,10 @@ export const ProposeTradeModal: React.FC<ProposeTradeModalProps> = ({
       animationType="slide"
       onRequestClose={onClose}
     >
-      <View style={styles.overlay}>
+      <KeyboardAvoidingView
+        style={styles.overlay}
+        behavior={Platform.OS === "ios" ? "padding" : "height"}
+      >
         <View style={styles.sheet}>
           {/* ── Handle ── */}
           <View style={styles.handle} />
@@ -406,7 +411,7 @@ export const ProposeTradeModal: React.FC<ProposeTradeModalProps> = ({
             </>
           )}
         </View>
-      </View>
+      </KeyboardAvoidingView>
     </Modal>
   );
 };
@@ -597,6 +602,7 @@ const styles = StyleSheet.create({
     minHeight: 72,
     backgroundColor: "#FAFAFA",
     marginBottom: 4,
+    placeholderTextColor: "#AAAAAA",
   },
   charCount: {
     fontSize: 11,
