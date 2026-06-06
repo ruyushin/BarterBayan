@@ -1062,7 +1062,7 @@ const styles = StyleSheet.create({
   },
   dropdownItem: { paddingVertical: 12, paddingHorizontal: 15 },
   dropdownText: { fontSize: 13, color: "#333" },
-  dropdownTextActive: { fontWeight: "700", color: "#5E3EA1" },
+  dropdownTextActive: { fontWeight: "700", color: "#2f2f6f" },
   card: {
     backgroundColor: "#FFFFFF",
     marginHorizontal: 12,

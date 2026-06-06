@@ -1,11 +1,18 @@
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import { useRouter } from 'expo-router';
-import { onAuthStateChanged, reload, sendEmailVerification } from 'firebase/auth';
-import React, { useEffect, useState } from 'react';
+import {
+  deleteUser,
+  onAuthStateChanged,
+  reload,
+  sendEmailVerification,
+  signOut,
+} from 'firebase/auth';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
-  ScrollView,
+  Animated,
+  Easing,
   StyleSheet,
   Text,
   TouchableOpacity,
@@ -13,390 +20,430 @@ import {
 } from 'react-native';
 import { auth } from '../../firebaseConfig';
 
+const PRIMARY  = '#2F2F6F';
+const BG       = '#F7F5F2';
+const CARD     = '#FFFFFF';
+const BORDER   = '#E0DDD8';
+const TEXT     = '#1A1A1A';
+const MUTED    = '#888888';
+const SUCCESS  = '#27AE60';
+
+const POLL_MS         = 3000;
+const RESEND_COOLDOWN = 60;
+
+function maskEmail(email: string): string {
+  const [local, domain] = email.split('@');
+  if (!domain) return email;
+  const visible = local.slice(0, Math.min(3, local.length));
+  const stars   = '*'.repeat(Math.max(local.length - 3, 2));
+  return `${visible}${stars}@${domain}`;
+}
+
 export default function VerifyEmailScreen() {
   const router = useRouter();
-  const [user, setUser] = useState<any>(null);
-  const [isLoading, setIsLoading] = useState(true);
-  const [isVerified, setIsVerified] = useState(false);
-  const [isSending, setIsSending] = useState(false);
-  const [resendCountdown, setResendCountdown] = useState(0);
 
-  // Check authentication and email verification status
+  const [user,       setUser]       = useState<any>(null);
+  const [isBooting,  setIsBooting]  = useState(true);
+  const [isVerified, setIsVerified] = useState(false);
+  const [isSending,  setIsSending]  = useState(false);
+  const [isChecking, setIsChecking] = useState(false);
+  const [countdown,  setCountdown]  = useState(0);
+
+  // ── Animations ───────────────────────────────────────────────────
+  const pulseAnim   = useRef(new Animated.Value(1)).current;
+  const successAnim = useRef(new Animated.Value(0)).current;
+  const dotOpacity  = useRef(new Animated.Value(1)).current;
+
+  const pulseLoop = useRef<Animated.CompositeAnimation | null>(null);
+
+  const startPulse = () => {
+    pulseLoop.current = Animated.loop(
+      Animated.sequence([
+        Animated.timing(pulseAnim, { toValue: 1.1, duration: 800, useNativeDriver: true, easing: Easing.inOut(Easing.ease) }),
+        Animated.timing(pulseAnim, { toValue: 1.0, duration: 800, useNativeDriver: true, easing: Easing.inOut(Easing.ease) }),
+      ])
+    );
+    pulseLoop.current.start();
+  };
+  const stopPulse = () => { pulseLoop.current?.stop(); pulseAnim.setValue(1); };
+
+  const dotLoop = useRef<Animated.CompositeAnimation | null>(null);
+  const startDotBlink = () => {
+    dotLoop.current = Animated.loop(
+      Animated.sequence([
+        Animated.timing(dotOpacity, { toValue: 0.2, duration: 600, useNativeDriver: true }),
+        Animated.timing(dotOpacity, { toValue: 1.0, duration: 600, useNativeDriver: true }),
+      ])
+    );
+    dotLoop.current.start();
+  };
+
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
-      if (!currentUser) {
+    startPulse();
+    startDotBlink();
+    return () => { stopPulse(); dotLoop.current?.stop(); };
+  }, []);
+
+  // ── Auth listener ─────────────────────────────────────────────────
+  useEffect(() => {
+    const unsub = onAuthStateChanged(auth, async (u) => {
+      if (!u) {
         router.replace('/(auth)/login');
         return;
       }
-
-      setUser(currentUser);
-
+      setUser(u);
       try {
-        await reload(currentUser);
-        if (currentUser.emailVerified) {
-          setIsVerified(true);
-        }
-      } catch (err) {
-        console.error('Error reloading user:', err);
-      }
-
-      setIsLoading(false);
+        await reload(u);
+        if (u.emailVerified) triggerSuccess();
+      } catch (_) {}
+      setIsBooting(false);
     });
+    return unsub;
+  }, []);
 
-    return () => unsubscribe();
-  }, [router]);
-
-  // Auto-check verification every 3 seconds
+  // ── Polling — checks every 3s if user has clicked the link ───────
   useEffect(() => {
     if (!user || isVerified) return;
-
-    const interval = setInterval(async () => {
+    const id = setInterval(async () => {
       try {
+        setIsChecking(true);
         await reload(user);
-        if (user.emailVerified) {
-          setIsVerified(true);
-        }
-      } catch (err) {
-        console.error('Error checking verification:', err);
-      }
-    }, 3000);
-
-    return () => clearInterval(interval);
+        if (user.emailVerified) triggerSuccess();
+      } catch (_) {}
+      finally { setIsChecking(false); }
+    }, POLL_MS);
+    return () => clearInterval(id);
   }, [user, isVerified]);
 
-  // Countdown timer for resend button
+  // ── Resend countdown ──────────────────────────────────────────────
   useEffect(() => {
-    if (resendCountdown <= 0) return;
-    const timer = setTimeout(() => setResendCountdown(resendCountdown - 1), 1000);
-    return () => clearTimeout(timer);
-  }, [resendCountdown]);
+    if (countdown <= 0) return;
+    const id = setTimeout(() => setCountdown(c => c - 1), 1000);
+    return () => clearTimeout(id);
+  }, [countdown]);
 
-  // Navigate after verified
-  useEffect(() => {
-    if (isVerified) {
-      const timer = setTimeout(() => {
-        router.replace('/(auth)/terms');
-      }, 1500);
-      return () => clearTimeout(timer);
-    }
-  }, [isVerified, router]);
+  // ── Success: show checkmark, then let auth guard route to terms ───
+  const triggerSuccess = () => {
+    stopPulse();
+    setIsVerified(true);
+    Animated.spring(successAnim, {
+      toValue: 1, useNativeDriver: true,
+      damping: 12, stiffness: 180,
+    }).start();
+    // Auth guard in _layout.tsx will detect emailVerified=true and
+    // route to /(auth)/terms automatically after a short delay.
+    // We just show the success state here.
+    setTimeout(() => router.replace('/(auth)/terms'), 1800);
+  };
 
-  const handleResendEmail = async () => {
-    if (!user) return;
-
+  // ── Resend ────────────────────────────────────────────────────────
+  const handleResend = async () => {
+    if (!user || isSending || countdown > 0) return;
     setIsSending(true);
     try {
       await sendEmailVerification(user);
-      Alert.alert('Email Sent', 'Verification email sent! Check your inbox and spam folder.');
-      setResendCountdown(60);
-    } catch (error: any) {
-      console.error('Resend error:', error);
-      if (error?.code === 'auth/too-many-requests') {
-        Alert.alert(
-          'Too Many Attempts',
-          'Firebase has temporarily blocked email sending. Please wait a few minutes before trying again.'
-        );
-        setResendCountdown(120);
-      } else {
-        Alert.alert('Error', error?.message || 'Failed to send verification email.');
-      }
-    } finally {
-      setIsSending(false);
-    }
+      setCountdown(RESEND_COOLDOWN);
+    } catch (err: any) {
+      const tooMany = err?.code === 'auth/too-many-requests';
+      Alert.alert(
+        tooMany ? 'Too Many Attempts' : 'Error',
+        tooMany
+          ? 'Firebase has temporarily blocked email sending. Please wait a few minutes.'
+          : err?.message || 'Failed to resend verification email.'
+      );
+      if (tooMany) setCountdown(120);
+    } finally { setIsSending(false); }
   };
 
-  const handleCheckNow = async () => {
-    if (!user) return;
-
-    setIsLoading(true);
-    try {
-      await reload(user);
-      if (user.emailVerified) {
-        setIsVerified(true);
-      } else {
-        Alert.alert(
-          'Not Verified Yet',
-          'Please check your email and click the verification link, then try again.'
-        );
-      }
-    } catch (err) {
-      console.error('Error:', err);
-      Alert.alert('Error', 'Unable to check verification status. Please try again.');
-    } finally {
-      setIsLoading(false);
-    }
+  // ── Cancel: delete the unverified account entirely ────────────────
+  // This means the email can be reused and no ghost account is left behind.
+  const handleCancel = () => {
+    Alert.alert(
+      'Cancel Registration',
+      'Your unverified account will be permanently deleted. You can sign up again anytime.',
+      [
+        { text: 'Stay', style: 'cancel' },
+        {
+          text: 'Delete & Exit',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              const currentUser = auth.currentUser;
+              if (currentUser) {
+                // Delete the Firebase Auth account so the email is freed up
+                await deleteUser(currentUser);
+              } else {
+                await signOut(auth);
+              }
+            } catch (err: any) {
+              // If delete fails (e.g. needs re-auth), just sign out
+              console.warn('Could not delete user:', err?.message);
+              try { await signOut(auth); } catch (_) {}
+            }
+            router.replace('/(auth)/login');
+          },
+        },
+      ]
+    );
   };
 
-  if (isLoading) {
+  // ── Loading splash ────────────────────────────────────────────────
+  if (isBooting) {
     return (
-      <View style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color="#2F2F6F" />
+      <View style={[styles.root, styles.center]}>
+        <ActivityIndicator size="large" color={PRIMARY} />
       </View>
     );
   }
 
+  // ── Success state ─────────────────────────────────────────────────
   if (isVerified) {
     return (
-      <View style={styles.container}>
-        <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
-          <View style={styles.successContainer}>
-            <MaterialIcons name="check-circle" size={80} color="#5CB85C" />
-            <Text style={styles.successTitle}>Email Verified!</Text>
-            <Text style={styles.successMessage}>
-              Your email address has been successfully verified.
-            </Text>
-            <Text style={styles.redirectText}>Proceeding to next step...</Text>
-          </View>
-        </ScrollView>
+      <View style={[styles.root, styles.center]}>
+        <Animated.View
+          style={[
+            styles.successRing,
+            { transform: [{ scale: successAnim }], opacity: successAnim },
+          ]}
+        >
+          <MaterialIcons name="check-circle" size={72} color={SUCCESS} />
+        </Animated.View>
+        <Text style={styles.successTitle}>Email Verified!</Text>
+        <Text style={styles.successSub}>Proceeding to Terms & Conditions…</Text>
+        <ActivityIndicator size="small" color={MUTED} style={{ marginTop: 16 }} />
       </View>
     );
   }
 
+  // ── Main state ────────────────────────────────────────────────────
   return (
-    <View style={styles.container}>
-      <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
-        <View style={styles.content}>
+    <View style={styles.root}>
+      <View style={styles.bgCircle} />
 
-          {/* Header */}
-          <View style={styles.header}>
-            <MaterialIcons name="mail-outline" size={80} color="#2F2F6F" />
-            <Text style={styles.title}>Verify Your Email</Text>
-            <Text style={styles.subtitle}>We've sent a verification link to:</Text>
-            <Text style={styles.email}>{user?.email}</Text>
-          </View>
+      <View style={styles.inner}>
+        {/* Envelope */}
+        <Animated.View style={[styles.iconWrap, { transform: [{ scale: pulseAnim }] }]}>
+          <MaterialIcons name="mark-email-unread" size={52} color={PRIMARY} />
+        </Animated.View>
 
-          {/* Instructions */}
-          <View style={styles.instructionsContainer}>
-            <View style={styles.instructionStep}>
-              <View style={styles.stepNumber}>
-                <Text style={styles.stepNumberText}>1</Text>
-              </View>
-              <View style={styles.stepContent}>
-                <Text style={styles.stepTitle}>Check Your Email</Text>
-                <Text style={styles.stepText}>
-                  Look for the verification email from BarterBayan in your inbox or spam folder.
-                </Text>
-              </View>
-            </View>
+        {/* Heading */}
+        <Text style={styles.title}>Check Your Inbox</Text>
+        <Text style={styles.subtitle}>We sent a verification link to</Text>
 
-            <View style={styles.instructionStep}>
-              <View style={styles.stepNumber}>
-                <Text style={styles.stepNumberText}>2</Text>
-              </View>
-              <View style={styles.stepContent}>
-                <Text style={styles.stepTitle}>Click the Link</Text>
-                <Text style={styles.stepText}>
-                  Click the verification link in the email.
-                </Text>
-              </View>
-            </View>
-
-            <View style={styles.instructionStep}>
-              <View style={styles.stepNumber}>
-                <Text style={styles.stepNumberText}>3</Text>
-              </View>
-              <View style={styles.stepContent}>
-                <Text style={styles.stepTitle}>Continue</Text>
-                <Text style={styles.stepText}>
-                  Return to the app and tap "I've Verified My Email" below.
-                </Text>
-              </View>
-            </View>
-          </View>
-
-          {/* Check Button */}
-          <TouchableOpacity
-            style={[styles.button, styles.primaryButton]}
-            onPress={handleCheckNow}
-            disabled={isLoading}
-          >
-            {isLoading ? (
-              <ActivityIndicator size="small" color="#FFFFFF" />
-            ) : (
-              <Text style={styles.buttonText}>I've Verified My Email</Text>
-            )}
-          </TouchableOpacity>
-
-          {/* Resend Button */}
-          <TouchableOpacity
-            style={[
-              styles.button,
-              styles.secondaryButton,
-              (isSending || resendCountdown > 0) ? styles.buttonDisabled : null,
-            ]}
-            onPress={handleResendEmail}
-            disabled={isSending || resendCountdown > 0}
-          >
-            {isSending ? (
-              <ActivityIndicator size="small" color="#2F2F6F" />
-            ) : (
-              <Text style={[styles.secondaryButtonText, resendCountdown > 0 ? styles.buttonTextDisabled : null]}>
-                {resendCountdown > 0
-                  ? `Resend Email in ${resendCountdown}s`
-                  : 'Resend Verification Email'}
-              </Text>
-            )}
-          </TouchableOpacity>
-
-          {/* Footer */}
-          <View style={styles.footer}>
-            <Text style={styles.footerText}>
-              Didn't receive the email? Check your spam or junk folder.
-            </Text>
-          </View>
-
+        {/* Masked email badge */}
+        <View style={styles.emailBadge}>
+          <MaterialIcons name="email" size={15} color={PRIMARY} />
+          <Text style={styles.emailText}>
+            {user?.email ? maskEmail(user.email) : 'your email'}
+          </Text>
         </View>
-      </ScrollView>
+
+        {/* Steps */}
+        <View style={styles.stepsCard}>
+          {([
+            { icon: 'inbox',     text: 'Open your email app' },
+            { icon: 'touch-app', text: 'Click the verification link' },
+            { icon: 'autorenew', text: "We'll detect it automatically — no action needed" },
+          ] as const).map(({ icon, text }, i) => (
+            <View key={i} style={styles.stepRow}>
+              <View style={styles.stepBadge}>
+                <Text style={styles.stepNum}>{i + 1}</Text>
+              </View>
+              <MaterialIcons name={icon} size={17} color={PRIMARY} style={styles.stepIcon} />
+              <Text style={styles.stepText}>{text}</Text>
+            </View>
+          ))}
+        </View>
+
+        {/* Live status */}
+        <View style={styles.statusRow}>
+          <Animated.View
+            style={[
+              styles.statusDot,
+              { opacity: dotOpacity },
+              isChecking && styles.statusDotActive,
+            ]}
+          />
+          <Text style={styles.statusText}>
+            {isChecking ? 'Checking verification status…' : 'Listening for verification…'}
+          </Text>
+        </View>
+
+        {/* Resend */}
+        <TouchableOpacity
+          style={[styles.resendBtn, (isSending || countdown > 0) && styles.resendBtnOff]}
+          onPress={handleResend}
+          disabled={isSending || countdown > 0}
+          activeOpacity={0.75}
+        >
+          {isSending
+            ? <ActivityIndicator size="small" color={MUTED} />
+            : <MaterialIcons name="send" size={15} color={countdown > 0 ? MUTED : PRIMARY} />
+          }
+          <Text style={[styles.resendText, (isSending || countdown > 0) && styles.resendTextOff]}>
+            {isSending
+              ? 'Sending…'
+              : countdown > 0
+              ? `Resend in ${countdown}s`
+              : 'Resend Verification Email'}
+          </Text>
+        </TouchableOpacity>
+
+        {/* Cancel — deletes the account */}
+        <TouchableOpacity style={styles.cancelBtn} onPress={handleCancel}>
+          <Text style={styles.cancelText}>Cancel registration</Text>
+        </TouchableOpacity>
+      </View>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#FFFFFF',
+  root:   { flex: 1, backgroundColor: BG },
+  center: { justifyContent: 'center', alignItems: 'center' },
+
+  bgCircle: {
+    position:        'absolute',
+    top:             -100,
+    right:           -80,
+    width:           300,
+    height:          300,
+    borderRadius:    150,
+    backgroundColor: `${PRIMARY}08`,
   },
-  loadingContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: '#FFFFFF',
+
+  inner: {
+    flex:              1,
+    alignItems:        'center',
+    justifyContent:    'center',
+    paddingHorizontal: 28,
+    paddingBottom:     40,
   },
-  scrollContent: {
-    flexGrow: 1,
-    paddingVertical: 40,
+
+  iconWrap: {
+    width:           108,
+    height:          108,
+    borderRadius:    54,
+    backgroundColor: `${PRIMARY}10`,
+    borderWidth:     2,
+    borderColor:     `${PRIMARY}20`,
+    alignItems:      'center',
+    justifyContent:  'center',
+    marginBottom:    28,
   },
-  content: {
-    paddingHorizontal: 20,
-    paddingBottom: 30,
-  },
-  header: {
-    alignItems: 'center',
-    marginBottom: 40,
-  },
+
   title: {
-    fontSize: 28,
-    fontWeight: 'bold',
-    color: '#2F2F6F',
-    marginTop: 20,
-    marginBottom: 10,
+    fontSize:      27,
+    fontWeight:    '800',
+    color:         TEXT,
+    letterSpacing: -0.4,
+    marginBottom:  8,
+    textAlign:     'center',
   },
   subtitle: {
-    fontSize: 14,
-    color: '#666666',
-    marginTop: 10,
+    fontSize:     14,
+    color:        MUTED,
+    marginBottom: 10,
+    textAlign:    'center',
   },
-  email: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#2F2F6F',
-    marginTop: 8,
-    paddingVertical: 10,
-    paddingHorizontal: 12,
-    backgroundColor: '#F0F0F0',
-    borderRadius: 8,
-    marginBottom: 12,
+
+  emailBadge: {
+    flexDirection:     'row',
+    alignItems:        'center',
+    gap:               6,
+    backgroundColor:   `${PRIMARY}10`,
+    borderRadius:      20,
+    paddingHorizontal: 14,
+    paddingVertical:   8,
+    marginBottom:      28,
   },
-  instructionsContainer: {
-    marginBottom: 30,
+  emailText: {
+    fontSize:      14,
+    fontWeight:    '700',
+    color:         PRIMARY,
+    letterSpacing: 0.2,
   },
-  instructionStep: {
-    flexDirection: 'row',
-    marginBottom: 20,
-    paddingHorizontal: 10,
-  },
-  stepNumber: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: '#2F2F6F',
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: 15,
-    marginTop: 2,
-  },
-  stepNumberText: {
-    color: '#FFFFFF',
-    fontSize: 18,
-    fontWeight: 'bold',
-  },
-  stepContent: {
-    flex: 1,
-  },
-  stepTitle: {
-    fontSize: 15,
-    fontWeight: '600',
-    color: '#1A1A1A',
-    marginBottom: 4,
-  },
-  stepText: {
-    fontSize: 13,
-    color: '#666666',
-    lineHeight: 18,
-  },
-  button: {
-    height: 55,
-    borderRadius: 12,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginBottom: 12,
-  },
-  primaryButton: {
-    backgroundColor: '#2F2F6F',
-  },
-  secondaryButton: {
-    backgroundColor: '#F0F0F0',
-    borderWidth: 1,
-    borderColor: '#2F2F6F',
-  },
-  buttonDisabled: {
-    opacity: 0.6,
-  },
-  buttonText: {
-    color: '#FFFFFF',
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  secondaryButtonText: {
-    color: '#2F2F6F',
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  buttonTextDisabled: {
-    opacity: 0.7,
-  },
-  footer: {
-    marginTop: 20,
-    paddingHorizontal: 10,
-  },
-  footerText: {
-    fontSize: 12,
-    color: '#999999',
-    textAlign: 'center',
-    lineHeight: 16,
-  },
-  successContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
+
+  stepsCard: {
+    width:             '100%',
+    backgroundColor:   CARD,
+    borderRadius:      16,
+    borderWidth:       1,
+    borderColor:       BORDER,
     paddingHorizontal: 20,
+    paddingVertical:   18,
+    gap:               16,
+    marginBottom:      20,
+  },
+  stepRow: {
+    flexDirection: 'row',
+    alignItems:    'center',
+  },
+  stepBadge: {
+    width:           22,
+    height:          22,
+    borderRadius:    11,
+    backgroundColor: PRIMARY,
+    alignItems:      'center',
+    justifyContent:  'center',
+    marginRight:     10,
+  },
+  stepNum:  { fontSize: 11, fontWeight: '800', color: CARD },
+  stepIcon: { marginRight: 10 },
+  stepText: { fontSize: 13, color: TEXT, flex: 1, lineHeight: 19 },
+
+  statusRow: {
+    flexDirection: 'row',
+    alignItems:    'center',
+    gap:           8,
+    marginBottom:  24,
+  },
+  statusDot: {
+    width:           8,
+    height:          8,
+    borderRadius:    4,
+    backgroundColor: MUTED,
+  },
+  statusDotActive: { backgroundColor: SUCCESS },
+  statusText: { fontSize: 12, color: MUTED },
+
+  resendBtn: {
+    flexDirection:  'row',
+    alignItems:     'center',
+    gap:            8,
+    width:          '100%',
+    borderWidth:    1.5,
+    borderColor:    PRIMARY,
+    borderRadius:   12,
+    paddingVertical: 13,
+    justifyContent: 'center',
+    marginBottom:   14,
+  },
+  resendBtnOff:  { borderColor: BORDER },
+  resendText:    { fontSize: 15, fontWeight: '700', color: PRIMARY },
+  resendTextOff: { color: MUTED },
+
+  cancelBtn:  { paddingVertical: 10 },
+  cancelText: { fontSize: 13, color: MUTED, textDecorationLine: 'underline' },
+
+  // Success
+  successRing: {
+    width:           130,
+    height:          130,
+    borderRadius:    65,
+    backgroundColor: '#EAF9EE',
+    borderWidth:     2,
+    borderColor:     `${SUCCESS}40`,
+    alignItems:      'center',
+    justifyContent:  'center',
+    marginBottom:    24,
   },
   successTitle: {
-    fontSize: 28,
-    fontWeight: 'bold',
-    color: '#2F2F6F',
-    marginTop: 20,
-    marginBottom: 10,
+    fontSize:      28,
+    fontWeight:    '800',
+    color:         TEXT,
+    marginBottom:  8,
+    letterSpacing: -0.4,
   },
-  successMessage: {
-    fontSize: 16,
-    color: '#666666',
-    textAlign: 'center',
-    marginBottom: 20,
-  },
-  redirectText: {
-    fontSize: 14,
-    color: '#999999',
-    fontStyle: 'italic',
-  },
+  successSub: { fontSize: 14, color: MUTED },
 });
