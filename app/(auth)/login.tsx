@@ -3,6 +3,7 @@ import MaterialIcons from "@expo/vector-icons/MaterialIcons";
 import { makeRedirectUri } from "expo-auth-session";
 import * as Facebook from "expo-auth-session/providers/facebook";
 import * as Google from "expo-auth-session/providers/google";
+import Constants from "expo-constants";
 import { useRouter } from "expo-router";
 import * as WebBrowser from "expo-web-browser";
 import {
@@ -48,7 +49,12 @@ const validateEmail = (email: string) =>
 const sanitizeEmail = (email: string) => email.trim().toLowerCase();
 
 export default function LoginScreen() {
-  const redirectUri = makeRedirectUri({ useProxy: true } as any);
+  // ── FIX: guard useProxy exactly like signup.tsx ──────────────────
+  const useProxy = Platform.OS !== "web" && Constants.appOwnership === "expo";
+  const redirectUri = makeRedirectUri({
+    scheme: "barterbayanv10",
+    ...(useProxy ? { useProxy: true } : {}),
+  } as any);
 
   const [, response, promptAsync] = Google.useAuthRequest({
     clientId: "1081232685961-ej4te66gtudrhi4l70jjm37ffball2b6.apps.googleusercontent.com",
@@ -207,7 +213,6 @@ export default function LoginScreen() {
   const handleLogin = async () => {
     const nextErrors: typeof errors = {};
 
-    // Client-side validation
     if (!email.trim()) {
       nextErrors.email = "Email is required.";
     } else if (!validateEmail(email)) {
@@ -238,7 +243,6 @@ export default function LoginScreen() {
       const { user } = await signInWithEmailAndPassword(auth, sanitizeEmail(email), password);
       await user.reload();
 
-      // Email not verified
       if (!user.emailVerified) {
         Alert.alert(
           "Email Not Verified",
@@ -261,7 +265,6 @@ export default function LoginScreen() {
         return;
       }
 
-      // Ensure Firestore doc exists
       try {
         const ref = doc(db, "users", user.uid);
         const snap = await getDoc(ref);
@@ -411,7 +414,8 @@ export default function LoginScreen() {
             activeOpacity={0.7}
             onPress={() => {
               setKeepLoggedInStorage(keepLoggedIn);
-              promptAsync({ useProxy: true } as any).catch((err: any) =>
+              // ── FIX: pass useProxy consistently ──────────────────
+              promptAsync({ useProxy } as any).catch((err: any) =>
                 Alert.alert("Google Error", err?.message || "Failed to open Google login")
               );
             }}
@@ -424,8 +428,9 @@ export default function LoginScreen() {
             activeOpacity={0.7}
             onPress={() => {
               setKeepLoggedInStorage(keepLoggedIn);
+              // ── FIX: pass useProxy consistently ──────────────────
               facebookPromptAsync
-                ? facebookPromptAsync({ useProxy: true } as any).catch((err: any) =>
+                ? facebookPromptAsync({ useProxy } as any).catch((err: any) =>
                     Alert.alert("Facebook Error", err?.message || "Failed to open Facebook login")
                   )
                 : Alert.alert("Error", "Facebook Sign-In not ready. Please try again.");
@@ -449,7 +454,6 @@ export default function LoginScreen() {
 }
 
 const styles = StyleSheet.create({
-  // justifyContent: 'center' eliminates the dead space below by centering the form vertically
   scrollContent: {
     flexGrow:          1,
     justifyContent:    'center',
@@ -458,7 +462,7 @@ const styles = StyleSheet.create({
   },
 
   header:     { marginBottom: 40 },
-  headerText: { fontSize: 48, fontWeight: 'bold', textAlign: 'left-aligned', lineHeight: 42, color: '#000000' },
+  headerText: { fontSize: 48, fontWeight: 'bold', textAlign: 'left', lineHeight: 42, color: '#000000' },
 
   inputContainer: {
     flexDirection:     'row',

@@ -62,9 +62,10 @@ export default function SignUpScreen() {
     scheme: 'barterbayanv10',
     ...(useProxy ? { useProxy: true } : {}),
   } as any);
+console.log("redirectUri:", redirectUri);
 
   const [, googleResponse, googlePromptAsync] = Google.useAuthRequest({
-    clientId: '1081232685961-ej4te66gtudrhi4l70jjm37ffball2b6.apps.googleusercontent.com',
+    clientId: '1081232685961-gkth525m4vagv916gs9h1om0o41bbora.apps.googleusercontent.com',
     redirectUri,
     responseType: 'id_token',
     scopes: ['profile', 'email'],
