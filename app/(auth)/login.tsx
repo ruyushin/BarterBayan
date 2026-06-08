@@ -1,13 +1,12 @@
 import FontAwesome from "@expo/vector-icons/FontAwesome";
 import MaterialIcons from "@expo/vector-icons/MaterialIcons";
 import { makeRedirectUri } from "expo-auth-session";
-import * as Facebook from "expo-auth-session/providers/facebook";
+
 import * as Google from "expo-auth-session/providers/google";
 import Constants from "expo-constants";
 import { useRouter } from "expo-router";
 import * as WebBrowser from "expo-web-browser";
 import {
-  FacebookAuthProvider,
   GoogleAuthProvider,
   browserLocalPersistence,
   browserSessionPersistence,
@@ -35,16 +34,18 @@ import { auth, db } from "../../firebaseConfig";
 import { welcomeState } from "./welcomeState";
 
 const PRIMARY = "#2F2F6F";
-const BG      = "#FFFFFF";
-const MUTED   = "#666666";
-const BORDER  = "#E0E0E0";
-const DANGER  = "#D9534F";
+const BG = "#FFFFFF";
+const MUTED = "#666666";
+const BORDER = "#E0E0E0";
+const DANGER = "#D9534F";
 
 WebBrowser.maybeCompleteAuthSession();
 
 // ── Validation helpers ─────────────────────────────────────────────
 const validateEmail = (email: string) =>
-  /^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}$/.test(email.trim().toLowerCase());
+  /^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}$/.test(
+    email.trim().toLowerCase(),
+  );
 
 const sanitizeEmail = (email: string) => email.trim().toLowerCase();
 
@@ -57,16 +58,11 @@ export default function LoginScreen() {
   } as any);
 
   const [, response, promptAsync] = Google.useAuthRequest({
-    clientId: "1081232685961-ej4te66gtudrhi4l70jjm37ffball2b6.apps.googleusercontent.com",
+    clientId:
+      "1081232685961-ej4te66gtudrhi4l70jjm37ffball2b6.apps.googleusercontent.com",
     redirectUri,
     responseType: "id_token",
     scopes: ["profile", "email"],
-  });
-
-  const [, facebookResponse, facebookPromptAsync] = Facebook.useAuthRequest({
-    clientId: "848759694896379",
-    redirectUri,
-    scopes: ["public_profile", "email"],
   });
 
   const decodeJWT = (token: string) => {
@@ -74,18 +70,27 @@ export default function LoginScreen() {
       const base64Url = token.split(".")[1];
       const base64 = base64Url.replace(/-/g, "+").replace(/_/g, "/");
       const jsonPayload = decodeURIComponent(
-        atob(base64).split("").map((c) => "%" + ("00" + c.charCodeAt(0).toString(16)).slice(-2)).join("")
+        atob(base64)
+          .split("")
+          .map((c) => "%" + ("00" + c.charCodeAt(0).toString(16)).slice(-2))
+          .join(""),
       );
       return JSON.parse(jsonPayload);
-    } catch { return null; }
+    } catch {
+      return null;
+    }
   };
 
-  const [email,        setEmail]        = useState("");
-  const [password,     setPassword]     = useState("");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [keepLoggedIn, setKeepLoggedIn] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [errors,       setErrors]       = useState<{ email?: string; password?: string; general?: string }>({});
+  const [errors, setErrors] = useState<{
+    email?: string;
+    password?: string;
+    general?: string;
+  }>({});
 
   const router = useRouter();
 
@@ -115,14 +120,6 @@ export default function LoginScreen() {
     }
   }, [response]);
 
-  useEffect(() => {
-    if (facebookResponse?.type === "success") {
-      handleFacebookSignIn((facebookResponse.params as any).access_token);
-    } else if (facebookResponse?.type === "error") {
-      console.warn("Facebook auth error", facebookResponse.error);
-    }
-  }, [facebookResponse]);
-
   const signalWelcomeIfReturning = async (uid: string, displayName: string) => {
     try {
       const userDoc = await getDoc(doc(db, "users", uid));
@@ -130,7 +127,9 @@ export default function LoginScreen() {
       if (data?.termsAccepted && data?.profileComplete) {
         welcomeState.set(displayName, "login");
       }
-    } catch { /* auth guard still routes correctly */ }
+    } catch {
+      /* auth guard still routes correctly */
+    }
   };
 
   // ── Google sign-in ─────────────────────────────────────────────────
@@ -140,10 +139,16 @@ export default function LoginScreen() {
     try {
       const remember = getRememberedFlag();
       if (Platform.OS === "web") {
-        await setPersistence(auth, remember ? browserLocalPersistence : browserSessionPersistence);
+        await setPersistence(
+          auth,
+          remember ? browserLocalPersistence : browserSessionPersistence,
+        );
       }
       const decoded = decodeJWT(idToken);
-      if (!decoded?.email) { setErrors({ general: "Invalid Google credentials." }); return; }
+      if (!decoded?.email) {
+        setErrors({ general: "Invalid Google credentials." });
+        return;
+      }
       const credential = GoogleAuthProvider.credential(idToken);
       const { user } = await signInWithCredential(auth, credential);
       try {
@@ -151,62 +156,35 @@ export default function LoginScreen() {
         const snap = await getDoc(ref);
         if (!snap.exists()) {
           await setDoc(ref, {
-            email: user.email, username: user.email?.split("@")[0],
-            createdAt: new Date().toISOString(), rating: 5.0, tradeCount: 0,
-            emailVerified: user.emailVerified, termsAccepted: false, profileComplete: false,
+            email: user.email,
+            username: user.email?.split("@")[0],
+            createdAt: new Date().toISOString(),
+            rating: 5.0,
+            tradeCount: 0,
+            emailVerified: user.emailVerified,
+            termsAccepted: false,
+            profileComplete: false,
           });
         }
-      } catch (e) { console.warn("Firestore doc error:", e); }
+      } catch (e) {
+        console.warn("Firestore doc error:", e);
+      }
       await signalWelcomeIfReturning(
         user.uid,
-        decoded.given_name || decoded.name || decoded.email?.split("@")[0] || ""
+        decoded.given_name ||
+          decoded.name ||
+          decoded.email?.split("@")[0] ||
+          "",
       );
     } catch (err: any) {
-      const msg = err.code === "auth/popup-closed-by-user"
-        ? "Sign-in was cancelled."
-        : "Google sign-in failed. Please try again.";
+      const msg =
+        err.code === "auth/popup-closed-by-user"
+          ? "Sign-in was cancelled."
+          : "Google sign-in failed. Please try again.";
       setErrors({ general: msg });
-    } finally { setIsSubmitting(false); }
-  };
-
-  // ── Facebook sign-in ───────────────────────────────────────────────
-  const handleFacebookSignIn = async (accessToken: string) => {
-    setIsSubmitting(true);
-    setErrors({});
-    try {
-      const remember = getRememberedFlag();
-      if (Platform.OS === "web") {
-        await setPersistence(auth, remember ? browserLocalPersistence : browserSessionPersistence);
-      }
-      const fbRes = await fetch(`https://graph.facebook.com/me?fields=id,email,name&access_token=${accessToken}`);
-      const data = await fbRes.json();
-      if (!data.email) {
-        setErrors({ general: "Unable to retrieve email from Facebook." });
-        return;
-      }
-      const credential = FacebookAuthProvider.credential(accessToken);
-      const { user } = await signInWithCredential(auth, credential);
-      try {
-        const ref = doc(db, "users", user.uid);
-        const snap = await getDoc(ref);
-        if (!snap.exists()) {
-          await setDoc(ref, {
-            email: user.email, username: user.email?.split("@")[0],
-            createdAt: new Date().toISOString(), rating: 5.0, tradeCount: 0,
-            emailVerified: user.emailVerified, termsAccepted: false, profileComplete: false,
-          });
-        }
-      } catch (e) { console.warn("Firestore doc error:", e); }
-      await signalWelcomeIfReturning(
-        user.uid,
-        data.name?.split(" ")[0] || data.email?.split("@")[0] || ""
-      );
-    } catch (err: any) {
-      const msg = err.code === "auth/popup-closed-by-user"
-        ? "Sign-in was cancelled."
-        : "Facebook sign-in failed. Please try again.";
-      setErrors({ general: msg });
-    } finally { setIsSubmitting(false); }
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   // ── Email/password login ───────────────────────────────────────────
@@ -237,10 +215,17 @@ export default function LoginScreen() {
       setKeepLoggedInStorage(keepLoggedIn);
       if (Platform.OS === "web") {
         const remember = getRememberedFlag();
-        await setPersistence(auth, remember ? browserLocalPersistence : browserSessionPersistence);
+        await setPersistence(
+          auth,
+          remember ? browserLocalPersistence : browserSessionPersistence,
+        );
       }
 
-      const { user } = await signInWithEmailAndPassword(auth, sanitizeEmail(email), password);
+      const { user } = await signInWithEmailAndPassword(
+        auth,
+        sanitizeEmail(email),
+        password,
+      );
       await user.reload();
 
       if (!user.emailVerified) {
@@ -253,14 +238,20 @@ export default function LoginScreen() {
               onPress: async () => {
                 try {
                   await sendEmailVerification(user);
-                  Alert.alert("Sent", "Verification email resent. Please check your inbox.");
+                  Alert.alert(
+                    "Sent",
+                    "Verification email resent. Please check your inbox.",
+                  );
                 } catch {
-                  Alert.alert("Error", "Could not resend email. Try again later.");
+                  Alert.alert(
+                    "Error",
+                    "Could not resend email. Try again later.",
+                  );
                 }
               },
             },
             { text: "OK", onPress: () => router.push("/(auth)/verify") },
-          ]
+          ],
         );
         return;
       }
@@ -270,18 +261,24 @@ export default function LoginScreen() {
         const snap = await getDoc(ref);
         if (!snap.exists()) {
           await setDoc(ref, {
-            email: user.email, username: user.email?.split("@")[0],
-            createdAt: new Date().toISOString(), rating: 5.0, tradeCount: 0,
-            emailVerified: user.emailVerified, termsAccepted: false, profileComplete: false,
+            email: user.email,
+            username: user.email?.split("@")[0],
+            createdAt: new Date().toISOString(),
+            rating: 5.0,
+            tradeCount: 0,
+            emailVerified: user.emailVerified,
+            termsAccepted: false,
+            profileComplete: false,
           });
         }
-      } catch (e) { console.warn("Firestore doc error:", e); }
+      } catch (e) {
+        console.warn("Firestore doc error:", e);
+      }
 
       await signalWelcomeIfReturning(
         user.uid,
-        user.displayName?.split(" ")[0] || user.email?.split("@")[0] || ""
+        user.displayName?.split(" ")[0] || user.email?.split("@")[0] || "",
       );
-
     } catch (err: any) {
       switch (err.code) {
         case "auth/user-not-found":
@@ -295,18 +292,30 @@ export default function LoginScreen() {
           setErrors({ email: "Please enter a valid email address." });
           break;
         case "auth/too-many-requests":
-          setErrors({ general: "Too many failed attempts. Please wait a moment and try again." });
+          setErrors({
+            general:
+              "Too many failed attempts. Please wait a moment and try again.",
+          });
           break;
         case "auth/user-disabled":
-          setErrors({ general: "This account has been disabled. Please contact support." });
+          setErrors({
+            general: "This account has been disabled. Please contact support.",
+          });
           break;
         case "auth/network-request-failed":
-          setErrors({ general: "Network error. Please check your connection." });
+          setErrors({
+            general: "Network error. Please check your connection.",
+          });
           break;
         default:
-          setErrors({ general: "Login failed. Please check your credentials and try again." });
+          setErrors({
+            general:
+              "Login failed. Please check your credentials and try again.",
+          });
       }
-    } finally { setIsSubmitting(false); }
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   return (
@@ -327,8 +336,15 @@ export default function LoginScreen() {
         </View>
 
         {/* Email */}
-        <View style={[styles.inputContainer, errors.email && styles.inputError]}>
-          <MaterialIcons name="email" size={20} color="#ADADAD" style={styles.inputIcon} />
+        <View
+          style={[styles.inputContainer, errors.email && styles.inputError]}
+        >
+          <MaterialIcons
+            name="email"
+            size={20}
+            color="#ADADAD"
+            style={styles.inputIcon}
+          />
           <TextInput
             style={styles.input}
             placeholder="Email Address"
@@ -338,14 +354,30 @@ export default function LoginScreen() {
             textContentType="emailAddress"
             placeholderTextColor="#999999"
             value={email}
-            onChangeText={t => { setEmail(t); setErrors(e => ({ ...e, email: undefined, general: undefined })); }}
+            onChangeText={(t) => {
+              setEmail(t);
+              setErrors((e) => ({
+                ...e,
+                email: undefined,
+                general: undefined,
+              }));
+            }}
           />
         </View>
-        {errors.email ? <Text style={styles.errorText}>{errors.email}</Text> : null}
+        {errors.email ? (
+          <Text style={styles.errorText}>{errors.email}</Text>
+        ) : null}
 
         {/* Password */}
-        <View style={[styles.inputContainer, errors.password && styles.inputError]}>
-          <MaterialIcons name="lock" size={20} color="#ADADAD" style={styles.inputIcon} />
+        <View
+          style={[styles.inputContainer, errors.password && styles.inputError]}
+        >
+          <MaterialIcons
+            name="lock"
+            size={20}
+            color="#ADADAD"
+            style={styles.inputIcon}
+          />
           <TextInput
             style={styles.input}
             placeholder="Password"
@@ -354,9 +386,16 @@ export default function LoginScreen() {
             autoComplete="password"
             textContentType="password"
             value={password}
-            onChangeText={t => { setPassword(t); setErrors(e => ({ ...e, password: undefined, general: undefined })); }}
+            onChangeText={(t) => {
+              setPassword(t);
+              setErrors((e) => ({
+                ...e,
+                password: undefined,
+                general: undefined,
+              }));
+            }}
           />
-          <TouchableOpacity onPress={() => setShowPassword(v => !v)}>
+          <TouchableOpacity onPress={() => setShowPassword((v) => !v)}>
             <MaterialIcons
               name={showPassword ? "visibility" : "visibility-off"}
               size={20}
@@ -364,16 +403,24 @@ export default function LoginScreen() {
             />
           </TouchableOpacity>
         </View>
-        {errors.password ? <Text style={styles.errorText}>{errors.password}</Text> : null}
+        {errors.password ? (
+          <Text style={styles.errorText}>{errors.password}</Text>
+        ) : null}
 
         {/* General error */}
-        {errors.general ? <Text style={styles.errorText}>{errors.general}</Text> : null}
+        {errors.general ? (
+          <Text style={styles.errorText}>{errors.general}</Text>
+        ) : null}
 
         {/* Keep logged in + Forgot password */}
         <View style={styles.optionsRow}>
           <TouchableOpacity
             style={styles.keepRow}
-            onPress={() => { const v = !keepLoggedIn; setKeepLoggedIn(v); setKeepLoggedInStorage(v); }}
+            onPress={() => {
+              const v = !keepLoggedIn;
+              setKeepLoggedIn(v);
+              setKeepLoggedInStorage(v);
+            }}
           >
             <MaterialIcons
               name={keepLoggedIn ? "check-box" : "check-box-outline-blank"}
@@ -392,12 +439,16 @@ export default function LoginScreen() {
         <Pressable
           disabled={isSubmitting}
           onPress={handleLogin}
-          style={({ pressed }) => [styles.loginBtn, pressed && { opacity: 0.8 }]}
+          style={({ pressed }) => [
+            styles.loginBtn,
+            pressed && { opacity: 0.8 },
+          ]}
         >
-          {isSubmitting
-            ? <ActivityIndicator size="small" color="#fff" />
-            : <Text style={styles.loginBtnText}>Log In</Text>
-          }
+          {isSubmitting ? (
+            <ActivityIndicator size="small" color="#fff" />
+          ) : (
+            <Text style={styles.loginBtnText}>Log In</Text>
+          )}
         </Pressable>
 
         {/* Divider */}
@@ -416,27 +467,14 @@ export default function LoginScreen() {
               setKeepLoggedInStorage(keepLoggedIn);
               // ── FIX: pass useProxy consistently ──────────────────
               promptAsync({ useProxy } as any).catch((err: any) =>
-                Alert.alert("Google Error", err?.message || "Failed to open Google login")
+                Alert.alert(
+                  "Google Error",
+                  err?.message || "Failed to open Google login",
+                ),
               );
             }}
           >
             <FontAwesome name="google" size={24} color={PRIMARY} />
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={styles.socialBtn}
-            activeOpacity={0.7}
-            onPress={() => {
-              setKeepLoggedInStorage(keepLoggedIn);
-              // ── FIX: pass useProxy consistently ──────────────────
-              facebookPromptAsync
-                ? facebookPromptAsync({ useProxy } as any).catch((err: any) =>
-                    Alert.alert("Facebook Error", err?.message || "Failed to open Facebook login")
-                  )
-                : Alert.alert("Error", "Facebook Sign-In not ready. Please try again.");
-            }}
-          >
-            <FontAwesome name="facebook" size={24} color={PRIMARY} />
           </TouchableOpacity>
         </View>
 
@@ -447,7 +485,6 @@ export default function LoginScreen() {
             <Text style={styles.footerLink}>Sign Up</Text>
           </TouchableOpacity>
         </View>
-
       </ScrollView>
     </KeyboardAvoidingView>
   );
@@ -455,70 +492,86 @@ export default function LoginScreen() {
 
 const styles = StyleSheet.create({
   scrollContent: {
-    flexGrow:          1,
-    justifyContent:    'center',
+    flexGrow: 1,
+    justifyContent: "center",
     paddingHorizontal: 20,
-    paddingVertical:   40,
+    paddingVertical: 40,
   },
 
-  header:     { marginBottom: 40 },
-  headerText: { fontSize: 48, fontWeight: 'bold', textAlign: 'left', lineHeight: 42, color: '#000000' },
+  header: { marginBottom: 40 },
+  headerText: {
+    fontSize: 48,
+    fontWeight: "bold",
+    textAlign: "left",
+    lineHeight: 42,
+    color: "#000000",
+  },
 
   inputContainer: {
-    flexDirection:     'row',
-    alignItems:        'center',
+    flexDirection: "row",
+    alignItems: "center",
     paddingHorizontal: 15,
-    borderRadius:      12,
-    marginBottom:      16,
-    height:            55,
-    backgroundColor:   '#F0F0F0',
+    borderRadius: 12,
+    marginBottom: 16,
+    height: 55,
+    backgroundColor: "#F0F0F0",
   },
   inputError: {
     borderWidth: 1.5,
     borderColor: DANGER,
   },
   inputIcon: { marginRight: 10 },
-  input:     { flex: 1, fontSize: 16, color: '#000000' },
+  input: { flex: 1, fontSize: 16, color: "#000000" },
 
-  errorText: { color: DANGER, fontSize: 13, marginBottom: 8, marginLeft: 4, marginTop: -10 },
+  errorText: {
+    color: DANGER,
+    fontSize: 13,
+    marginBottom: 8,
+    marginLeft: 4,
+    marginTop: -10,
+  },
 
   optionsRow: {
-    flexDirection:  'row',
-    justifyContent: 'space-between',
-    alignItems:     'center',
-    marginBottom:   20,
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: 20,
   },
-  keepRow:    { flexDirection: 'row', alignItems: 'center', flex: 1 },
-  keepText:   { marginLeft: 8, fontSize: 14, color: '#000000', flexShrink: 1 },
-  forgotText: { fontSize: 14, fontWeight: '700', color: PRIMARY },
+  keepRow: { flexDirection: "row", alignItems: "center", flex: 1 },
+  keepText: { marginLeft: 8, fontSize: 14, color: "#000000", flexShrink: 1 },
+  forgotText: { fontSize: 14, fontWeight: "700", color: PRIMARY },
 
   loginBtn: {
     backgroundColor: PRIMARY,
-    height:          55,
-    borderRadius:    12,
-    justifyContent:  'center',
-    alignItems:      'center',
-    marginTop:       4,
-    marginBottom:    30,
+    height: 55,
+    borderRadius: 12,
+    justifyContent: "center",
+    alignItems: "center",
+    marginTop: 4,
+    marginBottom: 30,
   },
-  loginBtnText: { color: '#FFFFFF', fontSize: 18, fontWeight: '600' },
+  loginBtnText: { color: "#FFFFFF", fontSize: 18, fontWeight: "600" },
 
-  divider:     { flexDirection: 'row', alignItems: 'center', marginBottom: 20 },
+  divider: { flexDirection: "row", alignItems: "center", marginBottom: 20 },
   dividerLine: { flex: 1, height: 1, backgroundColor: BORDER },
   dividerText: { marginHorizontal: 10, color: MUTED, fontSize: 14 },
 
-  socialRow: { flexDirection: 'row', justifyContent: 'center', marginBottom: 24 },
+  socialRow: {
+    flexDirection: "row",
+    justifyContent: "center",
+    marginBottom: 24,
+  },
   socialBtn: {
-    width:            60,
-    height:           60,
-    borderRadius:     30,
-    backgroundColor:  '#F0F0F0',
-    justifyContent:   'center',
-    alignItems:       'center',
+    width: 60,
+    height: 60,
+    borderRadius: 30,
+    backgroundColor: "#F0F0F0",
+    justifyContent: "center",
+    alignItems: "center",
     marginHorizontal: 12,
   },
 
-  footer:     { flexDirection: 'row', justifyContent: 'center' },
-  footerText: { fontSize: 15, color: '#000000' },
-  footerLink: { color: PRIMARY, fontSize: 15, fontWeight: 'bold' },
+  footer: { flexDirection: "row", justifyContent: "center" },
+  footerText: { fontSize: 15, color: "#000000" },
+  footerLink: { color: PRIMARY, fontSize: 15, fontWeight: "bold" },
 });

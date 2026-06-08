@@ -1,26 +1,25 @@
-import FontAwesome from '@expo/vector-icons/FontAwesome';
-import MaterialIcons from '@expo/vector-icons/MaterialIcons';
-import { makeRedirectUri } from 'expo-auth-session';
-import * as Facebook from 'expo-auth-session/providers/facebook';
-import * as Google from 'expo-auth-session/providers/google';
-import Constants from 'expo-constants';
-import { useRouter } from 'expo-router';
-import * as WebBrowser from 'expo-web-browser';
+import FontAwesome from "@expo/vector-icons/FontAwesome";
+import MaterialIcons from "@expo/vector-icons/MaterialIcons";
+import { makeRedirectUri } from "expo-auth-session";
+import * as Facebook from "expo-auth-session/providers/facebook";
+import * as Google from "expo-auth-session/providers/google";
+import Constants from "expo-constants";
+import { useRouter } from "expo-router";
+import * as WebBrowser from "expo-web-browser";
 import {
   createUserWithEmailAndPassword,
   FacebookAuthProvider,
   GoogleAuthProvider,
-  linkWithCredential,
   sendEmailVerification,
   signInWithCredential,
-  signOut
-} from 'firebase/auth';
-import { doc, getDoc, setDoc } from 'firebase/firestore';
-import React, { useEffect, useRef, useState } from 'react';
+  signOut,
+} from "firebase/auth";
+import { doc, setDoc } from "firebase/firestore";
+import React, { useEffect, useRef, useState } from "react";
 import {
   Alert,
   Animated,
-  KeyboardAvoidingView,
+  Modal,
   Platform,
   Pressable,
   ScrollView,
@@ -29,473 +28,729 @@ import {
   TextInput,
   TouchableOpacity,
   View,
-} from 'react-native';
-import { auth, db } from '../../firebaseConfig';
-
-const PRIMARY = '#2F2F6F';
-const BG      = '#FFFFFF';
-const MUTED   = '#666666';
-const BORDER  = '#E0E0E0';
-const DANGER  = '#D9534F';
-
-WebBrowser.maybeCompleteAuthSession();
-
-// ── Email validation ───────────────────────────────────────────────
-const validateEmailFormat = (email: string) =>
-  /^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}$/.test(email.trim().toLowerCase());
-
-// ── Password strength ──────────────────────────────────────────────
-function evaluatePassword(pw: string) {
-  let score = 0;
-  if (pw.length >= 8)          score++;
-  if (/[A-Z]/.test(pw))        score++;
-  if (/[0-9]/.test(pw))        score++;
-  if (/[^A-Za-z0-9]/.test(pw)) score++;
-  const labels = ['Very Weak', 'Weak', 'Medium', 'Strong', 'Very Strong'];
-  const colors = ['#D9534F', '#D9534F', '#F0AD4E', '#F7C948', '#5CB85C'];
-  return { score, label: labels[score], color: colors[score] };
-}
+} from "react-native";
+import { auth, db } from "../../firebaseConfig";
 
 export default function SignUpScreen() {
-  const useProxy = Platform.OS !== 'web' && Constants.appOwnership === 'expo';
+  // --- Auth request redirectUri ---
+  WebBrowser.maybeCompleteAuthSession();
+  const useProxy = Platform.OS !== "web" && Constants.appOwnership === "expo";
   const redirectUri = makeRedirectUri({
-    scheme: 'barterbayanv10',
+    scheme: "barterbayanv10",
     ...(useProxy ? { useProxy: true } : {}),
   } as any);
-console.log("redirectUri:", redirectUri);
 
-  const [, googleResponse, googlePromptAsync] = Google.useAuthRequest({
-    clientId: '1081232685961-gkth525m4vagv916gs9h1om0o41bbora.apps.googleusercontent.com',
+  // --- Google Auth Request ---
+  const [request, response, promptAsync] = Google.useAuthRequest({
+    clientId:
+      "1081232685961-ej4te66gtudrhi4l70jjm37ffball2b6.apps.googleusercontent.com",
     redirectUri,
-    responseType: 'id_token',
-    scopes: ['profile', 'email'],
+    responseType: "id_token",
+    scopes: ["profile", "email"],
   });
 
-  const [, facebookResponse, facebookPromptAsync] = Facebook.useAuthRequest({
-    clientId: '848759694896379',
-    redirectUri,
-    scopes: ['public_profile', 'email'],
-  });
+  // --- Facebook Auth Request ---
+  const [facebookRequest, facebookResponse, facebookPromptAsync] =
+    Facebook.useAuthRequest({
+      clientId: "848759694896379", // Your Facebook App ID
+      redirectUri,
+      scopes: ["public_profile", "email"],
+    });
 
-  const [email,        setEmail]        = useState('');
-  const [password,     setPassword]     = useState('');
-  const [confirm,      setConfirm]      = useState('');
-  const [pwStrength,   setPwStrength]   = useState(evaluatePassword(''));
-  const [showPassword, setShowPassword] = useState(false);
-  const [errors,       setErrors]       = useState<{ email?: string; password?: string; confirm?: string }>({});
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const [isTyping,     setIsTyping]     = useState(false);
-
-  const strengthOpacity = useRef(new Animated.Value(0)).current;
-  const strengthTimer   = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const AnimatedAny: any = Animated;
-
-  const router = useRouter();
-
+  // if we are on web + expo dev client path, this help avoids COOP popup race
   useEffect(() => {
-    if (googleResponse?.type === 'success') {
-      const idToken =
-        (googleResponse.params as any).id_token ||
-        (googleResponse.authentication as any)?.idToken;
-      if (idToken) handleGoogleSignUp(idToken);
-      else Alert.alert('Google Sign-Up Error', 'No ID token returned. Please try again.');
-    } else if (googleResponse?.type === 'error') {
-      console.warn('Google auth error', googleResponse.error);
+    if (Platform.OS === "web" && response?.type === "error") {
+      console.warn("Google Web auth response error", response.error);
     }
-  }, [googleResponse]);
+  }, [response]);
 
   useEffect(() => {
-    if (facebookResponse?.type === 'success') {
-      handleFacebookSignUp((facebookResponse.params as any).access_token);
-    } else if (facebookResponse?.type === 'error') {
-      console.warn('Facebook auth error', facebookResponse.error);
+    if (Platform.OS === "web" && facebookResponse?.type === "error") {
+      console.warn("Facebook Web auth response error", facebookResponse.error);
     }
   }, [facebookResponse]);
 
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [confirm, setConfirm] = useState("");
+  const [pwStrength, setPwStrength] = useState({
+    score: 0,
+    label: "Very Weak",
+    color: "#D9534F",
+  });
+  const strengthOpacity = useRef(new Animated.Value(0)).current;
+  const strengthTimer = useRef<any>(null);
+  const AnimatedAny: any = Animated;
+  const [isTyping, setIsTyping] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
+  const [errors, setErrors] = useState<{
+    email?: string;
+    password?: string;
+    confirm?: string;
+  }>({});
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [showSuccessModal, setShowSuccessModal] = useState(false);
+  const [successMessage, setSuccessMessage] = useState("");
+  const [successRoute, setSuccessRoute] = useState<"login" | "verify">("login");
+
+  // --- Router ---
+  const router = useRouter();
+
+  const showSuccessAndReset = (
+    message: string,
+    route: "login" | "verify" = "login",
+  ) => {
+    setSuccessMessage(message);
+    setSuccessRoute(route);
+    setShowSuccessModal(true);
+    setEmail("");
+    setPassword("");
+    setConfirm("");
+    setErrors({});
+  };
+
+  // when Google response comes back
+  useEffect(() => {
+    if (response?.type === "success") {
+      const { id_token } = response.params;
+      handleGoogleSignUp(id_token);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [response]);
+
+  // when Facebook response comes back
+  useEffect(() => {
+    if (facebookResponse?.type === "success") {
+      const { access_token } = facebookResponse.params;
+      handleFacebookSignUp(access_token);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [facebookResponse]);
+  const textColor = "#000000";
+  const inputBgColor = "#f0f0f0";
+  const iconColor = "#ADADAD";
+
+  // --- shared social button component ---
+  function SocialButton({
+    name,
+    onPress,
+  }: {
+    name: any;
+    onPress?: () => void;
+  }) {
+    return (
+      <TouchableOpacity
+        style={styles.socialButton}
+        activeOpacity={0.7}
+        onPress={onPress}
+      >
+        <FontAwesome name={name} size={24} color="#2F2F6F" />
+      </TouchableOpacity>
+    );
+  }
+
+  // --- HELPER FUNCTIONS ---
+  // STRICTOR VALIDATION: Only allows valid @gmail.com structures
+  const validateEmailFormat = (email: string) => {
+    return /^[a-zA-Z0-9._%+-]+@gmail\.com$/.test(email.toLowerCase());
+  };
+
+  function evaluatePassword(pw: string) {
+    let score = 0;
+    if (pw.length >= 8) score++;
+    if (/[A-Z]/.test(pw)) score++;
+    if (/[0-9]/.test(pw)) score++;
+    if (/[^A-Za-z0-9]/.test(pw)) score++;
+    const labels = ["Very Weak", "Weak", "Medium", "Strong", "Very Strong"];
+    const colors = ["#D9534F", "#D9534F", "#F0AD4E", "#F7C948", "#5CB85C"];
+    return { score, label: labels[score], color: colors[score] };
+  }
+
   function handlePasswordChange(text: string) {
     setPassword(text);
-    setErrors(e => ({ ...e, password: undefined }));
+    setErrors((e) => ({ ...e, password: undefined }));
     setPwStrength(evaluatePassword(text));
     setIsTyping(true);
-    Animated.timing(strengthOpacity, { toValue: 1, duration: 120, useNativeDriver: true }).start();
+    Animated.timing(strengthOpacity, {
+      toValue: 1,
+      duration: 120,
+      useNativeDriver: true,
+    }).start();
     if (strengthTimer.current) clearTimeout(strengthTimer.current);
     strengthTimer.current = setTimeout(() => {
-      Animated.timing(strengthOpacity, { toValue: 0, duration: 350, useNativeDriver: true }).start(
-        () => setIsTyping(false)
-      );
+      Animated.timing(strengthOpacity, {
+        toValue: 0,
+        duration: 350,
+        useNativeDriver: true,
+      }).start(() => setIsTyping(false));
     }, 1200);
   }
 
-  const extractEmailFromError = (error: any): string | null => {
-    if (error?.customData?.email) return error.customData.email;
-    if (error?.customData?._tokenResponse?.email) return error.customData._tokenResponse.email;
-    if (error?.email) return error.email;
-    if (error?.message) {
-      const match = error.message.match(/([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/);
-      if (match) return match[1];
-    }
-    return null;
-  };
-
-  const handleAccountLinking = async (
-    email: string,
-    credential: any,
-    providerName: string
-  ): Promise<any> => {
-    return new Promise((resolve, reject) => {
-      Alert.alert(
-        'Account Already Exists',
-        `This email (${email}) is already registered with another provider. Would you like to link this ${providerName} account?`,
-        [
-          {
-            text: 'Link Accounts',
-            onPress: async () => {
-              try {
-                const existing = auth.currentUser;
-                if (existing) { await linkWithCredential(existing, credential); resolve(existing); }
-                else reject(new Error('No existing user to link to'));
-              } catch (err) { reject(err instanceof Error ? err : new Error(String(err))); }
-            },
-          },
-          { text: 'Use Existing Account', onPress: () => resolve(auth.currentUser) },
-          { text: 'Cancel', style: 'cancel', onPress: () => reject(new Error('User cancelled account linking')) },
-        ]
-      );
-    });
-  };
-
-  const ensureFirestoreDoc = async (user: any, extra: Record<string, any> = {}) => {
-    try {
-      const ref  = doc(db, 'users', user.uid);
-      const snap = await getDoc(ref);
-      if (!snap.exists()) {
-        await setDoc(ref, {
-          email: user.email,
-          username: user.email?.split('@')[0],
-          createdAt: new Date().toISOString(),
-          rating: 5.0, tradeCount: 0,
-          emailVerified: user.emailVerified,
-          termsAccepted: false,
-          profileComplete: false,
-          ...extra,
-        });
-      }
-    } catch (err) { console.warn('Firestore doc error:', err); }
-  };
-
-  const routeAfterSocialSignup = (user: any) => {
-    if (!user.emailVerified) {
-      router.replace('/(auth)/verify');
-    }
-  };
-
+  // --- CORE SIGNUP LOGIC ---
+  // --- Google sign-up handler ---
   const handleGoogleSignUp = async (idToken: string) => {
     setIsSubmitting(true);
     try {
-      await signOut(auth).catch(() => {});
-      const credential = GoogleAuthProvider.credential(idToken);
-      try {
-        const { user } = await signInWithCredential(auth, credential);
-        await ensureFirestoreDoc(user);
-        routeAfterSocialSignup(user);
-      } catch (error: any) {
-        if (
-          error?.code === 'auth/account-exists-with-different-credential' ||
-          error?.message?.includes('account-exists-with-different-credential')
-        ) {
-          const extracted = extractEmailFromError(error);
-          if (!extracted) { Alert.alert('Error', 'Could not extract email for account linking'); return; }
-          const linked = await handleAccountLinking(extracted, GoogleAuthProvider.credential(idToken), 'Google').catch(() => null);
-          if (linked) routeAfterSocialSignup(linked);
-        } else { throw error; }
+      // Decode the id_token to get the email
+      const payload = idToken.split(".")[1];
+      const decoded = JSON.parse(
+        atob(payload.replace(/-/g, "+").replace(/_/g, "/")),
+      );
+      if (!decoded || !decoded.email) {
+        Alert.alert("Error", "Unable to retrieve email from Google.");
+        setIsSubmitting(false);
+        return;
       }
-    } catch (err: any) {
-      Alert.alert('Google Signup Error', err?.message || String(err));
-    } finally { setIsSubmitting(false); }
+      const email = decoded.email;
+
+      // Sign out the temporary sign-in
+      await signOut(auth);
+      await createGoogleAccount(idToken);
+    } catch (error: any) {
+      console.error("Google Signup Error:", error);
+      Alert.alert("Google Signup Error", error?.message || String(error));
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
+  const createGoogleAccount = async (idToken: string) => {
+    setIsSubmitting(true);
+    try {
+      const credential = GoogleAuthProvider.credential(idToken);
+      const userCredential = await signInWithCredential(auth, credential);
+      const user = userCredential.user;
+
+      const profileData = {
+        email: user.email,
+        username: user.email?.split("@")[0],
+        createdAt: new Date().toISOString(),
+        rating: 5.0,
+        tradeCount: 0,
+        emailVerified: user.emailVerified,
+      };
+
+      try {
+        await sendEmailVerification(user);
+      } catch (error: any) {
+        console.error("Google verification email error:", error);
+        Alert.alert(
+          "Verification Email Failed",
+          error?.message ||
+            "Unable to send a verification email. Please try again.",
+        );
+      }
+
+      const successMessage =
+        "Account created successfully with Google! We sent a verification link to your Gmail. Please verify your email before continuing.";
+
+      showSuccessAndReset(successMessage, "verify");
+      setIsSubmitting(false);
+
+      // Background tasks - don't await these
+      setDoc(doc(db, "users", user.uid), profileData).catch((err) =>
+        console.warn("Firestore setDoc error", err),
+      );
+      if (user.emailVerified) {
+        signOut(auth).catch((err) => console.warn("Google signOut error", err));
+      }
+    } catch (error: any) {
+      console.error("Google Signup Error:", error);
+      Alert.alert("Google Signup Error", error?.message || String(error));
+      setIsSubmitting(false);
+    }
+  };
+
+  // --- Facebook sign-up handler ---
   const handleFacebookSignUp = async (accessToken: string) => {
     setIsSubmitting(true);
     try {
-      await signOut(auth).catch(() => {});
-      const credential = FacebookAuthProvider.credential(accessToken);
-      try {
-        const { user } = await signInWithCredential(auth, credential);
-        if (!user.email) {
-          await signOut(auth).catch(() => {});
-          Alert.alert('Email Required', 'Your Facebook account did not share an email address.');
-          return;
-        }
-        await ensureFirestoreDoc(user);
-        try { await sendEmailVerification(user); } catch (_) {}
-        routeAfterSocialSignup(user);
-      } catch (error: any) {
-        if (
-          error?.code === 'auth/account-exists-with-different-credential' ||
-          error?.message?.includes('account-exists-with-different-credential')
-        ) {
-          const extracted = extractEmailFromError(error);
-          if (!extracted) { Alert.alert('Error', 'Could not extract email for account linking'); return; }
-          const linked = await handleAccountLinking(extracted, FacebookAuthProvider.credential(accessToken), 'Facebook').catch(() => null);
-          if (linked) routeAfterSocialSignup(linked);
-        } else { throw error; }
+      // Get user info from Facebook to retrieve email
+      const response = await fetch(
+        `https://graph.facebook.com/me?fields=id,email,name&access_token=${accessToken}`,
+      );
+      const data = await response.json();
+      if (!data.email) {
+        Alert.alert(
+          "Email Required",
+          "Unable to retrieve email from Facebook account.",
+        );
+        setIsSubmitting(false);
+        return;
       }
-    } catch (err: any) {
-      Alert.alert('Facebook Signup Error', err?.message || String(err));
-    } finally { setIsSubmitting(false); }
+      await createFacebookAccount(accessToken);
+    } catch (error: any) {
+      console.error("Facebook Signup Error:", error);
+      Alert.alert("Facebook Signup Error", error?.message || String(error));
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const createFacebookAccount = async (accessToken: string) => {
+    setIsSubmitting(true);
+    try {
+      const credential = FacebookAuthProvider.credential(accessToken);
+      const userCredential = await signInWithCredential(auth, credential);
+      const user = userCredential.user;
+
+      const profileData = {
+        email: user.email,
+        username: user.email?.split("@")[0],
+        createdAt: new Date().toISOString(),
+        rating: 5.0,
+        tradeCount: 0,
+        emailVerified: user.emailVerified,
+      };
+
+      try {
+        await sendEmailVerification(user);
+      } catch (error: any) {
+        console.error("Facebook verification email error:", error);
+        Alert.alert(
+          "Verification Email Failed",
+          error?.message ||
+            "Unable to send a verification email. Please try again.",
+        );
+      }
+
+      const successMessage =
+        "Account created successfully with Facebook! We sent a verification link to your Gmail. Please verify your email before continuing.";
+
+      showSuccessAndReset(successMessage, "verify");
+      setIsSubmitting(false);
+
+      // Background tasks - don't await these
+      setDoc(doc(db, "users", user.uid), profileData).catch((err) =>
+        console.warn("Firestore setDoc error", err),
+      );
+      if (user.emailVerified) {
+        signOut(auth).catch((err) =>
+          console.warn("Facebook signOut error", err),
+        );
+      }
+    } catch (error: any) {
+      console.error("Facebook Signup Error:", error);
+      Alert.alert("Facebook Signup Error", error?.message || String(error));
+      setIsSubmitting(false);
+    }
   };
 
   const handleSignUp = async () => {
-    const nextErrors: typeof errors = {};
-    if (!email.trim())                    nextErrors.email    = 'Email is required.';
-    else if (!validateEmailFormat(email)) nextErrors.email    = 'Please enter a valid email address.';
-    if (!password)                        nextErrors.password = 'Password is required.';
-    else if (password.length < 6)         nextErrors.password = 'Password must be at least 6 characters.';
-    if (password !== confirm)             nextErrors.confirm  = 'Passwords do not match.';
-    if (Object.keys(nextErrors).length > 0) { setErrors(nextErrors); return; }
+    const nextErrors: any = {};
+
+    if (!email.trim()) {
+      nextErrors.email = "Email is required";
+    } else if (!validateEmailFormat(email)) {
+      nextErrors.email = "Please enter a valid @gmail.com address";
+    }
+
+    if (!password) {
+      nextErrors.password = "Password is required";
+    } else if (password.length < 6) {
+      nextErrors.password = "Password must be at least 6 characters";
+    }
+
+    if (password !== confirm) {
+      nextErrors.confirm = "Passwords do not match";
+    }
+
+    if (Object.keys(nextErrors).length > 0) {
+      setErrors(nextErrors);
+      return;
+    }
 
     setIsSubmitting(true);
+    await createEmailAccount(email.trim(), password);
+  };
 
+  const createEmailAccount = async (email: string, password: string) => {
+    setIsSubmitting(true);
     let user;
+
     try {
-      const { user: u } = await createUserWithEmailAndPassword(auth, email.trim().toLowerCase(), password);
-      user = u;
+      const userCredential = await createUserWithEmailAndPassword(
+        auth,
+        email,
+        password,
+      );
+      user = userCredential.user;
     } catch (error: any) {
-      if (error?.code === 'auth/email-already-in-use')
-        setErrors({ email: 'This email is already registered. Please log in or use a different email.' });
-      else if (error?.code === 'auth/invalid-email')
-        setErrors({ email: 'This email address is not valid.' });
-      else
-        Alert.alert('Signup Error', error?.message || String(error));
+      if (error?.code === "auth/email-already-in-use") {
+        setErrors({ email: "This Gmail is already registered." });
+      } else if (error?.code === "auth/invalid-email") {
+        setErrors({ email: "This email is not valid or does not exist." });
+      } else {
+        Alert.alert("Signup Error", error?.message || String(error));
+      }
       setIsSubmitting(false);
       return;
     }
 
-    await ensureFirestoreDoc(user);
-
-    try {
-      await sendEmailVerification(user);
-    } catch (err: any) {
-      console.warn('Verification email failed:', err?.message);
+    if (!user) {
+      setIsSubmitting(false);
+      return;
     }
 
-    setEmail(''); setPassword(''); setConfirm(''); setErrors({});
+    const message =
+      "Account created successfully! We've sent a verification link to your Gmail. Please verify your email before logging in.";
+    try {
+      await sendEmailVerification(user);
+    } catch (error: any) {
+      console.error("Email verification send error:", error);
+      Alert.alert(
+        "Verification Email Failed",
+        error?.message ||
+          "Unable to send a verification email. Please try again.",
+      );
+    }
+    showSuccessAndReset(message, "verify");
     setIsSubmitting(false);
-
-    router.replace('/(auth)/verify');
   };
 
   return (
-    <KeyboardAvoidingView
-      style={{ flex: 1, backgroundColor: BG }}
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-    >
-      <ScrollView
-        style={{ flex: 1 }}
-        contentContainerStyle={styles.scrollContent}
-        keyboardShouldPersistTaps="handled"
-        showsVerticalScrollIndicator={false}
-      >
-        {/* Header */}
-        <View style={styles.header}>
-          <Text style={styles.headerText}>Create an</Text>
-          <Text style={styles.headerText}>Account...</Text>
-        </View>
-
-        {/* Email */}
-        <View style={[styles.inputContainer, errors.email && styles.inputError]}>
-          <MaterialIcons name="email" size={20} color="#ADADAD" style={styles.inputIcon} />
-          <TextInput
-            style={styles.input}
-            placeholder="Email Address"
-            autoCapitalize="none"
-            keyboardType="email-address"
-            autoComplete="email"
-            textContentType="emailAddress"
-            placeholderTextColor="#999999"
-            value={email}
-            onChangeText={t => { setEmail(t); setErrors(e => ({ ...e, email: undefined })); }}
-          />
-        </View>
-        {errors.email ? <Text style={styles.errorText}>{errors.email}</Text> : null}
-
-        {/* Password */}
-        <View style={[styles.inputContainer, errors.password && styles.inputError]}>
-          <MaterialIcons name="lock" size={20} color="#ADADAD" style={styles.inputIcon} />
-          <TextInput
-            style={styles.input}
-            placeholder="Password"
-            placeholderTextColor="#999999"
-            value={password}
-            onChangeText={handlePasswordChange}
-            secureTextEntry={!showPassword}
-            autoComplete="new-password"
-            textContentType="newPassword"
-          />
-          <TouchableOpacity onPress={() => setShowPassword(v => !v)}>
-            <MaterialIcons
-              name={showPassword ? 'visibility' : 'visibility-off'}
-              size={20}
-              color="#ADADAD"
-            />
-          </TouchableOpacity>
-        </View>
-        {errors.password ? <Text style={styles.errorText}>{errors.password}</Text> : null}
-
-        {/* Password strength */}
-        {isTyping && (
-          <AnimatedAny.View style={[styles.strengthWrap, { opacity: strengthOpacity }]}>
-            <Text style={[styles.strengthLabel, { color: pwStrength.color }]}>
-              Password Strength: {pwStrength.label}
+    <View style={{ flex: 1 }}>
+      <ScrollView style={[styles.container, { backgroundColor: "#ffffff" }]}>
+        <View style={styles.content}>
+          <View style={styles.header}>
+            <Text style={[styles.headerGradient, { color: textColor }]}>
+              Create an
             </Text>
-            <View style={styles.strengthTrack}>
-              <View
-                style={[
-                  styles.strengthFill,
-                  { width: `${(pwStrength.score / 4) * 100}%`, backgroundColor: pwStrength.color },
-                ]}
+            <Text style={[styles.headerGradient, { color: textColor }]}>
+              Account...
+            </Text>
+          </View>
+
+          {/* Email Input */}
+          <View
+            style={[styles.inputContainer, { backgroundColor: inputBgColor }]}
+          >
+            <MaterialIcons
+              name="email"
+              size={20}
+              color={iconColor}
+              style={styles.inputIcon}
+            />
+            <TextInput
+              style={[styles.input, { color: textColor }]}
+              placeholder="Gmail Address"
+              autoCapitalize="none"
+              keyboardType="email-address"
+              placeholderTextColor="#999999"
+              value={email}
+              onChangeText={setEmail}
+            />
+          </View>
+          {errors.email ? (
+            <Text style={styles.errorText}>{errors.email}</Text>
+          ) : null}
+
+          {/* Password Input */}
+          <View
+            style={[styles.inputContainer, { backgroundColor: inputBgColor }]}
+          >
+            <MaterialIcons
+              name="lock"
+              size={20}
+              color={iconColor}
+              style={styles.inputIcon}
+            />
+            <TextInput
+              style={[styles.input, { color: textColor }]}
+              placeholder="Password"
+              placeholderTextColor="#999999"
+              value={password}
+              onChangeText={handlePasswordChange}
+              secureTextEntry={!showPassword}
+            />
+            <TouchableOpacity onPress={() => setShowPassword(!showPassword)}>
+              <MaterialIcons
+                name={showPassword ? "visibility" : "visibility-off"}
+                size={20}
+                color={iconColor}
               />
-            </View>
-          </AnimatedAny.View>
-        )}
+            </TouchableOpacity>
+          </View>
+          {errors.password ? (
+            <Text style={styles.errorText}>{errors.password}</Text>
+          ) : null}
 
-        {/* Confirm password */}
-        <View style={[styles.inputContainer, errors.confirm && styles.inputError]}>
-          <MaterialIcons name="lock" size={20} color="#ADADAD" style={styles.inputIcon} />
-          <TextInput
-            style={styles.input}
-            placeholder="Confirm Password"
-            placeholderTextColor="#999999"
-            value={confirm}
-            onChangeText={t => { setConfirm(t); setErrors(e => ({ ...e, confirm: undefined })); }}
-            secureTextEntry={!showPassword}
-            autoComplete="new-password"
-            textContentType="newPassword"
-          />
-        </View>
-        {errors.confirm ? <Text style={styles.errorText}>{errors.confirm}</Text> : null}
+          {/* Password Strength Indicator */}
+          {isTyping && (
+            <AnimatedAny.View
+              style={[styles.strengthContainer, { opacity: strengthOpacity }]}
+            >
+              <Text style={[styles.strengthText, { color: pwStrength.color }]}>
+                Password Strength: {pwStrength.label}
+              </Text>
+              <View style={styles.strengthBar}>
+                <View
+                  style={[
+                    styles.strengthFill,
+                    {
+                      width: `${(pwStrength.score / 4) * 100}%`,
+                      backgroundColor: pwStrength.color,
+                    },
+                  ]}
+                />
+              </View>
+            </AnimatedAny.View>
+          )}
 
-        {/* Submit */}
-        <Pressable
-          disabled={isSubmitting}
-          onPress={handleSignUp}
-          style={({ pressed }) => [styles.signupBtn, pressed && { opacity: 0.8 }]}
-        >
-          <Text style={styles.signupBtnText}>
-            {isSubmitting ? 'Creating Account…' : 'Sign Up'}
-          </Text>
-        </Pressable>
-
-        {/* Divider */}
-        <View style={styles.divider}>
-          <View style={styles.dividerLine} />
-          <Text style={styles.dividerText}>OR Sign up with</Text>
-          <View style={styles.dividerLine} />
-        </View>
-
-        {/* Social */}
-        <View style={styles.socialRow}>
-          <TouchableOpacity
-            style={styles.socialBtn}
-            activeOpacity={0.7}
-            onPress={() =>
-              googlePromptAsync({ useProxy } as any).catch((err: any) =>
-                Alert.alert('Google Error', err?.message || 'Failed to open Google login')
-              )
-            }
+          {/* Confirm Password Input */}
+          <View
+            style={[styles.inputContainer, { backgroundColor: inputBgColor }]}
           >
-            <FontAwesome name="google" size={24} color={PRIMARY} />
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={styles.socialBtn}
-            activeOpacity={0.7}
-            onPress={() =>
-              facebookPromptAsync
-                ? facebookPromptAsync({ useProxy } as any).catch((err: any) =>
-                    Alert.alert('Facebook Error', err?.message || 'Failed to open Facebook login')
-                  )
-                : Alert.alert('Error', 'Facebook Sign-In not ready. Please try again.')
-            }
+            <MaterialIcons
+              name="lock"
+              size={20}
+              color={iconColor}
+              style={styles.inputIcon}
+            />
+            <TextInput
+              style={[styles.input, { color: textColor }]}
+              placeholder="Confirm Password"
+              placeholderTextColor="#999999"
+              value={confirm}
+              onChangeText={(text) => {
+                setConfirm(text);
+                setErrors((e) => ({ ...e, confirm: undefined }));
+              }}
+              secureTextEntry={!showPassword}
+            />
+          </View>
+          {errors.confirm ? (
+            <Text style={styles.errorText}>{errors.confirm}</Text>
+          ) : null}
+
+          {/* Sign Up Button */}
+          <Pressable
+            disabled={isSubmitting}
+            onPress={handleSignUp}
+            style={({ pressed }) => [
+              styles.signupButton,
+              pressed && styles.signupButtonPressed,
+            ]}
           >
-            <FontAwesome name="facebook" size={24} color={PRIMARY} />
-          </TouchableOpacity>
-        </View>
+            <Text style={styles.signupButtonText}>
+              {isSubmitting ? "Creating Account..." : "Sign Up"}
+            </Text>
+          </Pressable>
 
-        {/* Footer */}
-        <View style={styles.footer}>
-          <Text style={styles.footerText}>Already have an account? </Text>
-          <TouchableOpacity onPress={() => router.push('/login')}>
-            <Text style={styles.footerLink}>Log In</Text>
-          </TouchableOpacity>
-        </View>
+          {/* Divider */}
+          <View style={styles.dividerContainer}>
+            <View style={styles.dividerLine} />
+            <Text style={styles.dividerText}>OR Sign up with</Text>
+            <View style={styles.dividerLine} />
+          </View>
 
+          {/* Social Buttons */}
+          <View style={styles.socialContainer}>
+            <SocialButton
+              name="google"
+              onPress={() => promptAsync({ useProxy } as any)}
+            />
+          </View>
+
+          {/* Footer */}
+          <View style={styles.footer}>
+            <Text style={[styles.footerText, { color: textColor }]}>
+              Already have an account?{" "}
+            </Text>
+            <TouchableOpacity onPress={() => router.push("/login")}>
+              <Text style={styles.footerLink}>Log In</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
       </ScrollView>
-    </KeyboardAvoidingView>
+
+      {/* Success Modal */}
+      <Modal
+        visible={showSuccessModal}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowSuccessModal(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <Text style={styles.modalTitle}>SIGNUP SUCCESSFULLY</Text>
+            <Text style={styles.modalMessage}>{successMessage}</Text>
+            <TouchableOpacity
+              style={styles.modalButton}
+              onPress={() => {
+                setShowSuccessModal(false);
+                setEmail("");
+                setPassword("");
+                setConfirm("");
+                if (successRoute === "verify") {
+                  router.replace("/verify");
+                } else {
+                  router.replace("/login");
+                }
+              }}
+            >
+              <Text style={styles.modalButtonText}>
+                {successRoute === "verify"
+                  ? "Go to Verification"
+                  : "Go to Login"}
+              </Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  // flexGrow + justifyContent: 'center' eliminates dead space below
-  scrollContent: {
-    flexGrow:          1,
-    justifyContent:    'center',
-    paddingHorizontal: 20,
-    paddingVertical:   40,
+  container: {
+    flex: 1,
   },
-
-  header:     { marginBottom: 40 },
-  headerText: { fontSize: 36, fontWeight: 'bold', textAlign: 'center', lineHeight: 42, color: '#000000' },
-
+  content: {
+    padding: 20,
+    paddingTop: 60,
+  },
+  header: {
+    marginBottom: 40,
+  },
+  headerGradient: {
+    fontSize: 36,
+    fontWeight: "bold",
+    textAlign: "center",
+    lineHeight: 42,
+  },
   inputContainer: {
-    flexDirection:     'row',
-    alignItems:        'center',
+    flexDirection: "row",
+    alignItems: "center",
     paddingHorizontal: 15,
-    borderRadius:      12,
-    marginBottom:      16,
-    height:            55,
-    backgroundColor:   '#F0F0F0',
+    borderRadius: 12,
+    marginBottom: 16,
+    height: 55,
   },
-  inputError: {
-    borderWidth: 1.5,
-    borderColor: DANGER,
+  inputIcon: {
+    marginRight: 10,
   },
-  inputIcon: { marginRight: 10 },
-  input:     { flex: 1, fontSize: 16, color: '#000000' },
-
-  errorText: { color: DANGER, fontSize: 13, marginBottom: 8, marginLeft: 4, marginTop: -10 },
-
-  strengthWrap:  { marginBottom: 16, marginLeft: 4 },
-  strengthLabel: { fontSize: 13, fontWeight: '600', marginBottom: 4 },
-  strengthTrack: { height: 4, backgroundColor: '#E0E0E0', borderRadius: 2, overflow: 'hidden' },
-  strengthFill:  { height: '100%' },
-
-  signupBtn: {
-    backgroundColor: PRIMARY,
-    height:          55,
-    borderRadius:    12,
-    justifyContent:  'center',
-    alignItems:      'center',
-    marginTop:       4,
-    marginBottom:    30,
+  input: {
+    flex: 1,
+    fontSize: 16,
   },
-  signupBtnText: { color: '#FFFFFF', fontSize: 18, fontWeight: '600' },
-
-  divider:     { flexDirection: 'row', alignItems: 'center', marginBottom: 20 },
-  dividerLine: { flex: 1, height: 1, backgroundColor: BORDER },
-  dividerText: { marginHorizontal: 10, color: MUTED, fontSize: 14 },
-
-  socialRow: { flexDirection: 'row', justifyContent: 'center', marginBottom: 24 },
-  socialBtn: {
-    width:            60,
-    height:           60,
-    borderRadius:     30,
-    backgroundColor:  '#F0F0F0',
-    justifyContent:   'center',
-    alignItems:       'center',
+  errorText: {
+    color: "#D9534F",
+    fontSize: 14,
+    marginBottom: 8,
+    marginLeft: 15,
+  },
+  strengthContainer: {
+    marginBottom: 16,
+    marginLeft: 15,
+  },
+  strengthText: {
+    fontSize: 14,
+    fontWeight: "600",
+    marginBottom: 4,
+  },
+  strengthBar: {
+    height: 4,
+    backgroundColor: "#E0E0E0",
+    borderRadius: 2,
+    overflow: "hidden",
+  },
+  strengthFill: {
+    height: "100%",
+  },
+  signupButton: {
+    backgroundColor: "#2F2F6F",
+    height: 55,
+    borderRadius: 12,
+    justifyContent: "center",
+    alignItems: "center",
+    marginTop: 20,
+    marginBottom: 30,
+  },
+  signupButtonPressed: {
+    opacity: 0.8,
+  },
+  signupButtonText: {
+    color: "#FFFFFF",
+    fontSize: 18,
+    fontWeight: "600",
+  },
+  dividerContainer: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginVertical: 20,
+  },
+  dividerLine: {
+    flex: 1,
+    height: 1,
+    backgroundColor: "#E0E0E0",
+  },
+  dividerText: {
+    marginHorizontal: 10,
+    color: "#666",
+    fontSize: 14,
+  },
+  socialContainer: {
+    flexDirection: "row",
+    justifyContent: "center",
+    marginBottom: 30,
+  },
+  socialButton: {
+    width: 60,
+    height: 60,
+    borderRadius: 30,
+    backgroundColor: "#F0F0F0",
+    justifyContent: "center",
+    alignItems: "center",
     marginHorizontal: 12,
   },
-
-  footer:     { flexDirection: 'row', justifyContent: 'center' },
-  footerText: { fontSize: 15, color: '#000000' },
-  footerLink: { color: PRIMARY, fontSize: 15, fontWeight: 'bold' },
+  footer: {
+    flexDirection: "row",
+    justifyContent: "center",
+    paddingBottom: 20,
+  },
+  footerText: {
+    fontSize: 15,
+  },
+  footerLink: {
+    color: "#2F2F6F",
+    fontSize: 15,
+    fontWeight: "bold",
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0, 0, 0, 0.5)",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  modalContent: {
+    backgroundColor: "#ffffff",
+    borderRadius: 12,
+    padding: 20,
+    width: "80%",
+    alignItems: "center",
+  },
+  modalTitle: {
+    fontSize: 24,
+    fontWeight: "bold",
+    color: "#000000",
+    marginBottom: 10,
+  },
+  modalMessage: {
+    fontSize: 16,
+    color: "#000000",
+    textAlign: "center",
+    marginBottom: 20,
+  },
+  modalButton: {
+    backgroundColor: "#2F2F6F",
+    paddingVertical: 12,
+    paddingHorizontal: 24,
+    borderRadius: 8,
+  },
+  modalButtonText: {
+    color: "#FFFFFF",
+    fontSize: 16,
+    fontWeight: "600",
+  },
 });
