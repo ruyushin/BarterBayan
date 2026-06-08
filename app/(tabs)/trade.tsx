@@ -1,6 +1,6 @@
 import { Ionicons } from "@expo/vector-icons";
-import { useLocalSearchParams, useRouter } from "expo-router";
-import { useEffect, useRef, useState } from "react";
+import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -9,6 +9,7 @@ import {
   Image,
   Modal,
   SafeAreaView,
+  ScrollView,
   StyleSheet,
   Text,
   TextInput,
@@ -16,13 +17,17 @@ import {
   View,
 } from "react-native";
 import { TradeChatModal } from "../../components/TradeChatModal";
-import { TradeOffersModal } from "../../components/TradeOffersModal";
 import { auth } from "../../firebaseConfig";
-import { deleteItem, getAllItems } from "../../services/itemService";
+import { getUserPostedItems } from "../../services/itemService";
 import {
   TradeOffer,
   cancelTradeOffer,
+  completeTrade,
+  submitTradeReview,
+  subscribeToOffersForItem,
   subscribeToSentOffers,
+  subscribeToTrade,
+  updateTradeStatus,
 } from "../../services/tradeService";
 
 const FILTER_CATEGORIES = [
@@ -41,7 +46,39 @@ const STATUS_COLORS: Record<string, { bg: string; text: string }> = {
   accepted: { bg: "#F0FDF4", text: "#16A34A" },
   declined: { bg: "#FFF1F2", text: "#E11D48" },
   cancelled: { bg: "#F3F4F6", text: "#6B7280" },
+  completed: { bg: "#E8F5E9", text: "#16A34A" },
 };
+
+function StarRating({
+  rating,
+  onRate,
+  size = 32,
+  readonly = false,
+}: {
+  rating: number;
+  onRate?: (r: number) => void;
+  size?: number;
+  readonly?: boolean;
+}) {
+  return (
+    <View style={{ flexDirection: "row", gap: 6, justifyContent: "center" }}>
+      {[1, 2, 3, 4, 5].map((star) => (
+        <TouchableOpacity
+          key={star}
+          onPress={() => !readonly && onRate?.(star)}
+          disabled={readonly}
+          activeOpacity={readonly ? 1 : 0.7}
+        >
+          <Ionicons
+            name={star <= rating ? "star" : "star-outline"}
+            size={size}
+            color={star <= rating ? "#FFB800" : "#DDD"}
+          />
+        </TouchableOpacity>
+      ))}
+    </View>
+  );
+}
 
 export default function TradeScreen() {
   const [activeTab, setActiveTab] = useState("trades");
@@ -51,59 +88,56 @@ export default function TradeScreen() {
   const [isFilterOpen, setIsFilterOpen] = useState(false);
   const [userItems, setUserItems] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
-  const [searchPopupVisible, setSearchPopupVisible] = useState(false);
 
   const [sentOffers, setSentOffers] = useState<TradeOffer[]>([]);
   const [cancellingOfferId, setCancellingOfferId] = useState<string | null>(
     null,
   );
   const [confirmCancelId, setConfirmCancelId] = useState<string | null>(null);
+  const [completingOfferId, setCompletingOfferId] = useState<string | null>(
+    null,
+  );
 
+  const [chatTrade, setChatTrade] = useState<TradeOffer | null>(null);
+  const [chatIsOwner, setChatIsOwner] = useState(false);
+
+  const [reviewRating, setReviewRating] = useState(0);
+  const [reviewComment, setReviewComment] = useState("");
+  const [submittingReview, setSubmittingReview] = useState(false);
+  const [showReviewForm, setShowReviewForm] = useState(false);
+
+  // See Offers modal — live-subscribed so status updates in real time
   const [offersModalVisible, setOffersModalVisible] = useState(false);
   const [selectedItemForOffers, setSelectedItemForOffers] = useState<any>(null);
+  const [incomingOffers, setIncomingOffers] = useState<TradeOffer[]>([]);
+  const [updatingOfferId, setUpdatingOfferId] = useState<string | null>(null);
 
   const [statusModalVisible, setStatusModalVisible] = useState(false);
   const [selectedOffer, setSelectedOffer] = useState<TradeOffer | null>(null);
 
-  const [chatModalVisible, setChatModalVisible] = useState(false);
-
-  // ── Delete state ─────────────────────────────────────────────────────────
-  const [deleteModalVisible, setDeleteModalVisible] = useState(false);
-  const [itemToDelete, setItemToDelete] = useState<any>(null);
-  const [deletingItemId, setDeletingItemId] = useState<string | null>(null);
-  // ─────────────────────────────────────────────────────────────────────────
+  // Deep-link: open a specific trade chat from a notification
+  const { openTradeId } = useLocalSearchParams<{ openTradeId?: string }>();
 
   const router = useRouter();
   const fadeAnim = useRef(new Animated.Value(1)).current;
   const addButtonScale = useRef(new Animated.Value(1)).current;
 
-  // ── Deep-link: open trade chat directly from a notification ─────────────
-  const { openTradeId } = useLocalSearchParams<{ openTradeId?: string }>();
-
-  useEffect(() => {
-    if (!openTradeId || sentOffers.length === 0) return;
-    const target = sentOffers.find((o) => o.id === openTradeId);
-    if (target) {
-      setSelectedOffer(target);
-      setStatusModalVisible(true);
-      setChatModalVisible(true);
-    }
-  }, [openTradeId, sentOffers]);
-  // ─────────────────────────────────────────────────────────────────────────
-
-  useEffect(() => {
-    fetchUserItems();
-  }, []);
+  // ── Fetch user's own items ────────────────────────────────────────────────
+  useFocusEffect(
+    useCallback(() => {
+      fetchUserItems();
+    }, []),
+  );
 
   const fetchUserItems = async () => {
     try {
       setLoading(true);
       const currentUserId = auth.currentUser?.uid;
       if (!currentUserId) return;
-      const allItems = await getAllItems();
-      setUserItems(
-        allItems.filter((item: any) => item.ownerId === currentUserId),
-      );
+      // getUserPostedItems filters by ownerId and intentionally includes
+      // isTraded items so listings mid-trade or completed still appear here.
+      const myItems = await getUserPostedItems(currentUserId);
+      setUserItems(myItems);
     } catch (error) {
       console.error("Error fetching items:", error);
     } finally {
@@ -111,54 +145,72 @@ export default function TradeScreen() {
     }
   };
 
+  // ── Real-time: sent offers ────────────────────────────────────────────────
   useEffect(() => {
-    const currentUserId = auth.currentUser?.uid;
-    if (!currentUserId) return;
-
-    const unsubscribe = subscribeToSentOffers(currentUserId, (offers) => {
-      setSentOffers(offers);
-      setSelectedOffer((prev) => {
-        if (!prev) return prev;
-        const updated = offers.find((o) => o.id === prev.id);
-        return updated ?? prev;
-      });
-    });
-
-    return unsubscribe;
+    const uid = auth.currentUser?.uid;
+    if (!uid) return;
+    return subscribeToSentOffers(uid, setSentOffers);
   }, []);
 
+  // ── Deep-link: open chat from notification ────────────────────────────────
+  useEffect(() => {
+    if (!openTradeId || sentOffers.length === 0) return;
+    const target = sentOffers.find((o) => o.id === openTradeId);
+    if (target) {
+      setSelectedOffer(target);
+      setStatusModalVisible(true);
+      openChat(target, false);
+    }
+  }, [openTradeId, sentOffers]);
+
+  // ── Live subscription for the status modal ────────────────────────────────
+  useEffect(() => {
+    if (!statusModalVisible || !selectedOffer?.id) return;
+    return subscribeToTrade(selectedOffer.id, (updated) => {
+      if (updated) setSelectedOffer(updated);
+    });
+  }, [statusModalVisible, selectedOffer?.id]);
+
+  // ── Live subscription for the See Offers modal ────────────────────────────
+  useEffect(() => {
+    if (!offersModalVisible || !selectedItemForOffers?.id) return;
+    return subscribeToOffersForItem(
+      selectedItemForOffers.id,
+      setIncomingOffers,
+    );
+  }, [offersModalVisible, selectedItemForOffers?.id]);
+
+  // ── Handlers ─────────────────────────────────────────────────────────────
   const handleSeeOffers = (item: any) => {
+    setIncomingOffers([]);
     setSelectedItemForOffers(item);
     setOffersModalVisible(true);
+    // Data loads via subscribeToOffersForItem effect above
   };
 
-  const handleDeletePress = (item: any) => {
-    setItemToDelete(item);
-    setDeleteModalVisible(true);
-  };
-
-  const handleConfirmDelete = async () => {
-    if (!itemToDelete) return;
-    setDeletingItemId(itemToDelete.id);
-    setDeleteModalVisible(false);
+  const handleRespondToOffer = async (
+    offerId: string,
+    response: "accepted" | "declined",
+  ) => {
+    setUpdatingOfferId(offerId);
     try {
-      await deleteItem(itemToDelete.id);
-      setUserItems((prev) => prev.filter((i) => i.id !== itemToDelete.id));
-    } catch (err: any) {
-      console.error("deleteItem failed:", err);
-      Alert.alert(
-        "Error",
-        err?.message ?? "Failed to delete the item. Please try again.",
-      );
+      await updateTradeStatus(offerId, response);
+      // ✅ If accepted, close the modal and show the accepted offer in status
+      if (response === "accepted") {
+        const acceptedOffer = incomingOffers.find((o) => o.id === offerId);
+        if (acceptedOffer) {
+          setTimeout(() => {
+            setOffersModalVisible(false);
+            setSelectedOffer({ ...acceptedOffer, status: "accepted" });
+            setStatusModalVisible(true);
+          }, 500);
+        }
+      }
+    } catch {
+      /* noop */
     } finally {
-      setDeletingItemId(null);
-      setItemToDelete(null);
+      setUpdatingOfferId(null);
     }
-  };
-
-  const handleCancelDelete = () => {
-    setDeleteModalVisible(false);
-    setItemToDelete(null);
   };
 
   const executeCancelOffer = async (offerId: string) => {
@@ -171,11 +223,7 @@ export default function TradeScreen() {
         setSelectedOffer(null);
       }
     } catch (err: any) {
-      console.error("cancelTradeOffer failed:", err);
-      Alert.alert(
-        "Error",
-        err?.message ?? "Failed to cancel the offer. Please try again.",
-      );
+      Alert.alert("Error", err?.message ?? "Failed to cancel the offer.");
     } finally {
       setCancellingOfferId(null);
     }
@@ -196,14 +244,74 @@ export default function TradeScreen() {
     );
   };
 
-  const handleSort = () => {
+  const handleCompleteTrade = async (offer: TradeOffer) => {
+    const currentUser = auth.currentUser;
+    if (!currentUser) return;
+    setCompletingOfferId(offer.id);
+    try {
+      await completeTrade(offer.id, currentUser.uid);
+      // selectedOffer auto-updates via subscribeToTrade
+    } catch (err: any) {
+      Alert.alert("Error", err?.message ?? "Failed to confirm the trade.");
+    } finally {
+      setCompletingOfferId(null);
+    }
+  };
+
+  const handleSubmitReview = async (offer: TradeOffer) => {
+    const currentUser = auth.currentUser;
+    if (!currentUser || reviewRating === 0) return;
+    setSubmittingReview(true);
+    const myUid = currentUser.uid;
+    // BUG FIX: derive the target from participants, not a hardcoded role
+    const targetUserId =
+      offer.participants?.find((p) => p !== myUid) ?? offer.ownerId;
+    try {
+      const bothDone = await submitTradeReview(
+        offer.id,
+        myUid,
+        targetUserId,
+        reviewRating,
+        reviewComment.trim(),
+      );
+      setShowReviewForm(false);
+      setReviewRating(0);
+      setReviewComment("");
+      if (bothDone) {
+        Alert.alert(
+          "Reviews Published! 🎉",
+          "Both reviews are now live on your profiles.",
+        );
+      } else {
+        Alert.alert(
+          "Review Submitted!",
+          "Waiting for the other person — both reviews reveal together.",
+        );
+      }
+    } catch (err: any) {
+      Alert.alert("Error", err?.message ?? "Failed to submit review.");
+    } finally {
+      setSubmittingReview(false);
+    }
+  };
+
+  const closeStatusModal = () => {
+    setStatusModalVisible(false);
+    setShowReviewForm(false);
+    setReviewRating(0);
+    setReviewComment("");
+  };
+
+  const openChat = (trade: TradeOffer, asOwner: boolean) => {
+    setChatTrade(trade);
+    setChatIsOwner(asOwner);
+  };
+
+  const handleSort = () =>
     setSortType((prev) =>
       prev === "none" ? "likes" : prev === "likes" ? "name" : "none",
     );
-  };
-
   const handleFilterToggle = () => setIsFilterOpen((prev) => !prev);
-
   const handleCategorySelect = (category: string) => {
     setFilterCategory(category);
     setIsFilterOpen(false);
@@ -241,17 +349,17 @@ export default function TradeScreen() {
     ]).start(() => router.push("/add-item"));
   };
 
+  // ── Derived data ─────────────────────────────────────────────────────────
   const filteredItems = userItems
     .filter((item) => {
       const matchSearch =
         search.length === 0 ||
-        (item.title &&
-          item.title.toLowerCase().includes(search.toLowerCase())) ||
-        (item.description &&
-          item.description.toLowerCase().includes(search.toLowerCase()));
-      const matchFilter =
-        filterCategory === "All" || item.category === filterCategory;
-      return matchSearch && matchFilter;
+        item.title?.toLowerCase().includes(search.toLowerCase()) ||
+        item.description?.toLowerCase().includes(search.toLowerCase());
+      return (
+        matchSearch &&
+        (filterCategory === "All" || item.category === filterCategory)
+      );
     })
     .sort((a, b) => {
       if (sortType === "likes") return (b.likes || 0) - (a.likes || 0);
@@ -260,63 +368,36 @@ export default function TradeScreen() {
       return 0;
     });
 
-  const filteredSentOffers = sentOffers.filter(
-    (offer) =>
+  const filteredSentOffers = sentOffers.filter((offer) => {
+    if (offer.status === "declined" || offer.status === "cancelled")
+      return false;
+    return (
       search.length === 0 ||
       offer.offeredItemTitle.toLowerCase().includes(search.toLowerCase()) ||
-      offer.requestedItemTitle.toLowerCase().includes(search.toLowerCase()),
-  );
+      offer.requestedItemTitle.toLowerCase().includes(search.toLowerCase())
+    );
+  });
 
   const pendingCount = sentOffers.filter((o) => o.status === "pending").length;
 
+  // ── Renderers ─────────────────────────────────────────────────────────────
   const renderTradeItem = ({ item }: any) => {
-    // Validate image URLs and filter out blob URLs
-    const validateImageUrl = (url: string | undefined): boolean => {
-      if (!url) return false;
-      if (typeof url !== "string") return false;
-      if (url.startsWith("blob:")) return false;
-      return true;
-    };
-
-    const imageUrl = (() => {
-      if (validateImageUrl(item?.images?.[0])) return item.images[0];
-      if (validateImageUrl(item?.image)) return item.image;
-      return "https://via.placeholder.com/200";
-    })();
-
-    const isDeleting = deletingItemId === item.id;
-
+    const imageUrl =
+      Array.isArray(item?.images) && item.images.length > 0
+        ? item.images[0]
+        : item?.image || "https://via.placeholder.com/200";
     return (
-      <View style={[styles.card, isDeleting && styles.cardDeleting]}>
-        <Image
-          source={{ uri: imageUrl }}
-          style={styles.image}
-          onError={() => console.warn("Failed to load trade item image:", imageUrl)}
-        />
+      <View style={styles.card}>
+        <Image source={{ uri: imageUrl }} style={styles.image} />
         <Text style={styles.itemName} numberOfLines={2}>
           {item.title || item.name}
         </Text>
-        <View style={styles.cardActions}>
-          <TouchableOpacity
-            style={styles.offerButton}
-            onPress={() => handleSeeOffers(item)}
-            disabled={isDeleting}
-          >
-            <Text style={styles.offerText}>See Offers</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={styles.deleteButton}
-            onPress={() => handleDeletePress(item)}
-            disabled={isDeleting}
-            activeOpacity={0.7}
-          >
-            {isDeleting ? (
-              <ActivityIndicator size="small" color="#E11D48" />
-            ) : (
-              <Ionicons name="trash-outline" size={16} color="#E11D48" />
-            )}
-          </TouchableOpacity>
-        </View>
+        <TouchableOpacity
+          style={styles.offerButton}
+          onPress={() => handleSeeOffers(item)}
+        >
+          <Text style={styles.offerText}>See Offers</Text>
+        </TouchableOpacity>
       </View>
     );
   };
@@ -342,7 +423,6 @@ export default function TradeScreen() {
               {offer.status.charAt(0).toUpperCase() + offer.status.slice(1)}
             </Text>
           </View>
-
           <View style={styles.offerItemsRow}>
             <View style={styles.offerSide}>
               <Image
@@ -413,83 +493,19 @@ export default function TradeScreen() {
 
   return (
     <SafeAreaView style={styles.container}>
-      <View style={styles.searchWrapper}>
-        <View style={styles.searchContainer}>
-          <Ionicons
-            name="search-outline"
-            size={20}
-            color="#5B5B7B"
-            style={styles.searchIcon}
-          />
-          <TextInput
-            placeholder="Search for items..."
-            placeholderTextColor="#888"
-            style={styles.searchInput}
-            value={search}
-            onChangeText={(text) => {
-              setSearch(text);
-              setSearchPopupVisible(text.length > 0);
-            }}
-            onSubmitEditing={() => setSearchPopupVisible(false)}
-          />
-        </View>
-
-        {searchPopupVisible && search.trim().length > 0 && (
-          <View style={styles.searchPopup}>
-            <Text style={styles.popupTitle}>
-              {userItems.filter(
-                (item) =>
-                  item.title.toLowerCase().includes(search.toLowerCase()) ||
-                  item.category.toLowerCase().includes(search.toLowerCase())
-              ).length > 0
-                ? `Found ${userItems.filter(
-                    (item) =>
-                      item.title.toLowerCase().includes(search.toLowerCase()) ||
-                      item.category.toLowerCase().includes(search.toLowerCase())
-                  ).length} related posts`
-                : "No related posts found"}
-            </Text>
-            {userItems
-              .filter(
-                (item) =>
-                  item.title.toLowerCase().includes(search.toLowerCase()) ||
-                  item.category.toLowerCase().includes(search.toLowerCase())
-              )
-              .slice(0, 5).length > 0 ? (
-              userItems
-                .filter(
-                  (item) =>
-                    item.title.toLowerCase().includes(search.toLowerCase()) ||
-                    item.category.toLowerCase().includes(search.toLowerCase())
-                )
-                .slice(0, 5)
-                .map((item) => (
-                  <TouchableOpacity
-                    key={item.id}
-                    style={styles.searchResultLink}
-                    onPress={() => {
-                      setSearch(item.title);
-                      setSearchPopupVisible(false);
-                    }}
-                    activeOpacity={0.7}
-                  >
-                    <View style={styles.searchResultItem}>
-                      <Text style={styles.searchResultText}>
-                        {item.title}
-                      </Text>
-                      <Text style={styles.searchResultCategory}>
-                        {item.category}
-                      </Text>
-                    </View>
-                  </TouchableOpacity>
-                ))
-            ) : (
-              <Text style={styles.noResultsText}>
-                Try a different keyword or category.
-              </Text>
-            )}
-          </View>
-        )}
+      <View style={styles.searchContainer}>
+        <Ionicons
+          name="search-outline"
+          size={20}
+          color="#5B5B7B"
+          style={styles.searchIcon}
+        />
+        <TextInput
+          placeholder="Search for items..."
+          style={styles.searchInput}
+          value={search}
+          onChangeText={setSearch}
+        />
       </View>
 
       <View style={styles.tabs}>
@@ -595,7 +611,7 @@ export default function TradeScreen() {
                   size={48}
                   color="#ccc"
                 />
-                <Text style={styles.emptyText}>No trade offers sent yet</Text>
+                <Text style={styles.emptyText}>No active trade offers</Text>
               </View>
             }
           />
@@ -609,194 +625,151 @@ export default function TradeScreen() {
         </TouchableOpacity>
       </Animated.View>
 
-      {/* Incoming offers modal */}
-      <TradeOffersModal
+      {/* ── See Offers Modal ── */}
+      <Modal
         visible={offersModalVisible}
-        itemId={selectedItemForOffers?.id ?? null}
-        itemTitle={selectedItemForOffers?.title ?? ""}
-        onClose={() => {
-          setOffersModalVisible(false);
-          setSelectedItemForOffers(null);
-        }}
-      />
-
-      {/* Delete confirmation modal */}
-      <Modal
-        visible={deleteModalVisible}
-        transparent
-        animationType="fade"
-        onRequestClose={handleCancelDelete}
-      >
-        <View style={styles.modalOverlay}>
-          <View style={styles.deleteModalSheet}>
-            <View style={styles.deleteIconWrapper}>
-              <Ionicons name="trash" size={32} color="#E11D48" />
-            </View>
-            <Text style={styles.deleteModalTitle}>Delete Item?</Text>
-            <Text style={styles.deleteModalBody}>
-              Are you sure you want to delete{" "}
-              <Text style={styles.deleteModalItemName}>
-                "{itemToDelete?.title || itemToDelete?.name}"
-              </Text>
-              ? This action cannot be undone.
-            </Text>
-            <View style={styles.deleteModalActions}>
-              <TouchableOpacity
-                style={styles.deleteModalCancelBtn}
-                onPress={handleCancelDelete}
-                activeOpacity={0.8}
-              >
-                <Text style={styles.deleteModalCancelText}>Keep Item</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={styles.deleteModalConfirmBtn}
-                onPress={handleConfirmDelete}
-                activeOpacity={0.8}
-              >
-                <Ionicons name="trash-outline" size={15} color="#fff" />
-                <Text style={styles.deleteModalConfirmText}>Delete</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-        </View>
-      </Modal>
-
-      {/* Status detail modal */}
-      <Modal
-        visible={statusModalVisible}
         transparent
         animationType="slide"
-        onRequestClose={() => setStatusModalVisible(false)}
+        onRequestClose={() => setOffersModalVisible(false)}
       >
         <View style={styles.modalOverlay}>
-          <View style={[styles.modalSheet, { paddingBottom: 34 }]}>
+          <View style={styles.modalSheet}>
             <View style={styles.sheetHandle} />
-            <Text style={styles.modalTitle}>Trade Offer Status</Text>
+            <Text style={styles.modalTitle}>Offers on</Text>
+            <Text style={styles.modalItemName} numberOfLines={1}>
+              {selectedItemForOffers?.title}
+            </Text>
 
-            {selectedOffer &&
-              (() => {
-                const statusStyle =
-                  STATUS_COLORS[selectedOffer.status] || STATUS_COLORS.pending;
-                const isPending = selectedOffer.status === "pending";
-                const isCancelling = cancellingOfferId === selectedOffer.id;
-                const canChat =
-                  selectedOffer.status === "pending" ||
-                  selectedOffer.status === "accepted";
-
-                return (
-                  <>
-                    <View style={styles.statusDetailRow}>
-                      <View style={styles.statusDetailSide}>
-                        <Text style={styles.statusDetailLabel}>
-                          You offered
-                        </Text>
+            {incomingOffers.length === 0 ? (
+              <View style={styles.modalEmpty}>
+                <Ionicons name="inbox-outline" size={48} color="#ccc" />
+                <Text style={styles.modalEmptyText}>No offers yet</Text>
+              </View>
+            ) : (
+              <FlatList
+                data={incomingOffers}
+                keyExtractor={(o) => o.id}
+                showsVerticalScrollIndicator={false}
+                contentContainerStyle={{ paddingBottom: 16 }}
+                renderItem={({ item: offer }) => {
+                  const statusStyle =
+                    STATUS_COLORS[offer.status] || STATUS_COLORS.pending;
+                  const isUpdating = updatingOfferId === offer.id;
+                  const isAccepted = offer.status === "accepted";
+                  const isCompleted = offer.status === "completed";
+                  return (
+                    <View style={styles.incomingOfferCard}>
+                      <View style={styles.incomingOffererRow}>
                         <Image
                           source={{
                             uri:
-                              selectedOffer.offeredItemImage ||
-                              "https://via.placeholder.com/100",
+                              offer.offererAvatar ||
+                              "https://i.pravatar.cc/150?img=1",
                           }}
-                          style={styles.statusDetailImage}
+                          style={styles.incomingOffererAvatar}
                         />
-                        <Text
-                          style={styles.statusDetailTitle}
-                          numberOfLines={2}
-                        >
-                          {selectedOffer.offeredItemTitle}
+                        <Text style={styles.incomingOffererName}>
+                          {offer.offererName}
                         </Text>
+                        <View
+                          style={[
+                            styles.statusBadge,
+                            { backgroundColor: statusStyle.bg },
+                          ]}
+                        >
+                          <Text
+                            style={[
+                              styles.statusBadgeText,
+                              { color: statusStyle.text },
+                            ]}
+                          >
+                            {offer.status.charAt(0).toUpperCase() +
+                              offer.status.slice(1)}
+                          </Text>
+                        </View>
                       </View>
-                      <Ionicons name="swap-horizontal" size={28} color={NAVY} />
-                      <View style={styles.statusDetailSide}>
-                        <Text style={styles.statusDetailLabel}>For</Text>
+
+                      <View style={styles.incomingItemRow}>
                         <Image
                           source={{
                             uri:
-                              selectedOffer.requestedItemImage ||
-                              "https://via.placeholder.com/100",
+                              offer.offeredItemImage ||
+                              "https://via.placeholder.com/80",
                           }}
-                          style={styles.statusDetailImage}
+                          style={styles.incomingItemImage}
                         />
-                        <Text
-                          style={styles.statusDetailTitle}
-                          numberOfLines={2}
-                        >
-                          {selectedOffer.requestedItemTitle}
-                        </Text>
+                        <View style={{ flex: 1 }}>
+                          <Text style={styles.incomingItemLabel}>
+                            They're offering:
+                          </Text>
+                          <Text style={styles.incomingItemTitle}>
+                            {offer.offeredItemTitle}
+                          </Text>
+                        </View>
                       </View>
+
+                      {offer.status === "pending" && (
+                        <View style={styles.incomingActions}>
+                          <TouchableOpacity
+                            style={styles.declineBtn}
+                            onPress={() =>
+                              handleRespondToOffer(offer.id, "declined")
+                            }
+                            disabled={isUpdating}
+                          >
+                            {isUpdating ? (
+                              <ActivityIndicator size="small" color="#E11D48" />
+                            ) : (
+                              <Text style={styles.declineBtnText}>Decline</Text>
+                            )}
+                          </TouchableOpacity>
+                          <TouchableOpacity
+                            style={styles.acceptBtn}
+                            onPress={() =>
+                              handleRespondToOffer(offer.id, "accepted")
+                            }
+                            disabled={isUpdating}
+                          >
+                            {isUpdating ? (
+                              <ActivityIndicator size="small" color="#fff" />
+                            ) : (
+                              <Text style={styles.acceptBtnText}>Accept</Text>
+                            )}
+                          </TouchableOpacity>
+                        </View>
+                      )}
+                      {(isAccepted || isCompleted) && (
+                        <TouchableOpacity
+                          style={styles.msgCoordinateBtn}
+                          onPress={() => {
+                            setOffersModalVisible(false);
+
+                            setTimeout(() => {
+                              setSelectedOffer(offer);
+                              setStatusModalVisible(true);
+                            }, 200);
+                          }}
+                          activeOpacity={0.85}
+                        >
+                          <Ionicons
+                            name="chatbubble-ellipses-outline"
+                            size={16}
+                            color={NAVY}
+                          />
+                          <Text style={styles.msgCoordinateBtnText}>
+                            {isCompleted ? "View Trade Details" : "Open Trade"}
+                          </Text>
+                        </TouchableOpacity>
+                      )}
                     </View>
-
-                    <View
-                      style={[
-                        styles.statusDetailBadge,
-                        { backgroundColor: statusStyle.bg },
-                      ]}
-                    >
-                      <Text
-                        style={[
-                          styles.statusDetailBadgeText,
-                          { color: statusStyle.text },
-                        ]}
-                      >
-                        {selectedOffer.status === "pending" &&
-                          "⏳ Waiting for owner's response"}
-                        {selectedOffer.status === "accepted" &&
-                          "✅ Trade accepted! Message the owner to coordinate."}
-                        {selectedOffer.status === "declined" &&
-                          "❌ Offer was declined"}
-                        {selectedOffer.status === "cancelled" &&
-                          "🚫 You cancelled this offer"}
-                      </Text>
-                    </View>
-
-                    {canChat && (
-                      <TouchableOpacity
-                        style={styles.chatBtn}
-                        onPress={() => setChatModalVisible(true)}
-                        activeOpacity={0.85}
-                      >
-                        <Ionicons
-                          name="chatbubble-ellipses-outline"
-                          size={16}
-                          color="#fff"
-                        />
-                        <Text style={styles.chatBtnText}>
-                          {selectedOffer.status === "accepted"
-                            ? "Message to Coordinate"
-                            : "Message Owner"}
-                        </Text>
-                      </TouchableOpacity>
-                    )}
-
-                    {isPending && (
-                      <TouchableOpacity
-                        style={styles.cancelOfferBtnModal}
-                        onPress={() => handleCancelFromModal(selectedOffer)}
-                        disabled={isCancelling}
-                        activeOpacity={0.8}
-                      >
-                        {isCancelling ? (
-                          <ActivityIndicator size="small" color="#E11D48" />
-                        ) : (
-                          <>
-                            <Ionicons
-                              name="close-circle-outline"
-                              size={16}
-                              color="#E11D48"
-                            />
-                            <Text style={styles.cancelOfferBtnModalText}>
-                              Cancel This Offer
-                            </Text>
-                          </>
-                        )}
-                      </TouchableOpacity>
-                    )}
-                  </>
-                );
-              })()}
+                  );
+                }}
+              />
+            )}
 
             <TouchableOpacity
               style={styles.modalCloseBtn}
-              onPress={() => setStatusModalVisible(false)}
+              onPress={() => setOffersModalVisible(false)}
             >
               <Text style={styles.modalCloseBtnText}>Close</Text>
             </TouchableOpacity>
@@ -804,12 +777,353 @@ export default function TradeScreen() {
         </View>
       </Modal>
 
-      {/* Trade chat modal */}
+      {/* ── Status Detail Modal ── */}
+      <Modal
+        visible={statusModalVisible}
+        transparent
+        animationType="slide"
+        onRequestClose={closeStatusModal}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modalSheet, { paddingBottom: 34 }]}>
+            <View style={styles.sheetHandle} />
+            <Text style={styles.modalTitle}>Trade Offer Status</Text>
+
+            <ScrollView
+              showsVerticalScrollIndicator={false}
+              keyboardShouldPersistTaps="handled"
+            >
+              {selectedOffer &&
+                (() => {
+                  const statusStyle =
+                    STATUS_COLORS[selectedOffer.status] ||
+                    STATUS_COLORS.pending;
+                  const isPending = selectedOffer.status === "pending";
+                  const isAccepted = selectedOffer.status === "accepted";
+                  const isCompleted = selectedOffer.status === "completed";
+                  const isCancelling = cancellingOfferId === selectedOffer.id;
+                  const isCompleting = completingOfferId === selectedOffer.id;
+
+                  const myUid = auth.currentUser?.uid ?? "";
+
+                  const completedBy: string[] = selectedOffer.completedBy ?? [];
+                  const iHaveConfirmed = completedBy.includes(myUid);
+                  const otherParticipantUid =
+                    selectedOffer.participants?.find((p) => p !== myUid) ??
+                    selectedOffer.ownerId;
+                  const otherHasConfirmed =
+                    completedBy.includes(otherParticipantUid) &&
+                    !iHaveConfirmed;
+
+                  const reviews = selectedOffer.reviews ?? {};
+                  const myReview = reviews[myUid];
+                  const theirReview = reviews[otherParticipantUid];
+                  const bothReviewed = !!myReview && !!theirReview;
+
+                  return (
+                    <>
+                      <View style={styles.statusDetailRow}>
+                        <View style={styles.statusDetailSide}>
+                          <Text style={styles.statusDetailLabel}>
+                            You offered
+                          </Text>
+                          <Image
+                            source={{
+                              uri:
+                                selectedOffer.offeredItemImage ||
+                                "https://via.placeholder.com/100",
+                            }}
+                            style={styles.statusDetailImage}
+                          />
+                          <Text
+                            style={styles.statusDetailTitle}
+                            numberOfLines={2}
+                          >
+                            {selectedOffer.offeredItemTitle}
+                          </Text>
+                        </View>
+                        <Ionicons
+                          name="swap-horizontal"
+                          size={28}
+                          color={NAVY}
+                        />
+                        <View style={styles.statusDetailSide}>
+                          <Text style={styles.statusDetailLabel}>For</Text>
+                          <Image
+                            source={{
+                              uri:
+                                selectedOffer.requestedItemImage ||
+                                "https://via.placeholder.com/100",
+                            }}
+                            style={styles.statusDetailImage}
+                          />
+                          <Text
+                            style={styles.statusDetailTitle}
+                            numberOfLines={2}
+                          >
+                            {selectedOffer.requestedItemTitle}
+                          </Text>
+                        </View>
+                      </View>
+
+                      <View
+                        style={[
+                          styles.statusDetailBadge,
+                          { backgroundColor: statusStyle.bg },
+                        ]}
+                      >
+                        <Text
+                          style={[
+                            styles.statusDetailBadgeText,
+                            { color: statusStyle.text },
+                          ]}
+                        >
+                          {isPending && "⏳ Waiting for owner's response"}
+                          {isAccepted &&
+                            "✅ Trade accepted! Coordinate your meetup."}
+                          {isCompleted && "🏆 Trade completed!"}
+                          {selectedOffer.status === "declined" &&
+                            "❌ Offer was declined"}
+                          {selectedOffer.status === "cancelled" &&
+                            "🚫 You cancelled this offer"}
+                        </Text>
+                      </View>
+
+                      {/* ── Accepted: Mark as Finished (dual-confirmation) ── */}
+                      {isAccepted && (
+                        <View
+                          style={{ paddingHorizontal: 16, marginBottom: 12 }}
+                        >
+                          <TouchableOpacity
+                            style={[
+                              styles.completeBtn,
+                              otherHasConfirmed && styles.completeBtnHighlight,
+                            ]}
+                            onPress={() => handleCompleteTrade(selectedOffer)}
+                            disabled={isCompleting || iHaveConfirmed}
+                            activeOpacity={0.85}
+                          >
+                            {isCompleting ? (
+                              <ActivityIndicator size="small" color="#fff" />
+                            ) : iHaveConfirmed ? (
+                              <>
+                                <Ionicons
+                                  name="time-outline"
+                                  size={18}
+                                  color="#fff"
+                                />
+                                <Text style={styles.completeBtnText}>
+                                  Waiting for other party...
+                                </Text>
+                              </>
+                            ) : (
+                              <>
+                                <Ionicons
+                                  name="checkmark-done-circle"
+                                  size={18}
+                                  color="#fff"
+                                />
+                                <Text style={styles.completeBtnText}>
+                                  {otherHasConfirmed
+                                    ? "They confirmed — tap to complete!"
+                                    : "Mark Trade as Finished"}
+                                </Text>
+                              </>
+                            )}
+                          </TouchableOpacity>
+                        </View>
+                      )}
+
+                      {/* ── Message button ── */}
+                      {(isAccepted || isCompleted) && (
+                        <TouchableOpacity
+                          style={styles.msgCoordinateBtn}
+                          onPress={() => {
+                            closeStatusModal();
+                            openChat(selectedOffer, false);
+                          }}
+                          activeOpacity={0.85}
+                        >
+                          <Ionicons
+                            name="chatbubble-ellipses-outline"
+                            size={16}
+                            color={NAVY}
+                          />
+                          <Text style={styles.msgCoordinateBtnText}>
+                            {isCompleted
+                              ? "View Trade Chat"
+                              : "Message to Coordinate"}
+                          </Text>
+                        </TouchableOpacity>
+                      )}
+
+                      {/* ── Cancel ── */}
+                      {isPending && (
+                        <TouchableOpacity
+                          style={styles.cancelOfferBtnModal}
+                          onPress={() => handleCancelFromModal(selectedOffer)}
+                          disabled={isCancelling}
+                          activeOpacity={0.8}
+                        >
+                          {isCancelling ? (
+                            <ActivityIndicator size="small" color="#E11D48" />
+                          ) : (
+                            <>
+                              <Ionicons
+                                name="close-circle-outline"
+                                size={16}
+                                color="#E11D48"
+                              />
+                              <Text style={styles.cancelOfferBtnModalText}>
+                                Cancel This Offer
+                              </Text>
+                            </>
+                          )}
+                        </TouchableOpacity>
+                      )}
+
+                      {/* ── Completed: review section ── */}
+                      {isCompleted &&
+                        (bothReviewed ? (
+                          <View style={styles.receivedReview}>
+                            <Text style={styles.receivedReviewHeader}>
+                              Their review of you
+                            </Text>
+                            <StarRating
+                              rating={theirReview.rating}
+                              size={18}
+                              readonly
+                            />
+                            {theirReview.comment ? (
+                              <Text style={styles.receivedReviewComment}>
+                                "{theirReview.comment}"
+                              </Text>
+                            ) : null}
+                          </View>
+                        ) : myReview ? (
+                          <View style={styles.reviewWaiting}>
+                            <Ionicons
+                              name="time-outline"
+                              size={13}
+                              color="#D97706"
+                            />
+                            <Text style={styles.reviewWaitingText}>
+                              Your review is in — waiting for theirs
+                            </Text>
+                          </View>
+                        ) : showReviewForm ? (
+                          <View style={styles.reviewForm}>
+                            <Text style={styles.reviewFormTitle}>
+                              Rate your trade partner
+                            </Text>
+                            <StarRating
+                              rating={reviewRating}
+                              onRate={setReviewRating}
+                              size={36}
+                            />
+                            <TextInput
+                              style={styles.reviewInput}
+                              placeholder="Share your experience (optional)…"
+                              placeholderTextColor="#AAAAAA"
+                              value={reviewComment}
+                              onChangeText={setReviewComment}
+                              multiline
+                              maxLength={300}
+                              textAlignVertical="top"
+                            />
+                            <Text style={styles.reviewDisclaimer}>
+                              Reviews are hidden until both sides submit — then
+                              revealed simultaneously.
+                            </Text>
+                            <View style={styles.reviewFormActions}>
+                              <TouchableOpacity
+                                style={styles.reviewCancelBtn}
+                                onPress={() => setShowReviewForm(false)}
+                                disabled={submittingReview}
+                              >
+                                <Text style={styles.reviewCancelText}>
+                                  Back
+                                </Text>
+                              </TouchableOpacity>
+                              <TouchableOpacity
+                                style={[
+                                  styles.reviewSubmitBtn,
+                                  (reviewRating === 0 || submittingReview) &&
+                                    styles.reviewSubmitBtnDisabled,
+                                ]}
+                                onPress={() =>
+                                  handleSubmitReview(selectedOffer)
+                                }
+                                disabled={
+                                  reviewRating === 0 || submittingReview
+                                }
+                                activeOpacity={0.85}
+                              >
+                                {submittingReview ? (
+                                  <ActivityIndicator
+                                    size="small"
+                                    color="#fff"
+                                  />
+                                ) : (
+                                  <Text style={styles.reviewSubmitText}>
+                                    Submit Review
+                                  </Text>
+                                )}
+                              </TouchableOpacity>
+                            </View>
+                          </View>
+                        ) : (
+                          <TouchableOpacity
+                            style={styles.rateOwnerBtn}
+                            onPress={() => setShowReviewForm(true)}
+                            activeOpacity={0.85}
+                          >
+                            <Ionicons
+                              name="star-outline"
+                              size={16}
+                              color="#fff"
+                            />
+                            <Text style={styles.rateOwnerBtnText}>
+                              Rate Your Trade Partner
+                            </Text>
+                          </TouchableOpacity>
+                        ))}
+                    </>
+                  );
+                })()}
+            </ScrollView>
+
+            <TouchableOpacity
+              style={styles.modalCloseBtn}
+              onPress={closeStatusModal}
+            >
+              <Text style={styles.modalCloseBtnText}>Close</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
+      {/* ── Chat modal ── */}
       <TradeChatModal
-        visible={chatModalVisible}
-        trade={selectedOffer}
-        isOwner={false}
-        onClose={() => setChatModalVisible(false)}
+        visible={!!chatTrade}
+        trade={chatTrade}
+        isOwner={chatIsOwner}
+        onClose={() => {
+          setChatTrade(null);
+          setChatIsOwner(false);
+        }}
+        onStatusChange={(tradeId, newStatus) => {
+          setSentOffers((prev) =>
+            prev.map((o) =>
+              o.id === tradeId ? { ...o, status: newStatus as any } : o,
+            ),
+          );
+          setIncomingOffers((prev) =>
+            prev.map((o) =>
+              o.id === tradeId ? { ...o, status: newStatus as any } : o,
+            ),
+          );
+        }}
       />
     </SafeAreaView>
   );
@@ -817,14 +1131,6 @@ export default function TradeScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#efeff4" },
-  searchWrapper: {
-    marginHorizontal: 16,
-    marginTop: 30,
-    marginBottom: 4,
-    position: "relative",
-    overflow: "visible",
-    zIndex: 9999,
-  },
   searchContainer: {
     flexDirection: "row",
     alignItems: "center",
@@ -834,41 +1140,12 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: "#E9E9E9",
     paddingHorizontal: 14,
+    marginHorizontal: 16,
+    marginTop: 14,
+    marginBottom: 16,
   },
   searchIcon: { marginRight: 10 },
   searchInput: { flex: 1, color: "#242424", fontSize: 15, paddingVertical: 8 },
-  searchPopup: {
-    position: "absolute",
-    top: 52,
-    left: 0,
-    right: 0,
-    borderRadius: 16,
-    backgroundColor: "#FFFFFF",
-    borderColor: "#E5E7EB",
-    borderWidth: 1,
-    padding: 14,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.12,
-    shadowRadius: 18,
-    elevation: 30,
-    zIndex: 10000,
-  },
-  popupTitle: {
-    fontSize: 14,
-    fontWeight: "700",
-    color: "#111827",
-    marginBottom: 10,
-  },
-  searchResultLink: { width: "100%" },
-  searchResultItem: {
-    paddingVertical: 10,
-    borderBottomWidth: 1,
-    borderBottomColor: "#E5E7EB",
-  },
-  searchResultText: { fontSize: 14, fontWeight: "600", color: "#111827" },
-  searchResultCategory: { fontSize: 12, color: "#6B7280", marginTop: 2 },
-  noResultsText: { color: "#6B7280", fontSize: 13, lineHeight: 20 },
   tabs: {
     marginTop: 10,
     flexDirection: "row",
@@ -939,14 +1216,6 @@ const styles = StyleSheet.create({
     marginBottom: 10,
     marginHorizontal: 16,
   },
-  cardDeleting: {
-    opacity: 0.5,
-  },
-  cardActions: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-  },
   image: { width: 55, height: 55, borderRadius: 8, marginRight: 10 },
   itemName: { flex: 1, fontWeight: "600", color: "#222" },
   offerButton: {
@@ -956,16 +1225,6 @@ const styles = StyleSheet.create({
     borderRadius: 7,
   },
   offerText: { fontSize: 12, color: "#fff", fontWeight: "600" },
-  deleteButton: {
-    width: 32,
-    height: 32,
-    borderRadius: 8,
-    backgroundColor: "#FFF1F2",
-    borderWidth: 1.5,
-    borderColor: "#FECDD3",
-    alignItems: "center",
-    justifyContent: "center",
-  },
   offerCard: {
     backgroundColor: "#fff",
     borderRadius: 14,
@@ -977,11 +1236,7 @@ const styles = StyleSheet.create({
     shadowRadius: 4,
     elevation: 2,
   },
-  offerItemsRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    marginTop: 28,
-  },
+  offerItemsRow: { flexDirection: "row", alignItems: "center", marginTop: 28 },
   offerSide: { flex: 1, alignItems: "center", gap: 6 },
   offerArrow: { paddingHorizontal: 8 },
   offerItemImage: {
@@ -1046,6 +1301,23 @@ const styles = StyleSheet.create({
     borderColor: "#FECDD3",
   },
   cancelConfirmYesText: { fontSize: 12, fontWeight: "700", color: "#E11D48" },
+  cancelOfferBtnModal: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+    paddingVertical: 13,
+    borderRadius: 12,
+    borderWidth: 1.5,
+    borderColor: "#FECDD3",
+    backgroundColor: "#FFF1F2",
+    marginBottom: 10,
+  },
+  cancelOfferBtnModalText: {
+    fontSize: 14,
+    fontWeight: "700",
+    color: "#E11D48",
+  },
   emptyContainer: {
     flex: 1,
     justifyContent: "center",
@@ -1071,76 +1343,6 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(0,0,0,0.5)",
     justifyContent: "flex-end",
   },
-  // ── Delete modal styles ──────────────────────────────────────────────────
-  deleteModalSheet: {
-    backgroundColor: "#fff",
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
-    paddingHorizontal: 24,
-    paddingTop: 28,
-    paddingBottom: 40,
-    alignItems: "center",
-  },
-  deleteIconWrapper: {
-    width: 64,
-    height: 64,
-    borderRadius: 32,
-    backgroundColor: "#FFF1F2",
-    alignItems: "center",
-    justifyContent: "center",
-    marginBottom: 16,
-  },
-  deleteModalTitle: {
-    fontSize: 20,
-    fontWeight: "700",
-    color: "#111827",
-    marginBottom: 10,
-  },
-  deleteModalBody: {
-    fontSize: 14,
-    color: "#6B7280",
-    textAlign: "center",
-    lineHeight: 22,
-    marginBottom: 28,
-  },
-  deleteModalItemName: {
-    fontWeight: "700",
-    color: "#374151",
-  },
-  deleteModalActions: {
-    flexDirection: "row",
-    gap: 12,
-    width: "100%",
-  },
-  deleteModalCancelBtn: {
-    flex: 1,
-    paddingVertical: 14,
-    borderRadius: 12,
-    backgroundColor: "#F3F4F6",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  deleteModalCancelText: {
-    fontSize: 15,
-    fontWeight: "600",
-    color: "#374151",
-  },
-  deleteModalConfirmBtn: {
-    flex: 1,
-    flexDirection: "row",
-    paddingVertical: 14,
-    borderRadius: 12,
-    backgroundColor: "#E11D48",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 6,
-  },
-  deleteModalConfirmText: {
-    fontSize: 15,
-    fontWeight: "700",
-    color: "#fff",
-  },
-  // ────────────────────────────────────────────────────────────────────────
   modalSheet: {
     backgroundColor: "#fff",
     borderTopLeftRadius: 24,
@@ -1164,6 +1366,64 @@ const styles = StyleSheet.create({
     color: "#111827",
     marginBottom: 4,
   },
+  modalItemName: {
+    fontSize: 15,
+    fontWeight: "600",
+    color: NAVY,
+    marginBottom: 16,
+  },
+  modalEmpty: { alignItems: "center", paddingVertical: 40, gap: 12 },
+  modalEmptyText: { fontSize: 14, color: "#6B7280" },
+  modalCloseBtn: {
+    marginTop: 16,
+    backgroundColor: "#F3F4F6",
+    paddingVertical: 14,
+    borderRadius: 12,
+    alignItems: "center",
+  },
+  modalCloseBtnText: { fontSize: 15, fontWeight: "600", color: "#374151" },
+  incomingOfferCard: {
+    backgroundColor: "#F9FAFB",
+    borderRadius: 12,
+    padding: 14,
+    marginBottom: 12,
+    gap: 10,
+  },
+  incomingOffererRow: { flexDirection: "row", alignItems: "center", gap: 8 },
+  incomingOffererAvatar: { width: 32, height: 32, borderRadius: 16 },
+  incomingOffererName: {
+    flex: 1,
+    fontSize: 14,
+    fontWeight: "700",
+    color: "#111827",
+  },
+  incomingItemRow: { flexDirection: "row", alignItems: "center", gap: 12 },
+  incomingItemImage: {
+    width: 60,
+    height: 60,
+    borderRadius: 8,
+    backgroundColor: "#E5E7EB",
+  },
+  incomingItemLabel: { fontSize: 11, color: "#6B7280", marginBottom: 2 },
+  incomingItemTitle: { fontSize: 13, fontWeight: "600", color: "#111827" },
+  incomingActions: { flexDirection: "row", gap: 10, marginTop: 4 },
+  declineBtn: {
+    flex: 1,
+    paddingVertical: 10,
+    borderRadius: 8,
+    borderWidth: 1.5,
+    borderColor: "#E11D48",
+    alignItems: "center",
+  },
+  declineBtnText: { fontSize: 13, fontWeight: "600", color: "#E11D48" },
+  acceptBtn: {
+    flex: 2,
+    paddingVertical: 10,
+    borderRadius: 8,
+    backgroundColor: "#16A34A",
+    alignItems: "center",
+  },
+  acceptBtnText: { fontSize: 13, fontWeight: "600", color: "#fff" },
   statusDetailRow: {
     flexDirection: "row",
     alignItems: "center",
@@ -1188,47 +1448,156 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     padding: 14,
     alignItems: "center",
-    marginBottom: 12,
+    marginBottom: 8,
   },
   statusDetailBadgeText: {
     fontSize: 15,
     fontWeight: "700",
     textAlign: "center",
   },
-  chatBtn: {
+  completeBtn: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
     gap: 8,
-    backgroundColor: NAVY,
-    paddingVertical: 13,
-    borderRadius: 12,
-    marginBottom: 10,
+    backgroundColor: "#16A34A",
+    borderRadius: 14,
+    paddingVertical: 14,
+    marginHorizontal: 20,
+    marginBottom: 12,
+    elevation: 2,
+    shadowColor: "#16A34A",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 4,
   },
-  chatBtnText: { fontSize: 14, fontWeight: "700", color: "#fff" },
-  cancelOfferBtnModal: {
+  completeBtnHighlight: { backgroundColor: "#0F9D58" },
+  completeBtnText: { fontSize: 14, fontWeight: "800", color: "#fff" },
+  completeWaitingBanner: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: 10,
+    backgroundColor: "#FFF7ED",
+    borderRadius: 12,
+    paddingVertical: 11,
+    paddingHorizontal: 14,
+    marginBottom: 10,
+    borderWidth: 1,
+    borderColor: "#FDE68A",
+  },
+  completeWaitingTitle: {
+    fontSize: 13,
+    fontWeight: "700",
+    color: "#D97706",
+    marginBottom: 2,
+  },
+  completeWaitingSubtitle: { fontSize: 12, color: "#92400E", lineHeight: 16 },
+  msgCoordinateBtn: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
-    gap: 6,
+    gap: 8,
     paddingVertical: 13,
-    borderRadius: 12,
+    borderRadius: 14,
     borderWidth: 1.5,
-    borderColor: "#FECDD3",
-    backgroundColor: "#FFF1F2",
+    borderColor: NAVY,
+    backgroundColor: "#ECEDF8",
     marginBottom: 10,
   },
-  cancelOfferBtnModalText: {
-    fontSize: 14,
-    fontWeight: "700",
-    color: "#E11D48",
+  msgCoordinateBtnText: { fontSize: 14, fontWeight: "700", color: NAVY },
+  rateOwnerBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 7,
+    backgroundColor: "#FFB800",
+    borderRadius: 14,
+    paddingVertical: 13,
+    marginBottom: 10,
   },
-  modalCloseBtn: {
-    marginTop: 4,
-    backgroundColor: "#F3F4F6",
-    paddingVertical: 14,
-    borderRadius: 12,
+  rateOwnerBtnText: { fontSize: 14, fontWeight: "700", color: "#fff" },
+  reviewForm: {
+    backgroundColor: "#F7F8FC",
+    borderRadius: 14,
+    padding: 14,
+    gap: 10,
+    marginBottom: 10,
+    borderWidth: 1,
+    borderColor: "#ECECEC",
+  },
+  reviewFormTitle: {
+    fontSize: 15,
+    fontWeight: "700",
+    color: "#1A1A2E",
+    textAlign: "center",
+  },
+  reviewInput: {
+    borderWidth: 1.5,
+    borderColor: "#E0E0E0",
+    borderRadius: 10,
+    padding: 10,
+    fontSize: 13,
+    color: "#1A1A2E",
+    minHeight: 64,
+    backgroundColor: "#fff",
+  },
+  reviewDisclaimer: {
+    fontSize: 11,
+    color: "#AAAAAA",
+    textAlign: "center",
+    lineHeight: 15,
+  },
+  reviewFormActions: { flexDirection: "row", gap: 8 },
+  reviewCancelBtn: {
+    flex: 1,
+    paddingVertical: 11,
+    borderRadius: 10,
+    backgroundColor: "#E5E7EB",
     alignItems: "center",
   },
-  modalCloseBtnText: { fontSize: 15, fontWeight: "600", color: "#374151" },
+  reviewCancelText: { fontSize: 13, fontWeight: "600", color: "#374151" },
+  reviewSubmitBtn: {
+    flex: 2,
+    paddingVertical: 11,
+    borderRadius: 10,
+    backgroundColor: NAVY,
+    alignItems: "center",
+  },
+  reviewSubmitBtnDisabled: { opacity: 0.4 },
+  reviewSubmitText: { fontSize: 13, fontWeight: "700", color: "#fff" },
+  reviewWaiting: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    backgroundColor: "#FFF7ED",
+    borderRadius: 10,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    marginBottom: 10,
+  },
+  reviewWaitingText: { fontSize: 12, color: "#D97706", fontWeight: "600" },
+  receivedReview: {
+    backgroundColor: "#F7F8FC",
+    borderRadius: 12,
+    padding: 12,
+    marginBottom: 10,
+    alignItems: "center",
+    borderWidth: 1,
+    borderColor: "#ECECEC",
+    gap: 4,
+  },
+  receivedReviewHeader: {
+    fontSize: 13,
+    fontWeight: "700",
+    color: "#1A1A2E",
+    marginBottom: 4,
+  },
+  receivedReviewComment: {
+    fontSize: 12,
+    color: "#555",
+    fontStyle: "italic",
+    textAlign: "center",
+    lineHeight: 18,
+    marginTop: 4,
+  },
 });

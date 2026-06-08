@@ -16,7 +16,20 @@ import { createNotification } from "./notificationService";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-export type TradeStatus = "pending" | "accepted" | "declined" | "cancelled";
+export type TradeStatus =
+  | "pending"
+  | "accepted"
+  | "declined"
+  | "cancelled"
+  | "completed";
+
+export interface TradeReview {
+  reviewerId: string;
+  targetUserId: string;
+  rating: number;
+  comment: string;
+  createdAt: Timestamp;
+}
 
 export interface TradeOffer {
   id: string;
@@ -34,14 +47,20 @@ export interface TradeOffer {
   participants: string[];
   createdAt: Timestamp;
   updatedAt?: Timestamp;
+  completedAt?: Timestamp;
+  // BUG FIX: must be stored in Firestore so dual-confirmation UX works
+  completedBy?: string[];
   message?: string;
+  // Reviews keyed by REVIEWER'S uid
+  reviews?: Record<string, TradeReview>;
 }
 
 export interface TradeMessage {
   id: string;
+  tradeId: string;
   senderId: string;
-  senderName: string;
-  senderAvatar: string;
+  senderName: string | null;
+  senderAvatar: string | null;
   text: string;
   createdAt: Timestamp;
 }
@@ -86,16 +105,13 @@ export const proposeTrade = async (
     );
   }
 
-  const offeredImage = resolveImage(offeredItem);
-  const requestedImage = resolveImage(requestedItem);
-
   const payload: Omit<TradeOffer, "id"> = {
     offeredItemId: offeredItem.id,
     offeredItemTitle: offeredItem.title,
-    offeredItemImage: offeredImage,
+    offeredItemImage: resolveImage(offeredItem),
     requestedItemId: requestedItem.id,
     requestedItemTitle: requestedItem.title,
-    requestedItemImage: requestedImage,
+    requestedItemImage: resolveImage(requestedItem),
     offererId: offererUser.uid,
     offererName: offererUser.displayName ?? "Unknown User",
     offererAvatar: offererUser.photoURL ?? "",
@@ -103,14 +119,26 @@ export const proposeTrade = async (
     status: "pending",
     participants: [offererUser.uid, requestedItem.ownerId],
     createdAt: Timestamp.now(),
+    completedBy: [],
     ...(message?.trim() ? { message: message.trim() } : {}),
   };
 
   const docRef = await addDoc(collection(db, "trades"), payload);
+
+  await createNotification({
+    userId: requestedItem.ownerId,
+    type: "trade_offer",
+    title: offererUser.displayName ?? "Someone",
+    body: `wants to trade their "${offeredItem.title}" for your "${requestedItem.title}"`,
+    avatar: offererUser.photoURL ?? undefined,
+    tradeId: docRef.id,
+    otherUserId: offererUser.uid,
+  });
+
   return docRef.id;
 };
 
-// ─── Read ─────────────────────────────────────────────────────────────────────
+// ─── One-time reads ───────────────────────────────────────────────────────────
 
 export const getOffersByUser = async (
   userId: string,
@@ -141,22 +169,6 @@ export const getOffersByUser = async (
   }
 };
 
-export const subscribeToSentOffers = (
-  userId: string,
-  onUpdate: (offers: TradeOffer[]) => void,
-): (() => void) => {
-  const q = query(collection(db, "trades"), where("offererId", "==", userId));
-  return onSnapshot(q, (snap) => {
-    const offers: TradeOffer[] = snap.docs
-      .map((d) => ({ id: d.id, ...(d.data() as Omit<TradeOffer, "id">) }))
-      .sort(
-        (a, b) =>
-          (b.createdAt?.toMillis?.() ?? 0) - (a.createdAt?.toMillis?.() ?? 0),
-      );
-    onUpdate(offers);
-  });
-};
-
 export const getOffersForItem = async (
   itemId: string,
 ): Promise<TradeOffer[]> => {
@@ -184,29 +196,6 @@ export const getOffersForItem = async (
           (b.createdAt?.toMillis?.() ?? 0) - (a.createdAt?.toMillis?.() ?? 0),
       );
   }
-};
-
-/**
- * Real-time subscription to all offers on a specific item.
- * Use this in TradeOffersModal so the list updates instantly on accept/decline.
- */
-export const subscribeToOffersForItem = (
-  itemId: string,
-  onUpdate: (offers: TradeOffer[]) => void,
-): (() => void) => {
-  const q = query(
-    collection(db, "trades"),
-    where("requestedItemId", "==", itemId),
-  );
-  return onSnapshot(q, (snap) => {
-    const offers: TradeOffer[] = snap.docs
-      .map((d) => ({ id: d.id, ...(d.data() as Omit<TradeOffer, "id">) }))
-      .sort(
-        (a, b) =>
-          (b.createdAt?.toMillis?.() ?? 0) - (a.createdAt?.toMillis?.() ?? 0),
-      );
-    onUpdate(offers);
-  });
 };
 
 export const getAllOffersForUser = async (
@@ -241,10 +230,146 @@ export const getAllOffersForUser = async (
 export const getTradeOffer = async (
   offerId: string,
 ): Promise<TradeOffer | null> => {
-  const docRef = doc(db, "trades", offerId);
-  const snap = await getDoc(docRef);
+  const snap = await getDoc(doc(db, "trades", offerId));
   if (!snap.exists()) return null;
   return { id: snap.id, ...(snap.data() as Omit<TradeOffer, "id">) };
+};
+
+// ─── Real-time listeners ──────────────────────────────────────────────────────
+
+export const subscribeToSentOffers = (
+  userId: string,
+  callback: (offers: TradeOffer[]) => void,
+): (() => void) => {
+  const q = query(collection(db, "trades"), where("offererId", "==", userId));
+  return onSnapshot(
+    q,
+    (snap) => {
+      callback(
+        snap.docs
+          .map((d) => ({ id: d.id, ...(d.data() as Omit<TradeOffer, "id">) }))
+          .sort(
+            (a, b) =>
+              (b.createdAt?.toMillis?.() ?? 0) -
+              (a.createdAt?.toMillis?.() ?? 0),
+          ),
+      );
+    },
+    (error) => {
+      console.error("subscribeToSentOffers error:", error);
+      callback([]);
+    },
+  );
+};
+
+export const subscribeToOffersForItem = (
+  itemId: string,
+  callback: (offers: TradeOffer[]) => void,
+): (() => void) => {
+  const q = query(
+    collection(db, "trades"),
+    where("requestedItemId", "==", itemId),
+  );
+  return onSnapshot(
+    q,
+    (snap) => {
+      callback(
+        snap.docs
+          .map((d) => ({ id: d.id, ...(d.data() as Omit<TradeOffer, "id">) }))
+          .sort(
+            (a, b) =>
+              (b.createdAt?.toMillis?.() ?? 0) -
+              (a.createdAt?.toMillis?.() ?? 0),
+          ),
+      );
+    },
+    (error) => {
+      console.error("subscribeToOffersForItem error:", error);
+      callback([]);
+    },
+  );
+};
+
+/** Live single-doc listener — used by TradeChatModal and the status modal */
+export const subscribeToTrade = (
+  tradeId: string,
+  callback: (trade: TradeOffer | null) => void,
+): (() => void) => {
+  return onSnapshot(
+    doc(db, "trades", tradeId),
+    (snap) => {
+      callback(
+        snap.exists()
+          ? { id: snap.id, ...(snap.data() as Omit<TradeOffer, "id">) }
+          : null,
+      );
+    },
+    (error) => {
+      console.error("subscribeToTrade error:", error);
+    },
+  );
+};
+
+// ─── Trade chat ───────────────────────────────────────────────────────────────
+
+export const sendTradeMessage = async (
+  tradeId: string,
+  sender: {
+    uid: string;
+    displayName: string | null;
+    photoURL: string | null;
+  },
+  text: string,
+  recipientUserId: string,
+): Promise<void> => {
+  if (!text.trim()) return;
+
+  await addDoc(collection(db, "trades", tradeId, "messages"), {
+    tradeId,
+    senderId: sender.uid,
+    senderName: sender.displayName ?? "Anonymous",
+    senderAvatar: sender.photoURL ?? "",
+    text: text.trim(),
+    createdAt: Timestamp.now(),
+  });
+
+  await createNotification({
+    userId: recipientUserId,
+    type: "message",
+    title: sender.displayName ?? "Someone",
+    body:
+      text.trim().length > 60
+        ? text.trim().substring(0, 60) + "…"
+        : text.trim(),
+    avatar: sender.photoURL ?? undefined,
+    tradeId,
+    otherUserId: sender.uid,
+  });
+};
+
+export const subscribeToTradeMessages = (
+  tradeId: string,
+  callback: (messages: TradeMessage[]) => void,
+): (() => void) => {
+  const q = query(
+    collection(db, "trades", tradeId, "messages"),
+    orderBy("createdAt", "asc"),
+  );
+  return onSnapshot(
+    q,
+    (snap) => {
+      callback(
+        snap.docs.map((d) => ({
+          id: d.id,
+          ...(d.data() as Omit<TradeMessage, "id">),
+        })),
+      );
+    },
+    (error) => {
+      console.error("subscribeToTradeMessages error:", error);
+      callback([]);
+    },
+  );
 };
 
 // ─── Update ───────────────────────────────────────────────────────────────────
@@ -254,95 +379,199 @@ export const updateTradeStatus = async (
   newStatus: "accepted" | "declined",
 ): Promise<void> => {
   const docRef = doc(db, "trades", offerId);
+  const snap = await getDoc(docRef);
+  const data = snap.data();
+
   await updateDoc(docRef, {
     status: newStatus,
     updatedAt: Timestamp.now(),
   });
+
+  // When accepted: hide both items from the public feed
+  if (newStatus === "accepted" && data) {
+    const ops: Promise<void>[] = [];
+    if (data.offeredItemId)
+      ops.push(
+        updateDoc(doc(db, "items", data.offeredItemId), { isTraded: true }),
+      );
+    if (data.requestedItemId)
+      ops.push(
+        updateDoc(doc(db, "items", data.requestedItemId), { isTraded: true }),
+      );
+    await Promise.all(ops).catch((e) =>
+      console.warn("Could not mark items as traded (non-fatal):", e),
+    );
+  }
+
+  if (data) {
+    await createNotification({
+      userId: data.offererId,
+      type:
+        newStatus === "accepted" ? "trade_accepted" : ("trade_declined" as any),
+      title: newStatus === "accepted" ? "Trade Accepted! 🎉" : "Trade Declined",
+      body:
+        newStatus === "accepted"
+          ? `Your offer for "${data.requestedItemTitle}" was accepted!`
+          : `Your offer for "${data.requestedItemTitle}" was declined.`,
+      avatar: data.ownerAvatar ?? undefined,
+      tradeId: offerId,
+      otherUserId: data.ownerId,
+    });
+  }
 };
 
 export const cancelTradeOffer = async (offerId: string): Promise<void> => {
   const docRef = doc(db, "trades", offerId);
+  const snap = await getDoc(docRef);
+  if (!snap.exists()) throw new Error("Trade offer not found.");
+  if (snap.data()?.status !== "pending")
+    throw new Error("Only pending offers can be cancelled.");
   await updateDoc(docRef, {
     status: "cancelled",
     updatedAt: Timestamp.now(),
   });
 };
 
-// ─── Messaging ────────────────────────────────────────────────────────────────
-
 /**
- * Send a message in a trade's chat thread.
- * Messages are stored in: trades/{tradeId}/messages/{messageId}
+ * BUG FIX: dual-confirmation — each participant confirms separately.
+ * Trade becomes "completed" only when BOTH have confirmed.
+ * completedBy is now written to Firestore so the UI can read it live.
  */
-export const sendTradeMessage = async (
+export const completeTrade = async (
   tradeId: string,
-  sender: {
-    uid: string;
-    displayName: string | null;
-    photoURL: string | null;
-  },
-  text: string,
-  recipientUid?: string,
+  completedByUserId: string,
 ): Promise<void> => {
-  if (!text.trim()) return;
+  const docRef = doc(db, "trades", tradeId);
+  const snap = await getDoc(docRef);
+  if (!snap.exists()) throw new Error("Trade not found.");
+  const data = snap.data()!;
 
-  const now = Timestamp.now();
+  if (data.status !== "accepted") {
+    throw new Error("Only accepted trades can be marked as finished.");
+  }
 
-  // Write the message
-  const messagesRef = collection(db, "trades", tradeId, "messages");
-  await addDoc(messagesRef, {
-    senderId: sender.uid,
-    senderName: sender.displayName ?? "Unknown",
-    senderAvatar: sender.photoURL ?? "",
-    text: text.trim(),
-    createdAt: now,
-  });
+  const current: string[] = data.completedBy ?? [];
+  if (current.includes(completedByUserId)) return; // already confirmed, no-op
 
-  // Write a trade_message notification for the recipient so tapping it
-  // in the Inbox routes back to this trade chat, not the regular chat.
-  if (recipientUid) {
-    const senderName = sender.displayName ?? "Someone";
-    const preview =
-      text.trim().length > 60
-        ? text.trim().slice(0, 57) + "\u2026"
-        : text.trim();
+  const updated = [...current, completedByUserId];
+  const otherUserId =
+    completedByUserId === data.offererId ? data.ownerId : data.offererId;
+  const bothConfirmed =
+    updated.includes(data.offererId) && updated.includes(data.ownerId);
+
+  if (bothConfirmed) {
+    await updateDoc(docRef, {
+      status: "completed",
+      completedBy: updated,
+      completedAt: Timestamp.now(),
+      updatedAt: Timestamp.now(),
+    });
     await createNotification({
-      userId: recipientUid,
-      type: "trade_message",
-      title: `${senderName} sent you a message`,
-      body: preview,
-      avatar: sender.photoURL ?? "",
+      userId: otherUserId,
+      type: "generic",
+      title: "Trade Completed! 🎉",
+      body: `Your trade for "${data.requestedItemTitle}" is complete. Leave a review!`,
       tradeId,
+      otherUserId: completedByUserId,
+    });
+  } else {
+    // First to confirm — store, wait for the other party
+    await updateDoc(docRef, {
+      completedBy: updated,
+      updatedAt: Timestamp.now(),
+    });
+    await createNotification({
+      userId: otherUserId,
+      type: "generic",
+      title: "Trade Completion Requested",
+      body: `Your trade partner confirmed the exchange for "${data.requestedItemTitle}". Tap to confirm and complete!`,
+      tradeId,
+      otherUserId: completedByUserId,
     });
   }
 };
 
 /**
- * Real-time subscription to a trade's chat messages.
- * Returns an unsubscribe function — call it in useEffect cleanup.
+ * BUG FIX: explicitly typed as Promise<boolean>.
+ * Reviews are keyed by REVIEWER'S uid.
+ * Returns true when both parties have reviewed (triggers profile publish).
  */
-export const subscribeToTradeMessages = (
+export const submitTradeReview = async (
   tradeId: string,
-  onUpdate: (messages: TradeMessage[]) => void,
-): (() => void) => {
-  const q = query(
-    collection(db, "trades", tradeId, "messages"),
-    orderBy("createdAt", "asc"),
-  );
-  return onSnapshot(q, (snap) => {
-    const messages: TradeMessage[] = snap.docs.map((d) => ({
-      id: d.id,
-      ...(d.data() as Omit<TradeMessage, "id">),
-    }));
-    onUpdate(messages);
+  reviewerId: string,
+  targetUserId: string,
+  rating: number,
+  comment: string,
+): Promise<boolean> => {
+  const docRef = doc(db, "trades", tradeId);
+
+  await updateDoc(docRef, {
+    [`reviews.${reviewerId}`]: {
+      reviewerId,
+      targetUserId,
+      rating,
+      comment,
+      createdAt: Timestamp.now(),
+    } as TradeReview,
   });
+
+  const updatedSnap = await getDoc(docRef);
+  const data = updatedSnap.data();
+  const reviews: Record<string, TradeReview> = data?.reviews ?? {};
+  const keys = Object.keys(reviews);
+
+  if (keys.length >= 2) {
+    await Promise.all(
+      keys.map((k) =>
+        publishReviewToProfile(reviews[k].targetUserId, {
+          fromUserId: reviews[k].reviewerId,
+          rating: reviews[k].rating,
+          comment: reviews[k].comment,
+          tradeId,
+          createdAt: reviews[k].createdAt,
+        }),
+      ),
+    );
+    return true;
+  }
+  return false;
 };
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function resolveImage(item: { images?: string[]; image?: string }): string {
-  if (Array.isArray(item.images) && item.images.length > 0) {
+  if (Array.isArray(item.images) && item.images.length > 0)
     return item.images[0];
-  }
   return item.image ?? "";
+}
+
+async function publishReviewToProfile(
+  userId: string,
+  review: {
+    fromUserId: string;
+    rating: number;
+    comment: string;
+    tradeId: string;
+    createdAt: Timestamp;
+  },
+): Promise<void> {
+  try {
+    const userRef = doc(db, "users", userId);
+    const userSnap = await getDoc(userRef);
+    if (!userSnap.exists()) return;
+    const userData = userSnap.data();
+    const existing: any[] = userData.userReviews ?? [];
+    if (existing.some((r) => r.tradeId === review.tradeId)) return;
+    const count = userData.reviewCount ?? 0;
+    const oldRating = userData.rating ?? 0;
+    const newCount = count + 1;
+    const newRating = (oldRating * count + review.rating) / newCount;
+    await updateDoc(userRef, {
+      userReviews: [...existing, review],
+      rating: Math.round(newRating * 10) / 10,
+      reviewCount: newCount,
+    });
+  } catch (e) {
+    console.warn("publishReviewToProfile failed (non-fatal):", e);
+  }
 }

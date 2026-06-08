@@ -3,19 +3,16 @@ import {
   arrayRemove,
   arrayUnion,
   collection,
-  deleteDoc,
   doc,
   getDoc,
-  getDocs,
+  getDocsFromServer,
   updateDoc,
 } from "firebase/firestore";
 import { db } from "../firebaseConfig";
 
-// TEST FUNCTION: Fetch the specific item from image_9b1520.png
 export const getItemsByCategory = async (category: string) => {
-  const docRef = doc(db, "items", "LTJvXhFNMHkuVON8VNKX"); // Verbatim ID from image
+  const docRef = doc(db, "items", "LTJvXhFNMHkuVON8VNKX");
   const docSnap = await getDoc(docRef);
-
   if (docSnap.exists()) {
     return { id: docSnap.id, ...docSnap.data() };
   } else {
@@ -23,16 +20,21 @@ export const getItemsByCategory = async (category: string) => {
   }
 };
 
-// FETCH ALL: For your index.tsx feed
+// FETCH ALL: filters out items that have been successfully traded
 export const getAllItems = async () => {
-  const querySnapshot = await getDocs(collection(db, "items"));
+  // getDocsFromServer bypasses Firestore's local cache so newly added
+  // items are always visible immediately after navigating back to the
+  // trade screen.
+  const querySnapshot = await getDocsFromServer(collection(db, "items"));
 
-  const items = querySnapshot.docs.map((doc) => ({
+  const allItems = querySnapshot.docs.map((doc) => ({
     id: doc.id,
     ...doc.data(),
   })) as any[];
 
-  // Deduplicate owner IDs so we only fetch each user doc once
+  // Filter traded items BEFORE user enrichment to avoid unnecessary reads
+  const items = allItems.filter((item) => !item.isTraded);
+
   const ownerIds = [...new Set(items.map((i) => i.ownerId).filter(Boolean))];
 
   const userMap: Record<string, { userName: string; userAvatar: string }> = {};
@@ -62,13 +64,13 @@ export const getAllItems = async () => {
   }));
 };
 
-// SEARCH: Search items by title or name
+// SEARCH: also filters traded items
 export const searchItems = async (searchQuery: string) => {
   if (!searchQuery.trim()) {
     return getAllItems();
   }
 
-  const querySnapshot = await getDocs(collection(db, "items"));
+  const querySnapshot = await getDocsFromServer(collection(db, "items"));
   const searchLower = searchQuery.toLowerCase();
 
   return querySnapshot.docs
@@ -78,51 +80,36 @@ export const searchItems = async (searchQuery: string) => {
     }))
     .filter(
       (item: any) =>
-        (item.title && item.title.toLowerCase().includes(searchLower)) ||
-        (item.description &&
-          item.description.toLowerCase().includes(searchLower)),
+        !item.isTraded && // exclude traded items from search too
+        ((item.title && item.title.toLowerCase().includes(searchLower)) ||
+          (item.description &&
+            item.description.toLowerCase().includes(searchLower))),
     );
 };
 
-/**
- * Get user information by userId
- * Returns null if user not found (graceful fallback)
- */
 export const getUserInfo = async (userId: string) => {
   try {
     const userRef = doc(db, "users", userId);
     const userSnap = await getDoc(userRef);
-
     if (userSnap.exists()) {
-      return {
-        id: userSnap.id,
-        ...userSnap.data(),
-      };
+      return { id: userSnap.id, ...userSnap.data() };
+    } else {
+      throw new Error("User not found");
     }
-    return null; // User not found - return null instead of throwing
   } catch (error) {
     console.error("Error getting user info:", error);
-    return null;
+    throw error;
   }
 };
 
-/**
- * Get item details with owner information
- */
 export const getItemDetails = async (itemId: string) => {
   try {
     const itemRef = doc(db, "items", itemId);
     const itemSnap = await getDoc(itemRef);
-
     if (itemSnap.exists()) {
       const itemData = itemSnap.data();
       const ownerInfo = await getUserInfo(itemData.ownerId);
-
-      return {
-        id: itemSnap.id,
-        ...itemData,
-        owner: ownerInfo,
-      };
+      return { id: itemSnap.id, ...itemData, owner: ownerInfo };
     } else {
       throw new Error("Item not found");
     }
@@ -132,24 +119,6 @@ export const getItemDetails = async (itemId: string) => {
   }
 };
 
-/**
- * Delete an item by its document ID
- */
-export const deleteItem = async (itemId: string): Promise<void> => {
-  try {
-    await deleteDoc(doc(db, "items", itemId));
-  } catch (error) {
-    console.error("Error deleting item:", error);
-    throw error;
-  }
-};
-
-/**
- * Update item likes
- * @param itemId - Item document ID
- * @param userId - User ID who is liking/unliking
- * @param isLiking - true to like, false to unlike
- */
 export const updateItemLikes = async (
   itemId: string,
   userId: string,
@@ -157,7 +126,6 @@ export const updateItemLikes = async (
 ) => {
   try {
     const itemRef = doc(db, "items", itemId);
-
     if (isLiking) {
       await updateDoc(itemRef, {
         likedBy: arrayUnion(userId),
@@ -166,7 +134,6 @@ export const updateItemLikes = async (
     } else {
       const itemSnap = await getDoc(itemRef);
       const currentLikes = itemSnap.data()?.likes || 0;
-
       await updateDoc(itemRef, {
         likedBy: arrayRemove(userId),
         likes: Math.max(currentLikes - 1, 0),
@@ -178,19 +145,12 @@ export const updateItemLikes = async (
   }
 };
 
-/**
- * Initialize likedBy array if it doesn't exist
- * Run this once during item creation or migration
- */
 export const initializeLikedBy = async (itemId: string) => {
   try {
     const itemRef = doc(db, "items", itemId);
     const itemSnap = await getDoc(itemRef);
-
     if (itemSnap.exists() && !itemSnap.data()?.likedBy) {
-      await updateDoc(itemRef, {
-        likedBy: [],
-      });
+      await updateDoc(itemRef, { likedBy: [] });
     }
   } catch (error) {
     console.error("Error initializing likedBy:", error);
@@ -198,10 +158,6 @@ export const initializeLikedBy = async (itemId: string) => {
   }
 };
 
-/**
- * Add a new item to Firebase
- * @param itemData - The item data to add
- */
 export const addItem = async (itemData: {
   title: string;
   description: string;
@@ -218,6 +174,7 @@ export const addItem = async (itemData: {
       ...itemData,
       likes: itemData.likes || 0,
       likedBy: itemData.likedBy || [],
+      isTraded: false, // explicit default so filter works correctly
       createdAt: itemData.createdAt || new Date(),
     });
     return { id: docRef.id, ...itemData };
@@ -227,9 +184,6 @@ export const addItem = async (itemData: {
   }
 };
 
-/**
- * Add a comment to an item
- */
 export const addComment = async (
   itemId: string,
   userId: string,
@@ -250,11 +204,7 @@ export const addComment = async (
       replies: [],
       createdAt: new Date(),
     };
-
-    await updateDoc(itemRef, {
-      comments: arrayUnion(comment),
-    });
-
+    await updateDoc(itemRef, { comments: arrayUnion(comment) });
     return comment;
   } catch (error) {
     console.error("Error adding comment:", error);
@@ -262,29 +212,19 @@ export const addComment = async (
   }
 };
 
-/**
- * Delete a comment from an item
- */
 export const deleteComment = async (itemId: string, commentId: string) => {
   try {
     const itemRef = doc(db, "items", itemId);
     const itemSnap = await getDoc(itemRef);
     const comments = itemSnap.data()?.comments || [];
-
     const updatedComments = comments.filter((c: any) => c.id !== commentId);
-
-    await updateDoc(itemRef, {
-      comments: updatedComments,
-    });
+    await updateDoc(itemRef, { comments: updatedComments });
   } catch (error) {
     console.error("Error deleting comment:", error);
     throw error;
   }
 };
 
-/**
- * Like/unlike a comment
- */
 export const updateCommentLike = async (
   itemId: string,
   commentId: string,
@@ -295,7 +235,6 @@ export const updateCommentLike = async (
     const itemRef = doc(db, "items", itemId);
     const itemSnap = await getDoc(itemRef);
     const comments = itemSnap.data()?.comments || [];
-
     const updatedComments = comments.map((comment: any) => {
       if (comment.id === commentId) {
         if (isLiking) {
@@ -317,7 +256,6 @@ export const updateCommentLike = async (
       }
       return comment;
     });
-
     await updateDoc(itemRef, { comments: updatedComments });
   } catch (error) {
     console.error("Error updating comment like:", error);
@@ -325,9 +263,6 @@ export const updateCommentLike = async (
   }
 };
 
-/**
- * Add a reply to a comment
- */
 export const addCommentReply = async (
   itemId: string,
   commentId: string,
@@ -340,7 +275,6 @@ export const addCommentReply = async (
     const itemRef = doc(db, "items", itemId);
     const itemSnap = await getDoc(itemRef);
     const comments = itemSnap.data()?.comments || [];
-
     const updatedComments = comments.map((comment: any) => {
       if (comment.id === commentId) {
         return {
@@ -360,7 +294,6 @@ export const addCommentReply = async (
       }
       return comment;
     });
-
     await updateDoc(itemRef, { comments: updatedComments });
   } catch (error) {
     console.error("Error adding comment reply:", error);
@@ -368,9 +301,6 @@ export const addCommentReply = async (
   }
 };
 
-/**
- * Add/remove item from user's saved list
- */
 export const updateItemSave = async (
   itemId: string,
   userId: string,
@@ -379,16 +309,11 @@ export const updateItemSave = async (
   try {
     const userRef = doc(db, "users", userId);
     const userSnap = await getDoc(userRef);
-
-    if (!userSnap.exists()) {
-      throw new Error("User not found");
-    }
-
+    if (!userSnap.exists()) throw new Error("User not found");
     const currentSavedCount = userSnap.data()?.savedCount || 0;
     const newSavedCount = isSaving
       ? currentSavedCount + 1
       : Math.max(0, currentSavedCount - 1);
-
     if (isSaving) {
       await updateDoc(userRef, {
         savedItems: arrayUnion(itemId),
@@ -406,18 +331,13 @@ export const updateItemSave = async (
   }
 };
 
-/**
- * Get user's saved items
- */
 export const getUserSavedItems = async (userId: string) => {
   try {
     const userRef = doc(db, "users", userId);
     const userSnap = await getDoc(userRef);
-
     if (userSnap.exists()) {
       const savedItemIds = userSnap.data()?.savedItems || [];
       if (savedItemIds.length === 0) return [];
-
       const items = await getAllItems();
       return items.filter((item) => savedItemIds.includes(item.id));
     }
@@ -428,19 +348,14 @@ export const getUserSavedItems = async (userId: string) => {
   }
 };
 
-/**
- * Get user's posted items by their userId (ownerId)
- */
 export const getUserPostedItems = async (userId: string) => {
   try {
-    const querySnapshot = await getDocs(collection(db, "items"));
+    const querySnapshot = await getDocsFromServer(collection(db, "items"));
+    // getUserPostedItems intentionally includes traded items so the user
+    // can still see their own history in their profile
     const userItems = querySnapshot.docs
       .filter((doc) => doc.data().ownerId === userId)
-      .map((doc) => ({
-        id: doc.id,
-        ...doc.data(),
-      }));
-
+      .map((doc) => ({ id: doc.id, ...doc.data() }));
     return userItems;
   } catch (error) {
     console.error("Error getting user's posted items:", error);

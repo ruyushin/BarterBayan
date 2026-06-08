@@ -4,9 +4,9 @@ import {
   doc,
   getDoc,
   getDocs,
-  updateDoc
-} from 'firebase/firestore';
-import { db } from '../firebaseConfig';
+  updateDoc,
+} from "firebase/firestore";
+import { db } from "../firebaseConfig";
 
 export interface TrendingItem {
   id: string;
@@ -34,6 +34,13 @@ export interface UserActivity {
 }
 
 /**
+ * Sanitize a string so it can be used as a Firestore field path key.
+ * Firestore forbids '~', '*', '/', '[', ']' in field paths.
+ * e.g. "School/Office" → "School_Office"
+ */
+const sanitizeFieldKey = (key: string): string => key.replace(/[~*/[\]]/g, "_");
+
+/**
  * Calculate trending score for an item based on multiple factors
  */
 export const calculateTrendingScore = (item: TrendingItem): number => {
@@ -47,7 +54,7 @@ export const calculateTrendingScore = (item: TrendingItem): number => {
   const createdAt = item.createdAt?.toDate?.() || new Date(item.createdAt);
   const daysSinceCreation = Math.max(
     0,
-    (Date.now() - createdAt.getTime()) / (1000 * 60 * 60 * 24)
+    (Date.now() - createdAt.getTime()) / (1000 * 60 * 60 * 24),
   );
   const recencyScore = Math.max(0, 30 - daysSinceCreation * 1.5);
   score += recencyScore;
@@ -68,12 +75,14 @@ export const calculateTrendingScore = (item: TrendingItem): number => {
 /**
  * Get trending items sorted by trending score
  */
-export const getTrendingItems = async (limit_: number = 20): Promise<TrendingItem[]> => {
+export const getTrendingItems = async (
+  limit_: number = 20,
+): Promise<TrendingItem[]> => {
   try {
-    const itemsRef = collection(db, 'items');
+    const itemsRef = collection(db, "items");
     const snapshot = await getDocs(itemsRef);
 
-    const items = snapshot.docs.map(doc => {
+    const items = snapshot.docs.map((doc) => {
       const data = doc.data();
       return {
         id: doc.id,
@@ -92,7 +101,7 @@ export const getTrendingItems = async (limit_: number = 20): Promise<TrendingIte
       } as TrendingItem;
     });
 
-    const itemsWithScores = items.map(item => ({
+    const itemsWithScores = items.map((item) => ({
       ...item,
       trendingScore: calculateTrendingScore(item),
     }));
@@ -101,7 +110,7 @@ export const getTrendingItems = async (limit_: number = 20): Promise<TrendingIte
       .sort((a, b) => (b.trendingScore || 0) - (a.trendingScore || 0))
       .slice(0, limit_);
   } catch (error) {
-    console.error('Error fetching trending items:', error);
+    console.error("Error fetching trending items:", error);
     throw error;
   }
 };
@@ -111,10 +120,10 @@ export const getTrendingItems = async (limit_: number = 20): Promise<TrendingIte
  */
 export const trackItemView = async (
   itemId: string,
-  userId: string
+  userId: string,
 ): Promise<void> => {
   try {
-    const itemRef = doc(db, 'items', itemId);
+    const itemRef = doc(db, "items", itemId);
     const itemSnap = await getDoc(itemRef);
 
     if (itemSnap.exists()) {
@@ -129,10 +138,10 @@ export const trackItemView = async (
         });
       }
 
-      await trackUserActivity(userId, 'view', itemId, data.category);
+      await trackUserActivity(userId, "view", itemId, data.category);
     }
   } catch (error) {
-    console.error('Error tracking item view:', error);
+    console.error("Error tracking item view:", error);
   }
 };
 
@@ -141,33 +150,38 @@ export const trackItemView = async (
  */
 export const trackUserActivity = async (
   userId: string,
-  activityType: 'view' | 'like' | 'search',
+  activityType: "view" | "like" | "search",
   itemId?: string,
-  category?: string
+  category?: string,
 ): Promise<void> => {
   try {
-    const userRef = doc(db, 'users', userId);
+    const userRef = doc(db, "users", userId);
 
-    if (activityType === 'view' && itemId) {
+    if (activityType === "view" && itemId) {
       await updateDoc(userRef, {
         viewedItems: arrayUnion(itemId),
         lastViewedAt: new Date(),
       });
 
       if (category) {
+        // Sanitize the category so characters like '/' don't break the
+        // Firestore field path (e.g. "School/Office" → "School_Office").
+        const safeCategory = sanitizeFieldKey(category);
+        const userSnap = await getDoc(userRef);
+        const currentCount =
+          userSnap.data()?.categoryPreferences?.[safeCategory] || 0;
         await updateDoc(userRef, {
-          [`categoryPreferences.${category}`]: (await getDoc(userRef)).data()
-            ?.categoryPreferences?.[category] + 1 || 1,
+          [`categoryPreferences.${safeCategory}`]: currentCount + 1,
         });
       }
-    } else if (activityType === 'like' && itemId) {
+    } else if (activityType === "like" && itemId) {
       await updateDoc(userRef, {
         likedItems: arrayUnion(itemId),
         lastLikedAt: new Date(),
       });
     }
   } catch (error) {
-    console.error('Error tracking user activity:', error);
+    console.error("Error tracking user activity:", error);
   }
 };
 
@@ -176,10 +190,10 @@ export const trackUserActivity = async (
  */
 export const getPersonalizedSuggestions = async (
   userId: string,
-  limit_: number = 10
+  limit_: number = 10,
 ): Promise<TrendingItem[]> => {
   try {
-    const userRef = doc(db, 'users', userId);
+    const userRef = doc(db, "users", userId);
     const userSnap = await getDoc(userRef);
 
     if (!userSnap.exists()) {
@@ -191,10 +205,10 @@ export const getPersonalizedSuggestions = async (
     const viewedItems = userData.viewedItems || [];
     const categoryPreferences = userData.categoryPreferences || {};
 
-    const itemsRef = collection(db, 'items');
+    const itemsRef = collection(db, "items");
     const snapshot = await getDocs(itemsRef);
 
-    const allItems = snapshot.docs.map(doc => {
+    const allItems = snapshot.docs.map((doc) => {
       const data = doc.data();
       return {
         id: doc.id,
@@ -214,21 +228,24 @@ export const getPersonalizedSuggestions = async (
     });
 
     const unseenItems = allItems.filter(
-      item => !likedItems.includes(item.id) && !viewedItems.includes(item.id)
+      (item) => !likedItems.includes(item.id) && !viewedItems.includes(item.id),
     );
 
-    const scoredItems = unseenItems.map(item => {
+    const scoredItems = unseenItems.map((item) => {
       let personalScore = calculateTrendingScore(item);
 
-      const categoryBoost = (categoryPreferences[item.category] || 0) * 5;
+      // Look up preferences using the sanitized key so it matches what
+      // was written by trackUserActivity.
+      const safeCategory = sanitizeFieldKey(item.category);
+      const categoryBoost = (categoryPreferences[safeCategory] || 0) * 5;
       personalScore += categoryBoost;
 
       const topCategories = Object.entries(categoryPreferences)
-        .sort((a, b) => (b as any)[1] - (a as any)[1])
+        .sort((a, b) => (b[1] as number) - (a[1] as number))
         .slice(0, 3)
         .map(([cat]) => cat);
 
-      if (topCategories.includes(item.category)) {
+      if (topCategories.includes(safeCategory)) {
         personalScore *= 1.3;
       }
 
@@ -242,7 +259,7 @@ export const getPersonalizedSuggestions = async (
       .sort((a, b) => (b.trendingScore || 0) - (a.trendingScore || 0))
       .slice(0, limit_);
   } catch (error) {
-    console.error('Error getting personalized suggestions:', error);
+    console.error("Error getting personalized suggestions:", error);
     return getTrendingItems(limit_);
   }
 };
@@ -252,10 +269,10 @@ export const getPersonalizedSuggestions = async (
  */
 export const getSimilarItems = async (
   itemId: string,
-  limit_: number = 5
+  limit_: number = 5,
 ): Promise<TrendingItem[]> => {
   try {
-    const itemRef = doc(db, 'items', itemId);
+    const itemRef = doc(db, "items", itemId);
     const itemSnap = await getDoc(itemRef);
 
     if (!itemSnap.exists()) {
@@ -265,15 +282,15 @@ export const getSimilarItems = async (
     const baseItem = itemSnap.data();
     const baseCategory = baseItem.category;
 
-    const itemsRef = collection(db, 'items');
+    const itemsRef = collection(db, "items");
     const snapshot = await getDocs(itemsRef);
 
     const similarItems = snapshot.docs
-      .filter(doc => {
+      .filter((doc) => {
         const data = doc.data();
         return data.category === baseCategory && doc.id !== itemId;
       })
-      .map(doc => {
+      .map((doc) => {
         const data = doc.data();
         return {
           id: doc.id,
@@ -306,7 +323,7 @@ export const getSimilarItems = async (
       .sort((a, b) => (b.trendingScore || 0) - (a.trendingScore || 0))
       .slice(0, limit_);
   } catch (error) {
-    console.error('Error getting similar items:', error);
+    console.error("Error getting similar items:", error);
     return [];
   }
 };
