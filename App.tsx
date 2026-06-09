@@ -1,6 +1,6 @@
-import React, { useState } from 'react';
-import SplashScreen from './SplashScreen';
-import RootLayout from './app/_layout'; // your actual app
+import React, { useState } from "react";
+import SplashScreen from "./SplashScreen";
+import RootLayout from "./app/_layout"; // your actual app
 
 export default function App() {
   const [ready, setReady] = useState(false);
