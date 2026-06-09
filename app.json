@@ -2,6 +2,7 @@
   "expo": {
     "name": "BarterBayan",
     "slug": "barterbayan",
+    "owner": "monarkuu",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
@@ -12,6 +13,7 @@
       "bundleIdentifier": "com.ruyuching.barterbayan"
     },
     "android": {
+      "googleServicesFile": "./google-services.json",
       "intentFilters": [
         {
           "action": "VIEW",
@@ -21,10 +23,7 @@
               "scheme": "barterbayanv10"
             }
           ],
-          "category": [
-            "BROWSABLE",
-            "DEFAULT"
-          ]
+          "category": ["BROWSABLE", "DEFAULT"]
         }
       ],
       "adaptiveIcon": {
@@ -59,7 +58,7 @@
     "extra": {
       "router": {},
       "eas": {
-        "projectId": "1bc24b79-f326-43f0-a649-acba8ced6c5b"
+        "projectId": "0f707a59-f8bc-4a36-9683-9095d0729577"
       }
     }
   }

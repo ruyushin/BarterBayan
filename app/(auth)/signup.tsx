@@ -1,26 +1,20 @@
 import FontAwesome from "@expo/vector-icons/FontAwesome";
 import MaterialIcons from "@expo/vector-icons/MaterialIcons";
-import { makeRedirectUri } from "expo-auth-session";
-import * as Facebook from "expo-auth-session/providers/facebook";
-import * as Google from "expo-auth-session/providers/google";
-import Constants from "expo-constants";
+import { GoogleSignin } from "@react-native-google-signin/google-signin";
 import { useRouter } from "expo-router";
-import * as WebBrowser from "expo-web-browser";
 import {
   createUserWithEmailAndPassword,
-  FacebookAuthProvider,
   GoogleAuthProvider,
   sendEmailVerification,
   signInWithCredential,
   signOut,
 } from "firebase/auth";
 import { doc, setDoc } from "firebase/firestore";
-import React, { useEffect, useRef, useState } from "react";
+import React, { useRef, useState } from "react";
 import {
   Alert,
   Animated,
   Modal,
-  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -32,44 +26,6 @@ import {
 import { auth, db } from "../../firebaseConfig";
 
 export default function SignUpScreen() {
-  // --- Auth request redirectUri ---
-  WebBrowser.maybeCompleteAuthSession();
-  const useProxy = Platform.OS !== "web" && Constants.appOwnership === "expo";
-  const redirectUri = makeRedirectUri({
-    scheme: "barterbayanv10",
-    ...(useProxy ? { useProxy: true } : {}),
-  } as any);
-
-  // --- Google Auth Request ---
-  const [request, response, promptAsync] = Google.useAuthRequest({
-    clientId:
-      "1081232685961-ej4te66gtudrhi4l70jjm37ffball2b6.apps.googleusercontent.com",
-    redirectUri,
-    responseType: "id_token",
-    scopes: ["profile", "email"],
-  });
-
-  // --- Facebook Auth Request ---
-  const [facebookRequest, facebookResponse, facebookPromptAsync] =
-    Facebook.useAuthRequest({
-      clientId: "848759694896379", // Your Facebook App ID
-      redirectUri,
-      scopes: ["public_profile", "email"],
-    });
-
-  // if we are on web + expo dev client path, this help avoids COOP popup race
-  useEffect(() => {
-    if (Platform.OS === "web" && response?.type === "error") {
-      console.warn("Google Web auth response error", response.error);
-    }
-  }, [response]);
-
-  useEffect(() => {
-    if (Platform.OS === "web" && facebookResponse?.type === "error") {
-      console.warn("Facebook Web auth response error", facebookResponse.error);
-    }
-  }, [facebookResponse]);
-
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
@@ -93,8 +49,11 @@ export default function SignUpScreen() {
   const [successMessage, setSuccessMessage] = useState("");
   const [successRoute, setSuccessRoute] = useState<"login" | "verify">("login");
 
-  // --- Router ---
   const router = useRouter();
+
+  const textColor = "#000000";
+  const inputBgColor = "#f0f0f0";
+  const iconColor = "#ADADAD";
 
   const showSuccessAndReset = (
     message: string,
@@ -109,28 +68,6 @@ export default function SignUpScreen() {
     setErrors({});
   };
 
-  // when Google response comes back
-  useEffect(() => {
-    if (response?.type === "success") {
-      const { id_token } = response.params;
-      handleGoogleSignUp(id_token);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [response]);
-
-  // when Facebook response comes back
-  useEffect(() => {
-    if (facebookResponse?.type === "success") {
-      const { access_token } = facebookResponse.params;
-      handleFacebookSignUp(access_token);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [facebookResponse]);
-  const textColor = "#000000";
-  const inputBgColor = "#f0f0f0";
-  const iconColor = "#ADADAD";
-
-  // --- shared social button component ---
   function SocialButton({
     name,
     onPress,
@@ -149,8 +86,6 @@ export default function SignUpScreen() {
     );
   }
 
-  // --- HELPER FUNCTIONS ---
-  // STRICTOR VALIDATION: Only allows valid @gmail.com structures
   const validateEmailFormat = (email: string) => {
     return /^[a-zA-Z0-9._%+-]+@gmail\.com$/.test(email.toLowerCase());
   };
@@ -186,37 +121,15 @@ export default function SignUpScreen() {
     }, 1200);
   }
 
-  // --- CORE SIGNUP LOGIC ---
-  // --- Google sign-up handler ---
-  const handleGoogleSignUp = async (idToken: string) => {
+  // ── Google sign-up (native) ────────────────────────────────────────
+  const handleGoogleSignUp = async () => {
     setIsSubmitting(true);
     try {
-      // Decode the id_token to get the email
-      const payload = idToken.split(".")[1];
-      const decoded = JSON.parse(
-        atob(payload.replace(/-/g, "+").replace(/_/g, "/")),
-      );
-      if (!decoded || !decoded.email) {
-        Alert.alert("Error", "Unable to retrieve email from Google.");
-        setIsSubmitting(false);
-        return;
-      }
-      const email = decoded.email;
+      await GoogleSignin.hasPlayServices();
+      const userInfo = await GoogleSignin.signIn();
+      const idToken = userInfo.data?.idToken;
+      if (!idToken) throw new Error("No ID token returned");
 
-      // Sign out the temporary sign-in
-      await signOut(auth);
-      await createGoogleAccount(idToken);
-    } catch (error: any) {
-      console.error("Google Signup Error:", error);
-      Alert.alert("Google Signup Error", error?.message || String(error));
-    } finally {
-      setIsSubmitting(false);
-    }
-  };
-
-  const createGoogleAccount = async (idToken: string) => {
-    setIsSubmitting(true);
-    try {
       const credential = GoogleAuthProvider.credential(idToken);
       const userCredential = await signInWithCredential(auth, credential);
       const user = userCredential.user;
@@ -241,97 +154,22 @@ export default function SignUpScreen() {
         );
       }
 
-      const successMessage =
-        "Account created successfully with Google! We sent a verification link to your Gmail. Please verify your email before continuing.";
+      showSuccessAndReset(
+        "Account created successfully with Google! We sent a verification link to your Gmail. Please verify your email before continuing.",
+        "verify",
+      );
 
-      showSuccessAndReset(successMessage, "verify");
-      setIsSubmitting(false);
-
-      // Background tasks - don't await these
       setDoc(doc(db, "users", user.uid), profileData).catch((err) =>
         console.warn("Firestore setDoc error", err),
       );
       if (user.emailVerified) {
         signOut(auth).catch((err) => console.warn("Google signOut error", err));
       }
-    } catch (error: any) {
-      console.error("Google Signup Error:", error);
-      Alert.alert("Google Signup Error", error?.message || String(error));
-      setIsSubmitting(false);
-    }
-  };
-
-  // --- Facebook sign-up handler ---
-  const handleFacebookSignUp = async (accessToken: string) => {
-    setIsSubmitting(true);
-    try {
-      // Get user info from Facebook to retrieve email
-      const response = await fetch(
-        `https://graph.facebook.com/me?fields=id,email,name&access_token=${accessToken}`,
-      );
-      const data = await response.json();
-      if (!data.email) {
-        Alert.alert(
-          "Email Required",
-          "Unable to retrieve email from Facebook account.",
-        );
-        setIsSubmitting(false);
-        return;
+    } catch (err: any) {
+      if (err.code !== "SIGN_IN_CANCELLED") {
+        Alert.alert("Google Signup Error", err?.message || String(err));
       }
-      await createFacebookAccount(accessToken);
-    } catch (error: any) {
-      console.error("Facebook Signup Error:", error);
-      Alert.alert("Facebook Signup Error", error?.message || String(error));
     } finally {
-      setIsSubmitting(false);
-    }
-  };
-
-  const createFacebookAccount = async (accessToken: string) => {
-    setIsSubmitting(true);
-    try {
-      const credential = FacebookAuthProvider.credential(accessToken);
-      const userCredential = await signInWithCredential(auth, credential);
-      const user = userCredential.user;
-
-      const profileData = {
-        email: user.email,
-        username: user.email?.split("@")[0],
-        createdAt: new Date().toISOString(),
-        rating: 5.0,
-        tradeCount: 0,
-        emailVerified: user.emailVerified,
-      };
-
-      try {
-        await sendEmailVerification(user);
-      } catch (error: any) {
-        console.error("Facebook verification email error:", error);
-        Alert.alert(
-          "Verification Email Failed",
-          error?.message ||
-            "Unable to send a verification email. Please try again.",
-        );
-      }
-
-      const successMessage =
-        "Account created successfully with Facebook! We sent a verification link to your Gmail. Please verify your email before continuing.";
-
-      showSuccessAndReset(successMessage, "verify");
-      setIsSubmitting(false);
-
-      // Background tasks - don't await these
-      setDoc(doc(db, "users", user.uid), profileData).catch((err) =>
-        console.warn("Firestore setDoc error", err),
-      );
-      if (user.emailVerified) {
-        signOut(auth).catch((err) =>
-          console.warn("Facebook signOut error", err),
-        );
-      }
-    } catch (error: any) {
-      console.error("Facebook Signup Error:", error);
-      Alert.alert("Facebook Signup Error", error?.message || String(error));
       setIsSubmitting(false);
     }
   };
@@ -392,8 +230,6 @@ export default function SignUpScreen() {
       return;
     }
 
-    const message =
-      "Account created successfully! We've sent a verification link to your Gmail. Please verify your email before logging in.";
     try {
       await sendEmailVerification(user);
     } catch (error: any) {
@@ -404,7 +240,11 @@ export default function SignUpScreen() {
           "Unable to send a verification email. Please try again.",
       );
     }
-    showSuccessAndReset(message, "verify");
+
+    showSuccessAndReset(
+      "Account created successfully! We've sent a verification link to your Gmail. Please verify your email before logging in.",
+      "verify",
+    );
     setIsSubmitting(false);
   };
 
@@ -546,10 +386,7 @@ export default function SignUpScreen() {
 
           {/* Social Buttons */}
           <View style={styles.socialContainer}>
-            <SocialButton
-              name="google"
-              onPress={() => promptAsync({ useProxy } as any)}
-            />
+            <SocialButton name="google" onPress={handleGoogleSignUp} />
           </View>
 
           {/* Footer */}
@@ -603,16 +440,9 @@ export default function SignUpScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-  },
-  content: {
-    padding: 20,
-    paddingTop: 60,
-  },
-  header: {
-    marginBottom: 40,
-  },
+  container: { flex: 1 },
+  content: { padding: 20, paddingTop: 60 },
+  header: { marginBottom: 40 },
   headerGradient: {
     fontSize: 36,
     fontWeight: "bold",
@@ -627,37 +457,23 @@ const styles = StyleSheet.create({
     marginBottom: 16,
     height: 55,
   },
-  inputIcon: {
-    marginRight: 10,
-  },
-  input: {
-    flex: 1,
-    fontSize: 16,
-  },
+  inputIcon: { marginRight: 10 },
+  input: { flex: 1, fontSize: 16 },
   errorText: {
     color: "#D9534F",
     fontSize: 14,
     marginBottom: 8,
     marginLeft: 15,
   },
-  strengthContainer: {
-    marginBottom: 16,
-    marginLeft: 15,
-  },
-  strengthText: {
-    fontSize: 14,
-    fontWeight: "600",
-    marginBottom: 4,
-  },
+  strengthContainer: { marginBottom: 16, marginLeft: 15 },
+  strengthText: { fontSize: 14, fontWeight: "600", marginBottom: 4 },
   strengthBar: {
     height: 4,
     backgroundColor: "#E0E0E0",
     borderRadius: 2,
     overflow: "hidden",
   },
-  strengthFill: {
-    height: "100%",
-  },
+  strengthFill: { height: "100%" },
   signupButton: {
     backgroundColor: "#2F2F6F",
     height: 55,
@@ -667,29 +483,15 @@ const styles = StyleSheet.create({
     marginTop: 20,
     marginBottom: 30,
   },
-  signupButtonPressed: {
-    opacity: 0.8,
-  },
-  signupButtonText: {
-    color: "#FFFFFF",
-    fontSize: 18,
-    fontWeight: "600",
-  },
+  signupButtonPressed: { opacity: 0.8 },
+  signupButtonText: { color: "#FFFFFF", fontSize: 18, fontWeight: "600" },
   dividerContainer: {
     flexDirection: "row",
     alignItems: "center",
     marginVertical: 20,
   },
-  dividerLine: {
-    flex: 1,
-    height: 1,
-    backgroundColor: "#E0E0E0",
-  },
-  dividerText: {
-    marginHorizontal: 10,
-    color: "#666",
-    fontSize: 14,
-  },
+  dividerLine: { flex: 1, height: 1, backgroundColor: "#E0E0E0" },
+  dividerText: { marginHorizontal: 10, color: "#666", fontSize: 14 },
   socialContainer: {
     flexDirection: "row",
     justifyContent: "center",
@@ -704,19 +506,9 @@ const styles = StyleSheet.create({
     alignItems: "center",
     marginHorizontal: 12,
   },
-  footer: {
-    flexDirection: "row",
-    justifyContent: "center",
-    paddingBottom: 20,
-  },
-  footerText: {
-    fontSize: 15,
-  },
-  footerLink: {
-    color: "#2F2F6F",
-    fontSize: 15,
-    fontWeight: "bold",
-  },
+  footer: { flexDirection: "row", justifyContent: "center", paddingBottom: 20 },
+  footerText: { fontSize: 15 },
+  footerLink: { color: "#2F2F6F", fontSize: 15, fontWeight: "bold" },
   modalOverlay: {
     flex: 1,
     backgroundColor: "rgba(0, 0, 0, 0.5)",
@@ -748,9 +540,5 @@ const styles = StyleSheet.create({
     paddingHorizontal: 24,
     borderRadius: 8,
   },
-  modalButtonText: {
-    color: "#FFFFFF",
-    fontSize: 16,
-    fontWeight: "600",
-  },
+  modalButtonText: { color: "#FFFFFF", fontSize: 16, fontWeight: "600" },
 });
