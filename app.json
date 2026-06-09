@@ -34,12 +34,8 @@
         "monochromeImage": "./assets/images/android-icon-monochrome.png"
       },
       "predictiveBackGestureEnabled": false,
-      "package": "com.ruyuching.barterbayan"
-    },
-    "splash": {
-      "image": "./assets/images/splash-icon.png",
-      "resizeMode": "contain",
-      "backgroundColor": "#FFFFFF"
+      "package": "com.ruyuching.barterbayan",
+      "googleServicesFile": "./google-services.json"
     },
     "web": {
       "output": "static",
@@ -49,8 +45,15 @@
       "expo-router",
       "expo-image",
       "expo-font",
-      "@react-native-google-signin/google-signin",
-      "expo-video"
+      "expo-video",
+      [
+        "expo-splash-screen",
+        {
+          "image": "./assets/images/splash-icon.png",
+          "resizeMode": "contain",
+          "backgroundColor": "#FFFFFF"
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true,

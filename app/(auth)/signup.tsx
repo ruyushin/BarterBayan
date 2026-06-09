@@ -42,11 +42,11 @@ export default function SignUpScreen() {
 
   // --- Google Auth Request ---
   const [request, response, promptAsync] = Google.useAuthRequest({
-    clientId:
-      "1081232685961-ej4te66gtudrhi4l70jjm37ffball2b6.apps.googleusercontent.com",
-    redirectUri,
-    responseType: "id_token",
-    scopes: ["profile", "email"],
+  androidClientId: "1081232685961-gkth525m4vagv916gs9h1om0o41bbora.apps.googleusercontent.com",
+  webClientId: "1081232685961-gkth525m4vagv916gs9h1om0o41bbora.apps.googleusercontent.com",
+  redirectUri,
+  responseType: "id_token",
+  scopes: ["profile", "email"],
   });
 
   // --- Facebook Auth Request ---

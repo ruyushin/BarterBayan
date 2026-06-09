@@ -57,14 +57,14 @@ export default function LoginScreen() {
     ...(useProxy ? { useProxy: true } : {}),
   } as any);
 
-  const [, response, promptAsync] = Google.useAuthRequest({
-    clientId:
-      "1081232685961-ej4te66gtudrhi4l70jjm37ffball2b6.apps.googleusercontent.com",
-    redirectUri,
-    responseType: "id_token",
-    scopes: ["profile", "email"],
+  const [request, response, promptAsync] = Google.useAuthRequest({
+  androidClientId: "1081232685961-gkth525m4vagv916gs9h1om0o41bbora.apps.googleusercontent.com",
+  webClientId: "1081232685961-gkth525m4vagv916gs9h1om0o41bbora.apps.googleusercontent.com",
+  redirectUri,
+  responseType: "id_token",
+  scopes: ["profile", "email"],
   });
-
+  
   const decodeJWT = (token: string) => {
     try {
       const base64Url = token.split(".")[1];

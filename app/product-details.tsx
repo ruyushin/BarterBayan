@@ -222,6 +222,24 @@ export default function ProductDetailsScreen() {
     }
   };
 
+  // ── Called by ProductDetailModal via onLikeChange so both stay in sync ──
+  const handleLikeChange = (liked: boolean, newCount: number) => {
+    setIsLiked(liked);
+    setLikeCount(newCount);
+    // Also patch the item object so re-opens of the modal see fresh data
+    setItem((prev: any) =>
+      prev
+        ? {
+            ...prev,
+            likes: newCount,
+            likedBy: liked
+              ? [...(prev.likedBy ?? []), currentUser]
+              : (prev.likedBy ?? []).filter((id: string) => id !== currentUser),
+          }
+        : prev,
+    );
+  };
+
   const handleBackPress = () => {
     try {
       if (router.canGoBack?.()) {
@@ -242,8 +260,10 @@ export default function ProductDetailsScreen() {
     try {
       const nowLiked = !isLiked;
       await updateItemLikes(item.id, currentUser, nowLiked);
-      setIsLiked(nowLiked);
-      setLikeCount((prev) => (nowLiked ? prev + 1 : Math.max(0, prev - 1)));
+      const newCount = nowLiked
+        ? likeCount + 1
+        : Math.max(0, likeCount - 1);
+      handleLikeChange(nowLiked, newCount);
       if (nowLiked) {
         await trackUserActivity(currentUser, "like", item.id, item.category);
       }
@@ -516,7 +536,6 @@ export default function ProductDetailsScreen() {
                 activeOpacity={0.85}
               >
                 <View style={styles.ownerHeader}>
-                  {/* ── Avatar with Ionicons fallback ── */}
                   {ownerInfo.avatarUrl ? (
                     <Image
                       source={{ uri: ownerInfo.avatarUrl }}

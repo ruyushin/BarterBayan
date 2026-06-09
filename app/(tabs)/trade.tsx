@@ -81,7 +81,7 @@ function StarRating({
 }
 
 export default function TradeScreen() {
-  const [activeTab, setActiveTab] = useState("trades");
+  const [activeTab, setActiveTab] = useState<"trades" | "offers">("trades");
   const [search, setSearch] = useState("");
   const [sortType, setSortType] = useState("none");
   const [filterCategory, setFilterCategory] = useState("All");
@@ -90,13 +90,9 @@ export default function TradeScreen() {
   const [loading, setLoading] = useState(true);
 
   const [sentOffers, setSentOffers] = useState<TradeOffer[]>([]);
-  const [cancellingOfferId, setCancellingOfferId] = useState<string | null>(
-    null,
-  );
+  const [cancellingOfferId, setCancellingOfferId] = useState<string | null>(null);
   const [confirmCancelId, setConfirmCancelId] = useState<string | null>(null);
-  const [completingOfferId, setCompletingOfferId] = useState<string | null>(
-    null,
-  );
+  const [completingOfferId, setCompletingOfferId] = useState<string | null>(null);
 
   const [chatTrade, setChatTrade] = useState<TradeOffer | null>(null);
   const [chatIsOwner, setChatIsOwner] = useState(false);
@@ -106,7 +102,6 @@ export default function TradeScreen() {
   const [submittingReview, setSubmittingReview] = useState(false);
   const [showReviewForm, setShowReviewForm] = useState(false);
 
-  // See Offers modal — live-subscribed so status updates in real time
   const [offersModalVisible, setOffersModalVisible] = useState(false);
   const [selectedItemForOffers, setSelectedItemForOffers] = useState<any>(null);
   const [incomingOffers, setIncomingOffers] = useState<TradeOffer[]>([]);
@@ -115,14 +110,12 @@ export default function TradeScreen() {
   const [statusModalVisible, setStatusModalVisible] = useState(false);
   const [selectedOffer, setSelectedOffer] = useState<TradeOffer | null>(null);
 
-  // Deep-link: open a specific trade chat from a notification
   const { openTradeId } = useLocalSearchParams<{ openTradeId?: string }>();
 
   const router = useRouter();
   const fadeAnim = useRef(new Animated.Value(1)).current;
   const addButtonScale = useRef(new Animated.Value(1)).current;
 
-  // ── Fetch user's own items ────────────────────────────────────────────────
   useFocusEffect(
     useCallback(() => {
       fetchUserItems();
@@ -134,8 +127,6 @@ export default function TradeScreen() {
       setLoading(true);
       const currentUserId = auth.currentUser?.uid;
       if (!currentUserId) return;
-      // getUserPostedItems filters by ownerId and intentionally includes
-      // isTraded items so listings mid-trade or completed still appear here.
       const myItems = await getUserPostedItems(currentUserId);
       setUserItems(myItems);
     } catch (error) {
@@ -145,14 +136,12 @@ export default function TradeScreen() {
     }
   };
 
-  // ── Real-time: sent offers ────────────────────────────────────────────────
   useEffect(() => {
     const uid = auth.currentUser?.uid;
     if (!uid) return;
     return subscribeToSentOffers(uid, setSentOffers);
   }, []);
 
-  // ── Deep-link: open chat from notification ────────────────────────────────
   useEffect(() => {
     if (!openTradeId || sentOffers.length === 0) return;
     const target = sentOffers.find((o) => o.id === openTradeId);
@@ -163,7 +152,6 @@ export default function TradeScreen() {
     }
   }, [openTradeId, sentOffers]);
 
-  // ── Live subscription for the status modal ────────────────────────────────
   useEffect(() => {
     if (!statusModalVisible || !selectedOffer?.id) return;
     return subscribeToTrade(selectedOffer.id, (updated) => {
@@ -171,21 +159,15 @@ export default function TradeScreen() {
     });
   }, [statusModalVisible, selectedOffer?.id]);
 
-  // ── Live subscription for the See Offers modal ────────────────────────────
   useEffect(() => {
     if (!offersModalVisible || !selectedItemForOffers?.id) return;
-    return subscribeToOffersForItem(
-      selectedItemForOffers.id,
-      setIncomingOffers,
-    );
+    return subscribeToOffersForItem(selectedItemForOffers.id, setIncomingOffers);
   }, [offersModalVisible, selectedItemForOffers?.id]);
 
-  // ── Handlers ─────────────────────────────────────────────────────────────
   const handleSeeOffers = (item: any) => {
     setIncomingOffers([]);
     setSelectedItemForOffers(item);
     setOffersModalVisible(true);
-    // Data loads via subscribeToOffersForItem effect above
   };
 
   const handleRespondToOffer = async (
@@ -195,7 +177,6 @@ export default function TradeScreen() {
     setUpdatingOfferId(offerId);
     try {
       await updateTradeStatus(offerId, response);
-      // ✅ If accepted, close the modal and show the accepted offer in status
       if (response === "accepted") {
         const acceptedOffer = incomingOffers.find((o) => o.id === offerId);
         if (acceptedOffer) {
@@ -250,7 +231,6 @@ export default function TradeScreen() {
     setCompletingOfferId(offer.id);
     try {
       await completeTrade(offer.id, currentUser.uid);
-      // selectedOffer auto-updates via subscribeToTrade
     } catch (err: any) {
       Alert.alert("Error", err?.message ?? "Failed to confirm the trade.");
     } finally {
@@ -263,7 +243,6 @@ export default function TradeScreen() {
     if (!currentUser || reviewRating === 0) return;
     setSubmittingReview(true);
     const myUid = currentUser.uid;
-    // BUG FIX: derive the target from participants, not a hardcoded role
     const targetUserId =
       offer.participants?.find((p) => p !== myUid) ?? offer.ownerId;
     try {
@@ -278,15 +257,9 @@ export default function TradeScreen() {
       setReviewRating(0);
       setReviewComment("");
       if (bothDone) {
-        Alert.alert(
-          "Reviews Published! 🎉",
-          "Both reviews are now live on your profiles.",
-        );
+        Alert.alert("Reviews Published!", "Both reviews are now live on your profiles.");
       } else {
-        Alert.alert(
-          "Review Submitted!",
-          "Waiting for the other person — both reviews reveal together.",
-        );
+        Alert.alert("Review Submitted!", "Waiting for the other person — both reviews reveal together.");
       }
     } catch (err: any) {
       Alert.alert("Error", err?.message ?? "Failed to submit review.");
@@ -317,60 +290,38 @@ export default function TradeScreen() {
     setIsFilterOpen(false);
   };
 
-  const switchTab = (tab: string) => {
+  const switchTab = (tab: "trades" | "offers") => {
     setConfirmCancelId(null);
     Animated.sequence([
-      Animated.timing(fadeAnim, {
-        toValue: 0,
-        duration: 150,
-        useNativeDriver: true,
-      }),
-      Animated.timing(fadeAnim, {
-        toValue: 1,
-        duration: 150,
-        useNativeDriver: true,
-      }),
+      Animated.timing(fadeAnim, { toValue: 0, duration: 150, useNativeDriver: true }),
+      Animated.timing(fadeAnim, { toValue: 1, duration: 150, useNativeDriver: true }),
     ]).start();
     setActiveTab(tab);
   };
 
   const handleAddItemPress = () => {
     Animated.sequence([
-      Animated.timing(addButtonScale, {
-        toValue: 0.95,
-        duration: 100,
-        useNativeDriver: true,
-      }),
-      Animated.timing(addButtonScale, {
-        toValue: 1,
-        duration: 100,
-        useNativeDriver: true,
-      }),
+      Animated.timing(addButtonScale, { toValue: 0.95, duration: 100, useNativeDriver: true }),
+      Animated.timing(addButtonScale, { toValue: 1, duration: 100, useNativeDriver: true }),
     ]).start(() => router.push("/add-item"));
   };
 
-  // ── Derived data ─────────────────────────────────────────────────────────
   const filteredItems = userItems
     .filter((item) => {
       const matchSearch =
         search.length === 0 ||
         item.title?.toLowerCase().includes(search.toLowerCase()) ||
         item.description?.toLowerCase().includes(search.toLowerCase());
-      return (
-        matchSearch &&
-        (filterCategory === "All" || item.category === filterCategory)
-      );
+      return matchSearch && (filterCategory === "All" || item.category === filterCategory);
     })
     .sort((a, b) => {
       if (sortType === "likes") return (b.likes || 0) - (a.likes || 0);
-      if (sortType === "name")
-        return (a.title || "").localeCompare(b.title || "");
+      if (sortType === "name") return (a.title || "").localeCompare(b.title || "");
       return 0;
     });
 
   const filteredSentOffers = sentOffers.filter((offer) => {
-    if (offer.status === "declined" || offer.status === "cancelled")
-      return false;
+    if (offer.status === "declined" || offer.status === "cancelled") return false;
     return (
       search.length === 0 ||
       offer.offeredItemTitle.toLowerCase().includes(search.toLowerCase()) ||
@@ -380,7 +331,6 @@ export default function TradeScreen() {
 
   const pendingCount = sentOffers.filter((o) => o.status === "pending").length;
 
-  // ── Renderers ─────────────────────────────────────────────────────────────
   const renderTradeItem = ({ item }: any) => {
     const imageUrl =
       Array.isArray(item?.images) && item.images.length > 0
@@ -392,10 +342,7 @@ export default function TradeScreen() {
         <Text style={styles.itemName} numberOfLines={2}>
           {item.title || item.name}
         </Text>
-        <TouchableOpacity
-          style={styles.offerButton}
-          onPress={() => handleSeeOffers(item)}
-        >
+        <TouchableOpacity style={styles.offerButton} onPress={() => handleSeeOffers(item)}>
           <Text style={styles.offerText}>See Offers</Text>
         </TouchableOpacity>
       </View>
@@ -410,15 +357,10 @@ export default function TradeScreen() {
     return (
       <View style={styles.offerCard}>
         <TouchableOpacity
-          onPress={() => {
-            setSelectedOffer(offer);
-            setStatusModalVisible(true);
-          }}
+          onPress={() => { setSelectedOffer(offer); setStatusModalVisible(true); }}
           activeOpacity={0.8}
         >
-          <View
-            style={[styles.statusBadge, { backgroundColor: statusStyle.bg }]}
-          >
+          <View style={[styles.statusBadge, { backgroundColor: statusStyle.bg }]}>
             <Text style={[styles.statusBadgeText, { color: statusStyle.text }]}>
               {offer.status.charAt(0).toUpperCase() + offer.status.slice(1)}
             </Text>
@@ -426,31 +368,20 @@ export default function TradeScreen() {
           <View style={styles.offerItemsRow}>
             <View style={styles.offerSide}>
               <Image
-                source={{
-                  uri:
-                    offer.offeredItemImage || "https://via.placeholder.com/80",
-                }}
+                source={{ uri: offer.offeredItemImage || "https://via.placeholder.com/80" }}
                 style={styles.offerItemImage}
               />
-              <Text style={styles.offerItemLabel} numberOfLines={2}>
-                {offer.offeredItemTitle}
-              </Text>
+              <Text style={styles.offerItemLabel} numberOfLines={2}>{offer.offeredItemTitle}</Text>
             </View>
             <View style={styles.offerArrow}>
               <Ionicons name="swap-horizontal" size={22} color={NAVY} />
             </View>
             <View style={styles.offerSide}>
               <Image
-                source={{
-                  uri:
-                    offer.requestedItemImage ||
-                    "https://via.placeholder.com/80",
-                }}
+                source={{ uri: offer.requestedItemImage || "https://via.placeholder.com/80" }}
                 style={styles.offerItemImage}
               />
-              <Text style={styles.offerItemLabel} numberOfLines={2}>
-                {offer.requestedItemTitle}
-              </Text>
+              <Text style={styles.offerItemLabel} numberOfLines={2}>{offer.requestedItemTitle}</Text>
             </View>
           </View>
         </TouchableOpacity>
@@ -459,30 +390,20 @@ export default function TradeScreen() {
           (isCancelling ? (
             <View style={styles.cancelOfferBtn}>
               <ActivityIndicator size="small" color="#E11D48" />
-              <Text style={styles.cancelOfferBtnText}>Cancelling…</Text>
+              <Text style={styles.cancelOfferBtnText}>Cancelling...</Text>
             </View>
           ) : confirmCancelId === offer.id ? (
             <View style={styles.cancelConfirmRow}>
               <Text style={styles.cancelConfirmText}>Cancel this offer?</Text>
-              <TouchableOpacity
-                style={styles.cancelConfirmNo}
-                onPress={() => setConfirmCancelId(null)}
-              >
+              <TouchableOpacity style={styles.cancelConfirmNo} onPress={() => setConfirmCancelId(null)}>
                 <Text style={styles.cancelConfirmNoText}>Keep</Text>
               </TouchableOpacity>
-              <TouchableOpacity
-                style={styles.cancelConfirmYes}
-                onPress={() => executeCancelOffer(offer.id)}
-              >
+              <TouchableOpacity style={styles.cancelConfirmYes} onPress={() => executeCancelOffer(offer.id)}>
                 <Text style={styles.cancelConfirmYesText}>Yes, cancel</Text>
               </TouchableOpacity>
             </View>
           ) : (
-            <TouchableOpacity
-              style={styles.cancelOfferBtn}
-              onPress={() => setConfirmCancelId(offer.id)}
-              activeOpacity={0.7}
-            >
+            <TouchableOpacity style={styles.cancelOfferBtn} onPress={() => setConfirmCancelId(offer.id)} activeOpacity={0.7}>
               <Ionicons name="close-circle-outline" size={14} color="#E11D48" />
               <Text style={styles.cancelOfferBtnText}>Cancel Offer</Text>
             </TouchableOpacity>
@@ -491,33 +412,48 @@ export default function TradeScreen() {
     );
   };
 
+  const getStatusIcon = (
+    isPending: boolean,
+    isAccepted: boolean,
+    isCompleted: boolean,
+    isDeclined: boolean,
+  ): keyof typeof Ionicons.glyphMap => {
+    if (isPending) return "time-outline";
+    if (isAccepted) return "checkmark-circle-outline";
+    if (isCompleted) return "trophy-outline";
+    if (isDeclined) return "close-circle-outline";
+    return "ban-outline";
+  };
+
   return (
     <SafeAreaView style={styles.container}>
-      <View style={styles.searchContainer}>
-        <Ionicons
-          name="search-outline"
-          size={20}
-          color="#5B5B7B"
-          style={styles.searchIcon}
-        />
-        <TextInput
-          placeholder="Search for items..."
-          style={styles.searchInput}
-          value={search}
-          onChangeText={setSearch}
-        />
+      {/* ── Search (matches home page style) ── */}
+      <View style={styles.searchWrapper}>
+        <View style={styles.searchContainer}>
+          <Ionicons name="search-outline" size={20} color="#5B5B7B" style={styles.searchIcon} />
+          <TextInput
+            placeholder="Search for items..."
+            placeholderTextColor="#888"
+            style={styles.searchInput}
+            value={search}
+            onChangeText={setSearch}
+            returnKeyType="search"
+          />
+          {search.length > 0 && (
+            <TouchableOpacity onPress={() => setSearch("")} activeOpacity={0.7}>
+              <Ionicons name="close-circle" size={18} color="#AAAAAA" />
+            </TouchableOpacity>
+          )}
+        </View>
       </View>
 
+      {/* ── Tabs ── */}
       <View style={styles.tabs}>
         <TouchableOpacity
           style={activeTab === "trades" ? styles.activeTab : styles.inactiveTab}
           onPress={() => switchTab("trades")}
         >
-          <Text
-            style={
-              activeTab === "trades" ? styles.activeText : styles.inactiveText
-            }
-          >
+          <Text style={activeTab === "trades" ? styles.activeText : styles.inactiveText}>
             Your Trades
           </Text>
         </TouchableOpacity>
@@ -525,11 +461,7 @@ export default function TradeScreen() {
           style={activeTab === "offers" ? styles.activeTab : styles.inactiveTab}
           onPress={() => switchTab("offers")}
         >
-          <Text
-            style={
-              activeTab === "offers" ? styles.activeText : styles.inactiveText
-            }
-          >
+          <Text style={activeTab === "offers" ? styles.activeText : styles.inactiveText}>
             Your Offers
           </Text>
           {pendingCount > 0 && (
@@ -547,10 +479,7 @@ export default function TradeScreen() {
               <Ionicons name="swap-vertical" size={14} color="#333" />
               <Text style={styles.smallText}>Sort ({sortType})</Text>
             </TouchableOpacity>
-            <TouchableOpacity
-              style={styles.smallButton}
-              onPress={handleFilterToggle}
-            >
+            <TouchableOpacity style={styles.smallButton} onPress={handleFilterToggle}>
               <Ionicons name="funnel" size={14} color="#333" />
               <Text style={styles.smallText}>Filter ({filterCategory})</Text>
             </TouchableOpacity>
@@ -563,12 +492,7 @@ export default function TradeScreen() {
                   onPress={() => handleCategorySelect(category)}
                   style={styles.dropdownItem}
                 >
-                  <Text
-                    style={[
-                      styles.dropdownText,
-                      filterCategory === category && styles.dropdownTextActive,
-                    ]}
-                  >
+                  <Text style={[styles.dropdownText, filterCategory === category && styles.dropdownTextActive]}>
                     {category}
                   </Text>
                 </TouchableOpacity>
@@ -585,7 +509,7 @@ export default function TradeScreen() {
             renderItem={renderTradeItem}
             keyExtractor={(item) => item.id}
             showsVerticalScrollIndicator={false}
-            contentContainerStyle={{ paddingBottom: 80 }}
+            contentContainerStyle={{ paddingBottom: 100 }}
             onRefresh={fetchUserItems}
             refreshing={loading}
             ListEmptyComponent={
@@ -603,14 +527,10 @@ export default function TradeScreen() {
             renderItem={renderOfferItem}
             keyExtractor={(offer) => offer.id}
             showsVerticalScrollIndicator={false}
-            contentContainerStyle={{ paddingBottom: 80, paddingHorizontal: 16 }}
+            contentContainerStyle={{ paddingBottom: 100, paddingHorizontal: 16 }}
             ListEmptyComponent={
               <View style={styles.emptyContainer}>
-                <Ionicons
-                  name="swap-horizontal-outline"
-                  size={48}
-                  color="#ccc"
-                />
+                <Ionicons name="swap-horizontal-outline" size={48} color="#ccc" />
                 <Text style={styles.emptyText}>No active trade offers</Text>
               </View>
             }
@@ -642,7 +562,7 @@ export default function TradeScreen() {
 
             {incomingOffers.length === 0 ? (
               <View style={styles.modalEmpty}>
-                <Ionicons name="inbox-outline" size={48} color="#ccc" />
+                <Ionicons name="mail-unread-outline" size={48} color="#ccc" />
                 <Text style={styles.modalEmptyText}>No offers yet</Text>
               </View>
             ) : (
@@ -652,8 +572,7 @@ export default function TradeScreen() {
                 showsVerticalScrollIndicator={false}
                 contentContainerStyle={{ paddingBottom: 16 }}
                 renderItem={({ item: offer }) => {
-                  const statusStyle =
-                    STATUS_COLORS[offer.status] || STATUS_COLORS.pending;
+                  const statusStyle = STATUS_COLORS[offer.status] || STATUS_COLORS.pending;
                   const isUpdating = updatingOfferId === offer.id;
                   const isAccepted = offer.status === "accepted";
                   const isCompleted = offer.status === "completed";
@@ -661,50 +580,25 @@ export default function TradeScreen() {
                     <View style={styles.incomingOfferCard}>
                       <View style={styles.incomingOffererRow}>
                         <Image
-                          source={{
-                            uri:
-                              offer.offererAvatar ||
-                              "https://i.pravatar.cc/150?img=1",
-                          }}
+                          source={{ uri: offer.offererAvatar || "https://i.pravatar.cc/150?img=1" }}
                           style={styles.incomingOffererAvatar}
                         />
-                        <Text style={styles.incomingOffererName}>
-                          {offer.offererName}
-                        </Text>
-                        <View
-                          style={[
-                            styles.statusBadge,
-                            { backgroundColor: statusStyle.bg },
-                          ]}
-                        >
-                          <Text
-                            style={[
-                              styles.statusBadgeText,
-                              { color: statusStyle.text },
-                            ]}
-                          >
-                            {offer.status.charAt(0).toUpperCase() +
-                              offer.status.slice(1)}
+                        <Text style={styles.incomingOffererName}>{offer.offererName}</Text>
+                        <View style={[styles.statusBadge, { backgroundColor: statusStyle.bg }]}>
+                          <Text style={[styles.statusBadgeText, { color: statusStyle.text }]}>
+                            {offer.status.charAt(0).toUpperCase() + offer.status.slice(1)}
                           </Text>
                         </View>
                       </View>
 
                       <View style={styles.incomingItemRow}>
                         <Image
-                          source={{
-                            uri:
-                              offer.offeredItemImage ||
-                              "https://via.placeholder.com/80",
-                          }}
+                          source={{ uri: offer.offeredItemImage || "https://via.placeholder.com/80" }}
                           style={styles.incomingItemImage}
                         />
                         <View style={{ flex: 1 }}>
-                          <Text style={styles.incomingItemLabel}>
-                            They're offering:
-                          </Text>
-                          <Text style={styles.incomingItemTitle}>
-                            {offer.offeredItemTitle}
-                          </Text>
+                          <Text style={styles.incomingItemLabel}>They're offering:</Text>
+                          <Text style={styles.incomingItemTitle}>{offer.offeredItemTitle}</Text>
                         </View>
                       </View>
 
@@ -712,9 +606,7 @@ export default function TradeScreen() {
                         <View style={styles.incomingActions}>
                           <TouchableOpacity
                             style={styles.declineBtn}
-                            onPress={() =>
-                              handleRespondToOffer(offer.id, "declined")
-                            }
+                            onPress={() => handleRespondToOffer(offer.id, "declined")}
                             disabled={isUpdating}
                           >
                             {isUpdating ? (
@@ -725,9 +617,7 @@ export default function TradeScreen() {
                           </TouchableOpacity>
                           <TouchableOpacity
                             style={styles.acceptBtn}
-                            onPress={() =>
-                              handleRespondToOffer(offer.id, "accepted")
-                            }
+                            onPress={() => handleRespondToOffer(offer.id, "accepted")}
                             disabled={isUpdating}
                           >
                             {isUpdating ? (
@@ -743,7 +633,6 @@ export default function TradeScreen() {
                           style={styles.msgCoordinateBtn}
                           onPress={() => {
                             setOffersModalVisible(false);
-
                             setTimeout(() => {
                               setSelectedOffer(offer);
                               setStatusModalVisible(true);
@@ -751,11 +640,7 @@ export default function TradeScreen() {
                           }}
                           activeOpacity={0.85}
                         >
-                          <Ionicons
-                            name="chatbubble-ellipses-outline"
-                            size={16}
-                            color={NAVY}
-                          />
+                          <Ionicons name="chatbubble-ellipses-outline" size={16} color={NAVY} />
                           <Text style={styles.msgCoordinateBtnText}>
                             {isCompleted ? "View Trade Details" : "Open Trade"}
                           </Text>
@@ -767,10 +652,7 @@ export default function TradeScreen() {
               />
             )}
 
-            <TouchableOpacity
-              style={styles.modalCloseBtn}
-              onPress={() => setOffersModalVisible(false)}
-            >
+            <TouchableOpacity style={styles.modalCloseBtn} onPress={() => setOffersModalVisible(false)}>
               <Text style={styles.modalCloseBtnText}>Close</Text>
             </TouchableOpacity>
           </View>
@@ -789,116 +671,82 @@ export default function TradeScreen() {
             <View style={styles.sheetHandle} />
             <Text style={styles.modalTitle}>Trade Offer Status</Text>
 
-            <ScrollView
-              showsVerticalScrollIndicator={false}
-              keyboardShouldPersistTaps="handled"
-            >
+            <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
               {selectedOffer &&
                 (() => {
-                  const statusStyle =
-                    STATUS_COLORS[selectedOffer.status] ||
-                    STATUS_COLORS.pending;
+                  const statusStyle = STATUS_COLORS[selectedOffer.status] || STATUS_COLORS.pending;
                   const isPending = selectedOffer.status === "pending";
                   const isAccepted = selectedOffer.status === "accepted";
                   const isCompleted = selectedOffer.status === "completed";
+                  const isDeclined = selectedOffer.status === "declined";
+                  const isCancelled = selectedOffer.status === "cancelled";
                   const isCancelling = cancellingOfferId === selectedOffer.id;
                   const isCompleting = completingOfferId === selectedOffer.id;
 
                   const myUid = auth.currentUser?.uid ?? "";
-
                   const completedBy: string[] = selectedOffer.completedBy ?? [];
                   const iHaveConfirmed = completedBy.includes(myUid);
                   const otherParticipantUid =
-                    selectedOffer.participants?.find((p) => p !== myUid) ??
-                    selectedOffer.ownerId;
-                  const otherHasConfirmed =
-                    completedBy.includes(otherParticipantUid) &&
-                    !iHaveConfirmed;
+                    selectedOffer.participants?.find((p) => p !== myUid) ?? selectedOffer.ownerId;
+                  const otherHasConfirmed = completedBy.includes(otherParticipantUid) && !iHaveConfirmed;
 
                   const reviews = selectedOffer.reviews ?? {};
                   const myReview = reviews[myUid];
                   const theirReview = reviews[otherParticipantUid];
                   const bothReviewed = !!myReview && !!theirReview;
 
+                  const statusLabel = isPending
+                    ? "Waiting for owner's response"
+                    : isAccepted
+                    ? "Trade accepted! Coordinate your meetup."
+                    : isCompleted
+                    ? "Trade completed!"
+                    : isDeclined
+                    ? "Offer was declined"
+                    : isCancelled
+                    ? "You cancelled this offer"
+                    : selectedOffer.status;
+
+                  const statusIcon = getStatusIcon(isPending, isAccepted, isCompleted, isDeclined);
+
                   return (
                     <>
                       <View style={styles.statusDetailRow}>
                         <View style={styles.statusDetailSide}>
-                          <Text style={styles.statusDetailLabel}>
-                            You offered
-                          </Text>
+                          <Text style={styles.statusDetailLabel}>You offered</Text>
                           <Image
-                            source={{
-                              uri:
-                                selectedOffer.offeredItemImage ||
-                                "https://via.placeholder.com/100",
-                            }}
+                            source={{ uri: selectedOffer.offeredItemImage || "https://via.placeholder.com/100" }}
                             style={styles.statusDetailImage}
                           />
-                          <Text
-                            style={styles.statusDetailTitle}
-                            numberOfLines={2}
-                          >
+                          <Text style={styles.statusDetailTitle} numberOfLines={2}>
                             {selectedOffer.offeredItemTitle}
                           </Text>
                         </View>
-                        <Ionicons
-                          name="swap-horizontal"
-                          size={28}
-                          color={NAVY}
-                        />
+                        <Ionicons name="swap-horizontal" size={28} color={NAVY} />
                         <View style={styles.statusDetailSide}>
                           <Text style={styles.statusDetailLabel}>For</Text>
                           <Image
-                            source={{
-                              uri:
-                                selectedOffer.requestedItemImage ||
-                                "https://via.placeholder.com/100",
-                            }}
+                            source={{ uri: selectedOffer.requestedItemImage || "https://via.placeholder.com/100" }}
                             style={styles.statusDetailImage}
                           />
-                          <Text
-                            style={styles.statusDetailTitle}
-                            numberOfLines={2}
-                          >
+                          <Text style={styles.statusDetailTitle} numberOfLines={2}>
                             {selectedOffer.requestedItemTitle}
                           </Text>
                         </View>
                       </View>
 
-                      <View
-                        style={[
-                          styles.statusDetailBadge,
-                          { backgroundColor: statusStyle.bg },
-                        ]}
-                      >
-                        <Text
-                          style={[
-                            styles.statusDetailBadgeText,
-                            { color: statusStyle.text },
-                          ]}
-                        >
-                          {isPending && "⏳ Waiting for owner's response"}
-                          {isAccepted &&
-                            "✅ Trade accepted! Coordinate your meetup."}
-                          {isCompleted && "🏆 Trade completed!"}
-                          {selectedOffer.status === "declined" &&
-                            "❌ Offer was declined"}
-                          {selectedOffer.status === "cancelled" &&
-                            "🚫 You cancelled this offer"}
+                      <View style={[styles.statusDetailBadge, { backgroundColor: statusStyle.bg }]}>
+                        <Ionicons name={statusIcon} size={18} color={statusStyle.text} style={{ marginBottom: 4 }} />
+                        <Text style={[styles.statusDetailBadgeText, { color: statusStyle.text }]}>
+                          {statusLabel}
                         </Text>
                       </View>
 
-                      {/* ── Accepted: Mark as Finished (dual-confirmation) ── */}
+                      {/* Accepted: Mark as Finished */}
                       {isAccepted && (
-                        <View
-                          style={{ paddingHorizontal: 16, marginBottom: 12 }}
-                        >
+                        <View style={{ paddingHorizontal: 16, marginBottom: 12 }}>
                           <TouchableOpacity
-                            style={[
-                              styles.completeBtn,
-                              otherHasConfirmed && styles.completeBtnHighlight,
-                            ]}
+                            style={[styles.completeBtn, otherHasConfirmed && styles.completeBtnHighlight]}
                             onPress={() => handleCompleteTrade(selectedOffer)}
                             disabled={isCompleting || iHaveConfirmed}
                             activeOpacity={0.85}
@@ -907,26 +755,14 @@ export default function TradeScreen() {
                               <ActivityIndicator size="small" color="#fff" />
                             ) : iHaveConfirmed ? (
                               <>
-                                <Ionicons
-                                  name="time-outline"
-                                  size={18}
-                                  color="#fff"
-                                />
-                                <Text style={styles.completeBtnText}>
-                                  Waiting for other party...
-                                </Text>
+                                <Ionicons name="time-outline" size={18} color="#fff" />
+                                <Text style={styles.completeBtnText}>Waiting for other party...</Text>
                               </>
                             ) : (
                               <>
-                                <Ionicons
-                                  name="checkmark-done-circle"
-                                  size={18}
-                                  color="#fff"
-                                />
+                                <Ionicons name="checkmark-done-circle" size={18} color="#fff" />
                                 <Text style={styles.completeBtnText}>
-                                  {otherHasConfirmed
-                                    ? "They confirmed — tap to complete!"
-                                    : "Mark Trade as Finished"}
+                                  {otherHasConfirmed ? "They confirmed — tap to complete!" : "Mark Trade as Finished"}
                                 </Text>
                               </>
                             )}
@@ -934,30 +770,21 @@ export default function TradeScreen() {
                         </View>
                       )}
 
-                      {/* ── Message button ── */}
+                      {/* Message button */}
                       {(isAccepted || isCompleted) && (
                         <TouchableOpacity
                           style={styles.msgCoordinateBtn}
-                          onPress={() => {
-                            closeStatusModal();
-                            openChat(selectedOffer, false);
-                          }}
+                          onPress={() => { closeStatusModal(); openChat(selectedOffer, false); }}
                           activeOpacity={0.85}
                         >
-                          <Ionicons
-                            name="chatbubble-ellipses-outline"
-                            size={16}
-                            color={NAVY}
-                          />
+                          <Ionicons name="chatbubble-ellipses-outline" size={16} color={NAVY} />
                           <Text style={styles.msgCoordinateBtnText}>
-                            {isCompleted
-                              ? "View Trade Chat"
-                              : "Message to Coordinate"}
+                            {isCompleted ? "View Trade Chat" : "Message to Coordinate"}
                           </Text>
                         </TouchableOpacity>
                       )}
 
-                      {/* ── Cancel ── */}
+                      {/* Cancel */}
                       {isPending && (
                         <TouchableOpacity
                           style={styles.cancelOfferBtnModal}
@@ -969,61 +796,37 @@ export default function TradeScreen() {
                             <ActivityIndicator size="small" color="#E11D48" />
                           ) : (
                             <>
-                              <Ionicons
-                                name="close-circle-outline"
-                                size={16}
-                                color="#E11D48"
-                              />
-                              <Text style={styles.cancelOfferBtnModalText}>
-                                Cancel This Offer
-                              </Text>
+                              <Ionicons name="close-circle-outline" size={16} color="#E11D48" />
+                              <Text style={styles.cancelOfferBtnModalText}>Cancel This Offer</Text>
                             </>
                           )}
                         </TouchableOpacity>
                       )}
 
-                      {/* ── Completed: review section ── */}
+                      {/* Completed: review section */}
                       {isCompleted &&
                         (bothReviewed ? (
                           <View style={styles.receivedReview}>
-                            <Text style={styles.receivedReviewHeader}>
-                              Their review of you
-                            </Text>
-                            <StarRating
-                              rating={theirReview.rating}
-                              size={18}
-                              readonly
-                            />
+                            <Text style={styles.receivedReviewHeader}>Their review of you</Text>
+                            <StarRating rating={theirReview.rating} size={18} readonly />
                             {theirReview.comment ? (
-                              <Text style={styles.receivedReviewComment}>
-                                "{theirReview.comment}"
-                              </Text>
+                              <Text style={styles.receivedReviewComment}>"{theirReview.comment}"</Text>
                             ) : null}
                           </View>
                         ) : myReview ? (
                           <View style={styles.reviewWaiting}>
-                            <Ionicons
-                              name="time-outline"
-                              size={13}
-                              color="#D97706"
-                            />
+                            <Ionicons name="time-outline" size={13} color="#D97706" />
                             <Text style={styles.reviewWaitingText}>
                               Your review is in — waiting for theirs
                             </Text>
                           </View>
                         ) : showReviewForm ? (
                           <View style={styles.reviewForm}>
-                            <Text style={styles.reviewFormTitle}>
-                              Rate your trade partner
-                            </Text>
-                            <StarRating
-                              rating={reviewRating}
-                              onRate={setReviewRating}
-                              size={36}
-                            />
+                            <Text style={styles.reviewFormTitle}>Rate your trade partner</Text>
+                            <StarRating rating={reviewRating} onRate={setReviewRating} size={36} />
                             <TextInput
                               style={styles.reviewInput}
-                              placeholder="Share your experience (optional)…"
+                              placeholder="Share your experience (optional)..."
                               placeholderTextColor="#AAAAAA"
                               value={reviewComment}
                               onChangeText={setReviewComment}
@@ -1032,8 +835,7 @@ export default function TradeScreen() {
                               textAlignVertical="top"
                             />
                             <Text style={styles.reviewDisclaimer}>
-                              Reviews are hidden until both sides submit — then
-                              revealed simultaneously.
+                              Reviews are hidden until both sides submit — then revealed simultaneously.
                             </Text>
                             <View style={styles.reviewFormActions}>
                               <TouchableOpacity
@@ -1041,33 +843,21 @@ export default function TradeScreen() {
                                 onPress={() => setShowReviewForm(false)}
                                 disabled={submittingReview}
                               >
-                                <Text style={styles.reviewCancelText}>
-                                  Back
-                                </Text>
+                                <Text style={styles.reviewCancelText}>Back</Text>
                               </TouchableOpacity>
                               <TouchableOpacity
                                 style={[
                                   styles.reviewSubmitBtn,
-                                  (reviewRating === 0 || submittingReview) &&
-                                    styles.reviewSubmitBtnDisabled,
+                                  (reviewRating === 0 || submittingReview) && styles.reviewSubmitBtnDisabled,
                                 ]}
-                                onPress={() =>
-                                  handleSubmitReview(selectedOffer)
-                                }
-                                disabled={
-                                  reviewRating === 0 || submittingReview
-                                }
+                                onPress={() => handleSubmitReview(selectedOffer)}
+                                disabled={reviewRating === 0 || submittingReview}
                                 activeOpacity={0.85}
                               >
                                 {submittingReview ? (
-                                  <ActivityIndicator
-                                    size="small"
-                                    color="#fff"
-                                  />
+                                  <ActivityIndicator size="small" color="#fff" />
                                 ) : (
-                                  <Text style={styles.reviewSubmitText}>
-                                    Submit Review
-                                  </Text>
+                                  <Text style={styles.reviewSubmitText}>Submit Review</Text>
                                 )}
                               </TouchableOpacity>
                             </View>
@@ -1078,14 +868,8 @@ export default function TradeScreen() {
                             onPress={() => setShowReviewForm(true)}
                             activeOpacity={0.85}
                           >
-                            <Ionicons
-                              name="star-outline"
-                              size={16}
-                              color="#fff"
-                            />
-                            <Text style={styles.rateOwnerBtnText}>
-                              Rate Your Trade Partner
-                            </Text>
+                            <Ionicons name="star-outline" size={16} color="#fff" />
+                            <Text style={styles.rateOwnerBtnText}>Rate Your Trade Partner</Text>
                           </TouchableOpacity>
                         ))}
                     </>
@@ -1093,10 +877,7 @@ export default function TradeScreen() {
                 })()}
             </ScrollView>
 
-            <TouchableOpacity
-              style={styles.modalCloseBtn}
-              onPress={closeStatusModal}
-            >
+            <TouchableOpacity style={styles.modalCloseBtn} onPress={closeStatusModal}>
               <Text style={styles.modalCloseBtnText}>Close</Text>
             </TouchableOpacity>
           </View>
@@ -1108,20 +889,13 @@ export default function TradeScreen() {
         visible={!!chatTrade}
         trade={chatTrade}
         isOwner={chatIsOwner}
-        onClose={() => {
-          setChatTrade(null);
-          setChatIsOwner(false);
-        }}
+        onClose={() => { setChatTrade(null); setChatIsOwner(false); }}
         onStatusChange={(tradeId, newStatus) => {
           setSentOffers((prev) =>
-            prev.map((o) =>
-              o.id === tradeId ? { ...o, status: newStatus as any } : o,
-            ),
+            prev.map((o) => o.id === tradeId ? { ...o, status: newStatus as any } : o),
           );
           setIncomingOffers((prev) =>
-            prev.map((o) =>
-              o.id === tradeId ? { ...o, status: newStatus as any } : o,
-            ),
+            prev.map((o) => o.id === tradeId ? { ...o, status: newStatus as any } : o),
           );
         }}
       />
@@ -1130,7 +904,14 @@ export default function TradeScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#efeff4" },
+  container: { flex: 1, backgroundColor: "#FFFFFF" },
+
+  // ── Search (copied from home page) ──────────────────────────────────────
+  searchWrapper: {
+    marginHorizontal: 16,
+    paddingTop: 32,
+    marginBottom: 16,
+  },
   searchContainer: {
     flexDirection: "row",
     alignItems: "center",
@@ -1140,14 +921,17 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: "#E9E9E9",
     paddingHorizontal: 14,
-    marginHorizontal: 16,
-    marginTop: 14,
-    marginBottom: 16,
   },
   searchIcon: { marginRight: 10 },
-  searchInput: { flex: 1, color: "#242424", fontSize: 15, paddingVertical: 8 },
+  searchInput: {
+    flex: 1,
+    color: "#242424",
+    fontSize: 15,
+    paddingVertical: 8,
+  },
+
+  // ── Tabs ────────────────────────────────────────────────────────────────
   tabs: {
-    marginTop: 10,
     flexDirection: "row",
     marginBottom: 12,
     marginHorizontal: 16,
@@ -1184,6 +968,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: 4,
   },
   tabBadgeText: { color: "#fff", fontSize: 11, fontWeight: "700" },
+
+  // ── Sort / Filter row ────────────────────────────────────────────────────
   row: { flexDirection: "row", marginBottom: 12, marginHorizontal: 16 },
   smallButton: {
     flexDirection: "row",
@@ -1207,14 +993,18 @@ const styles = StyleSheet.create({
   dropdownItem: { paddingVertical: 12, paddingHorizontal: 15 },
   dropdownText: { fontSize: 13, color: "#333" },
   dropdownTextActive: { fontWeight: "700", color: "#5E3EA1" },
+
+  // ── Trade item card ──────────────────────────────────────────────────────
   card: {
     flexDirection: "row",
     alignItems: "center",
-    backgroundColor: "#e6e6ea",
+    backgroundColor: "#F5F7FF",
     padding: 12,
     borderRadius: 12,
     marginBottom: 10,
     marginHorizontal: 16,
+    borderWidth: 1,
+    borderColor: "#E8EEF9",
   },
   image: { width: 55, height: 55, borderRadius: 8, marginRight: 10 },
   itemName: { flex: 1, fontWeight: "600", color: "#222" },
@@ -1225,6 +1015,8 @@ const styles = StyleSheet.create({
     borderRadius: 7,
   },
   offerText: { fontSize: 12, color: "#fff", fontWeight: "600" },
+
+  // ── Offer card ───────────────────────────────────────────────────────────
   offerCard: {
     backgroundColor: "#fff",
     borderRadius: 14,
@@ -1239,18 +1031,8 @@ const styles = StyleSheet.create({
   offerItemsRow: { flexDirection: "row", alignItems: "center", marginTop: 28 },
   offerSide: { flex: 1, alignItems: "center", gap: 6 },
   offerArrow: { paddingHorizontal: 8 },
-  offerItemImage: {
-    width: 70,
-    height: 70,
-    borderRadius: 10,
-    backgroundColor: "#F3F4F6",
-  },
-  offerItemLabel: {
-    fontSize: 12,
-    color: "#374151",
-    fontWeight: "600",
-    textAlign: "center",
-  },
+  offerItemImage: { width: 70, height: 70, borderRadius: 10, backgroundColor: "#F3F4F6" },
+  offerItemLabel: { fontSize: 12, color: "#374151", fontWeight: "600", textAlign: "center" },
   statusBadge: {
     position: "absolute",
     top: 10,
@@ -1260,6 +1042,8 @@ const styles = StyleSheet.create({
     borderRadius: 20,
   },
   statusBadgeText: { fontSize: 11, fontWeight: "700" },
+
+  // ── Cancel controls ──────────────────────────────────────────────────────
   cancelOfferBtn: {
     flexDirection: "row",
     alignItems: "center",
@@ -1273,24 +1057,9 @@ const styles = StyleSheet.create({
     backgroundColor: "#FFF1F2",
   },
   cancelOfferBtnText: { fontSize: 12, fontWeight: "600", color: "#E11D48" },
-  cancelConfirmRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    marginTop: 10,
-    gap: 8,
-  },
-  cancelConfirmText: {
-    flex: 1,
-    fontSize: 12,
-    fontWeight: "600",
-    color: "#374151",
-  },
-  cancelConfirmNo: {
-    paddingHorizontal: 14,
-    paddingVertical: 7,
-    borderRadius: 8,
-    backgroundColor: "#F3F4F6",
-  },
+  cancelConfirmRow: { flexDirection: "row", alignItems: "center", marginTop: 10, gap: 8 },
+  cancelConfirmText: { flex: 1, fontSize: 12, fontWeight: "600", color: "#374151" },
+  cancelConfirmNo: { paddingHorizontal: 14, paddingVertical: 7, borderRadius: 8, backgroundColor: "#F3F4F6" },
   cancelConfirmNoText: { fontSize: 12, fontWeight: "600", color: "#374151" },
   cancelConfirmYes: {
     paddingHorizontal: 14,
@@ -1313,11 +1082,9 @@ const styles = StyleSheet.create({
     backgroundColor: "#FFF1F2",
     marginBottom: 10,
   },
-  cancelOfferBtnModalText: {
-    fontSize: 14,
-    fontWeight: "700",
-    color: "#E11D48",
-  },
+  cancelOfferBtnModalText: { fontSize: 14, fontWeight: "700", color: "#E11D48" },
+
+  // ── Empty state ──────────────────────────────────────────────────────────
   emptyContainer: {
     flex: 1,
     justifyContent: "center",
@@ -1326,6 +1093,8 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   emptyText: { color: "#999", fontSize: 16 },
+
+  // ── Add button ───────────────────────────────────────────────────────────
   addButton: {
     position: "absolute",
     bottom: 20,
@@ -1338,6 +1107,8 @@ const styles = StyleSheet.create({
     borderRadius: 10,
   },
   addText: { color: "white", fontWeight: "700", marginLeft: 6 },
+
+  // ── Modals ───────────────────────────────────────────────────────────────
   modalOverlay: {
     flex: 1,
     backgroundColor: "rgba(0,0,0,0.5)",
@@ -1360,18 +1131,8 @@ const styles = StyleSheet.create({
     alignSelf: "center",
     marginBottom: 16,
   },
-  modalTitle: {
-    fontSize: 18,
-    fontWeight: "700",
-    color: "#111827",
-    marginBottom: 4,
-  },
-  modalItemName: {
-    fontSize: 15,
-    fontWeight: "600",
-    color: NAVY,
-    marginBottom: 16,
-  },
+  modalTitle: { fontSize: 18, fontWeight: "700", color: "#111827", marginBottom: 4 },
+  modalItemName: { fontSize: 15, fontWeight: "600", color: NAVY, marginBottom: 16 },
   modalEmpty: { alignItems: "center", paddingVertical: 40, gap: 12 },
   modalEmptyText: { fontSize: 14, color: "#6B7280" },
   modalCloseBtn: {
@@ -1382,6 +1143,8 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   modalCloseBtnText: { fontSize: 15, fontWeight: "600", color: "#374151" },
+
+  // ── Incoming offer card ──────────────────────────────────────────────────
   incomingOfferCard: {
     backgroundColor: "#F9FAFB",
     borderRadius: 12,
@@ -1391,19 +1154,9 @@ const styles = StyleSheet.create({
   },
   incomingOffererRow: { flexDirection: "row", alignItems: "center", gap: 8 },
   incomingOffererAvatar: { width: 32, height: 32, borderRadius: 16 },
-  incomingOffererName: {
-    flex: 1,
-    fontSize: 14,
-    fontWeight: "700",
-    color: "#111827",
-  },
+  incomingOffererName: { flex: 1, fontSize: 14, fontWeight: "700", color: "#111827" },
   incomingItemRow: { flexDirection: "row", alignItems: "center", gap: 12 },
-  incomingItemImage: {
-    width: 60,
-    height: 60,
-    borderRadius: 8,
-    backgroundColor: "#E5E7EB",
-  },
+  incomingItemImage: { width: 60, height: 60, borderRadius: 8, backgroundColor: "#E5E7EB" },
   incomingItemLabel: { fontSize: 11, color: "#6B7280", marginBottom: 2 },
   incomingItemTitle: { fontSize: 13, fontWeight: "600", color: "#111827" },
   incomingActions: { flexDirection: "row", gap: 10, marginTop: 4 },
@@ -1416,14 +1169,10 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   declineBtnText: { fontSize: 13, fontWeight: "600", color: "#E11D48" },
-  acceptBtn: {
-    flex: 2,
-    paddingVertical: 10,
-    borderRadius: 8,
-    backgroundColor: "#16A34A",
-    alignItems: "center",
-  },
+  acceptBtn: { flex: 2, paddingVertical: 10, borderRadius: 8, backgroundColor: "#16A34A", alignItems: "center" },
   acceptBtnText: { fontSize: 13, fontWeight: "600", color: "#fff" },
+
+  // ── Status detail modal ──────────────────────────────────────────────────
   statusDetailRow: {
     flexDirection: "row",
     alignItems: "center",
@@ -1432,29 +1181,17 @@ const styles = StyleSheet.create({
   },
   statusDetailSide: { flex: 1, alignItems: "center", gap: 8 },
   statusDetailLabel: { fontSize: 12, color: "#6B7280", fontWeight: "600" },
-  statusDetailImage: {
-    width: 80,
-    height: 80,
-    borderRadius: 10,
-    backgroundColor: "#F3F4F6",
-  },
-  statusDetailTitle: {
-    fontSize: 12,
-    fontWeight: "600",
-    color: "#111827",
-    textAlign: "center",
-  },
+  statusDetailImage: { width: 80, height: 80, borderRadius: 10, backgroundColor: "#F3F4F6" },
+  statusDetailTitle: { fontSize: 12, fontWeight: "600", color: "#111827", textAlign: "center" },
   statusDetailBadge: {
     borderRadius: 12,
     padding: 14,
     alignItems: "center",
     marginBottom: 8,
   },
-  statusDetailBadgeText: {
-    fontSize: 15,
-    fontWeight: "700",
-    textAlign: "center",
-  },
+  statusDetailBadgeText: { fontSize: 15, fontWeight: "700", textAlign: "center" },
+
+  // ── Complete button ──────────────────────────────────────────────────────
   completeBtn: {
     flexDirection: "row",
     alignItems: "center",
@@ -1473,25 +1210,8 @@ const styles = StyleSheet.create({
   },
   completeBtnHighlight: { backgroundColor: "#0F9D58" },
   completeBtnText: { fontSize: 14, fontWeight: "800", color: "#fff" },
-  completeWaitingBanner: {
-    flexDirection: "row",
-    alignItems: "flex-start",
-    gap: 10,
-    backgroundColor: "#FFF7ED",
-    borderRadius: 12,
-    paddingVertical: 11,
-    paddingHorizontal: 14,
-    marginBottom: 10,
-    borderWidth: 1,
-    borderColor: "#FDE68A",
-  },
-  completeWaitingTitle: {
-    fontSize: 13,
-    fontWeight: "700",
-    color: "#D97706",
-    marginBottom: 2,
-  },
-  completeWaitingSubtitle: { fontSize: 12, color: "#92400E", lineHeight: 16 },
+
+  // ── Message / coordinate button ──────────────────────────────────────────
   msgCoordinateBtn: {
     flexDirection: "row",
     alignItems: "center",
@@ -1505,6 +1225,8 @@ const styles = StyleSheet.create({
     marginBottom: 10,
   },
   msgCoordinateBtnText: { fontSize: 14, fontWeight: "700", color: NAVY },
+
+  // ── Review section ───────────────────────────────────────────────────────
   rateOwnerBtn: {
     flexDirection: "row",
     alignItems: "center",
@@ -1525,12 +1247,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: "#ECECEC",
   },
-  reviewFormTitle: {
-    fontSize: 15,
-    fontWeight: "700",
-    color: "#1A1A2E",
-    textAlign: "center",
-  },
+  reviewFormTitle: { fontSize: 15, fontWeight: "700", color: "#1A1A2E", textAlign: "center" },
   reviewInput: {
     borderWidth: 1.5,
     borderColor: "#E0E0E0",
@@ -1541,12 +1258,7 @@ const styles = StyleSheet.create({
     minHeight: 64,
     backgroundColor: "#fff",
   },
-  reviewDisclaimer: {
-    fontSize: 11,
-    color: "#AAAAAA",
-    textAlign: "center",
-    lineHeight: 15,
-  },
+  reviewDisclaimer: { fontSize: 11, color: "#AAAAAA", textAlign: "center", lineHeight: 15 },
   reviewFormActions: { flexDirection: "row", gap: 8 },
   reviewCancelBtn: {
     flex: 1,
@@ -1586,12 +1298,7 @@ const styles = StyleSheet.create({
     borderColor: "#ECECEC",
     gap: 4,
   },
-  receivedReviewHeader: {
-    fontSize: 13,
-    fontWeight: "700",
-    color: "#1A1A2E",
-    marginBottom: 4,
-  },
+  receivedReviewHeader: { fontSize: 13, fontWeight: "700", color: "#1A1A2E", marginBottom: 4 },
   receivedReviewComment: {
     fontSize: 12,
     color: "#555",

@@ -490,8 +490,6 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
                     </View>
                   </View>
                 )}
-
-
               </View>
 
               {/* Owner card — avatar + name both navigate to profile */}
@@ -533,12 +531,10 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
                   {!!ownerInfo.bio && (
                     <Text style={styles.bio}>{ownerInfo.bio}</Text>
                   )}
-
-
                 </View>
               )}
 
-              {/* Like button */}
+              {/* Like button — matches ProductDetails screen style (outlined, bordered) */}
               <TouchableOpacity
                 style={[styles.likeButton, isLiked && styles.likeButtonActive]}
                 onPress={handleLike}
@@ -843,32 +839,35 @@ const styles = StyleSheet.create({
     color: "#4B5563",
     lineHeight: 18,
   } as TextStyle,
-  viewProfileRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 4,
-  } as ViewStyle,
-  viewProfileText: {
-    fontSize: 13,
-    fontWeight: "700",
-    color: NAVY,
-  } as TextStyle,
+
+  // ── Like button — matches ProductDetails screen:
+  //    inactive: white bg + navy border + navy text/icon
+  //    active:   navy bg + white text/icon
   likeButton: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "#F3F4F6",
-    borderRadius: 12,
-    paddingVertical: 12,
     gap: 8,
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+    borderRadius: 12,
+    borderWidth: 2,
+    borderColor: NAVY,
+    backgroundColor: "#fff",
   } as ViewStyle,
-  likeButtonActive: { backgroundColor: NAVY } as ViewStyle,
+  likeButtonActive: {
+    backgroundColor: NAVY,
+    borderColor: NAVY,
+  } as ViewStyle,
   likeButtonText: {
-    fontSize: 15,
+    fontSize: 16,
     fontWeight: "600",
     color: NAVY,
   } as TextStyle,
-  likeButtonTextActive: { color: "#fff" } as TextStyle,
+  likeButtonTextActive: {
+    color: "#fff",
+  } as TextStyle,
+
   actionRow: {
     flexDirection: "row",
     gap: 10,

@@ -23,8 +23,8 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
+import { DeleteAccountModal } from "../components/DeleteAccountModal";
 import { auth, db } from "../firebaseConfig";
-import { DeleteAccountModal } from "./DeleteAccountModal";
 
 // ─── Cloudinary Config ────────────────────────────────────────────────────────
 const CLOUDINARY_CLOUD_NAME = process.env.EXPO_PUBLIC_CLOUDINARY_CLOUD_NAME ?? "";

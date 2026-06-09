@@ -8,6 +8,7 @@ import {
   Alert,
   Animated,
   Image,
+  KeyboardAvoidingView,
   Modal,
   Platform,
   SafeAreaView,
@@ -16,8 +17,7 @@ import {
   Text,
   TextInput,
   TextStyle,
-  TouchableOpacity,
-  View,
+  TouchableOpacity, useWindowDimensions, View,
   ViewStyle
 } from "react-native";
 import { auth } from "../firebaseConfig";
@@ -114,6 +114,7 @@ function VideoPlayerWrapper({ uri }: { uri: string }) {
 
 export default function AddItemScreen() {
   const router = useRouter();
+  const { width: screenWidth, height: screenHeight } = useWindowDimensions();
   const [selectedCategory, setSelectedCategory] = useState("1");
   const [selectedCondition, setSelectedCondition] = useState("1");
   const [title, setTitle] = useState("");
@@ -338,141 +339,154 @@ export default function AddItemScreen() {
 
   return (
     <SafeAreaView style={styles.container}>
-      <ScrollView showsVerticalScrollIndicator={false}>
-        {/* Header */}
-        <View style={styles.header}>
-          <TouchableOpacity onPress={() => router.replace("/(tabs)/trade" as any)} style={styles.backButton}>
-            <Ionicons name="chevron-back" size={24} color="#222" />
-          </TouchableOpacity>
-          <Text style={styles.headerTitle}>Add Item</Text>
-        </View>
-
-        {/* Media Section */}
-        <Text style={styles.sectionLabel}>Add Photos & Videos (Max 10)</Text>
-
-        {/* File limit indicator */}
-        <View style={[styles.limitBar, isAtLimit && styles.limitBarFull]}>
-          <View style={styles.limitBarLeft}>
-            <Ionicons
-              name={isAtLimit ? "warning" : "information-circle"}
-              size={14}
-              color={isAtLimit ? "#ff4444" : NAVY}
-            />
-            <Text style={[styles.limitBarText, isAtLimit && styles.limitBarTextFull]}>
-              {isAtLimit
-                ? "Limit reached! Remove a file to add more."
-                : `${media.length}/10 files • ${imageCount} photo${imageCount !== 1 ? "s" : ""}, ${videoCount} video${videoCount !== 1 ? "s" : ""}`}
-            </Text>
-          </View>
-          <View style={styles.limitProgressOuter}>
-            <View style={[styles.limitProgressInner, { width: `${(media.length / 10) * 100}%` as any, backgroundColor: isAtLimit ? "#ff4444" : NAVY }]} />
-          </View>
-        </View>
-
-        {/* Size limits info */}
-        <View style={styles.sizeLimitsRow}>
-          <View style={styles.sizeLimitBadge}>
-            <Ionicons name="image-outline" size={12} color="#666" />
-            <Text style={styles.sizeLimitText}>Images: max {MAX_FILE_SIZE_MB}MB</Text>
-          </View>
-          <View style={styles.sizeLimitBadge}>
-            <Ionicons name="videocam-outline" size={12} color="#666" />
-            <Text style={styles.sizeLimitText}>Videos: max {MAX_VIDEO_SIZE_MB}MB · 60s</Text>
-          </View>
-        </View>
-
-        <View style={styles.photoRow}>
-          {media.map((item, index) => (
-            <View key={index} style={styles.photoWrapper}>
-              <TouchableOpacity onPress={() => openPreview(item)}>
-                {item.type === "image" ? (
-                  <Image source={{ uri: item.uri }} style={styles.photoBox} />
-                ) : (
-                  <View style={styles.videoThumb}>
-                    <View style={styles.videoThumbOverlay}>
-                      <Ionicons name="play-circle" size={40} color="white" />
-                      <Text style={styles.videoLabel}>Tap to preview</Text>
-                    </View>
-                  </View>
-                )}
-              </TouchableOpacity>
-              {/* Type badge */}
-              <View style={[styles.typeBadge, item.type === "video" && styles.typeBadgeVideo]}>
-                <Ionicons name={item.type === "video" ? "videocam" : "image"} size={10} color="white" />
-              </View>
-              <TouchableOpacity style={styles.removePhotoBtn} onPress={() => removeMedia(index)}>
-                <Ionicons name="close" size={16} color="white" />
-              </TouchableOpacity>
-            </View>
-          ))}
-
-          {!isAtLimit && (
-            <TouchableOpacity style={styles.addPhotoBox} onPress={pickMedia}>
-              <Ionicons name="add" size={32} color="#999" />
-              <Text style={styles.addPhotoText}>Photo/Video</Text>
+      <KeyboardAvoidingView
+        style={{ flex: 1 }}
+        behavior={Platform.OS === "ios" ? "padding" : "height"}
+        keyboardVerticalOffset={Platform.OS === "ios" ? 0 : 20}
+      >
+        <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+          {/* Header */}
+          <View style={styles.header}>
+            <TouchableOpacity onPress={() => router.replace("/(tabs)/trade" as any)} style={styles.backButton}>
+              <Ionicons name="chevron-back" size={24} color="#222" />
             </TouchableOpacity>
-          )}
-        </View>
-
-        {/* Title */}
-        <Text style={styles.sectionLabel}>Title</Text>
-        <TextInput style={styles.input} placeholder="Brief title for your item" value={title} onChangeText={setTitle} />
-
-        {/* Category */}
-        <Text style={styles.sectionLabel}>Category</Text>
-        <TouchableOpacity style={styles.dropdownButton} onPress={() => setIsCategoryOpen(!isCategoryOpen)}>
-          <Text style={styles.dropdownText}>{CATEGORIES.find((c) => c.id === selectedCategory)?.label || "Select Category"}</Text>
-          <Ionicons name={isCategoryOpen ? "chevron-up" : "chevron-down"} size={20} color={NAVY} />
-        </TouchableOpacity>
-        {isCategoryOpen && (
-          <View style={styles.dropdownMenu}>
-            {CATEGORIES.map((cat) => (
-              <TouchableOpacity key={cat.id} style={styles.dropdownItem} onPress={() => { setSelectedCategory(cat.id); setIsCategoryOpen(false); }}>
-                <Text style={[styles.dropdownItemText, selectedCategory === cat.id && styles.dropdownItemSelected]}>{cat.label}</Text>
-              </TouchableOpacity>
-            ))}
+            <Text style={styles.headerTitle}>Add Item</Text>
           </View>
-        )}
 
-        {/* Condition */}
-        <Text style={styles.sectionLabel}>Condition</Text>
-        <TouchableOpacity style={styles.dropdownButton} onPress={() => setIsConditionOpen(!isConditionOpen)}>
-          <Text style={styles.dropdownText}>{CONDITIONS.find((c) => c.id === selectedCondition)?.label || "Select Condition"}</Text>
-          <Ionicons name={isConditionOpen ? "chevron-up" : "chevron-down"} size={20} color={NAVY} />
-        </TouchableOpacity>
-        {isConditionOpen && (
-          <View style={styles.dropdownMenu}>
-            {CONDITIONS.map((cond) => (
-              <TouchableOpacity key={cond.id} style={styles.dropdownItem} onPress={() => { setSelectedCondition(cond.id); setIsConditionOpen(false); }}>
-                <Text style={[styles.dropdownItemText, selectedCondition === cond.id && styles.dropdownItemSelected]}>{cond.label}</Text>
-              </TouchableOpacity>
-            ))}
+          {/* Media Section */}
+          <Text style={styles.sectionLabel}>Add Photos & Videos (Max 10)</Text>
+
+          {/* File limit indicator */}
+          <View style={[styles.limitBar, isAtLimit && styles.limitBarFull]}>
+            <View style={styles.limitBarLeft}>
+              <Ionicons
+                name={isAtLimit ? "warning" : "information-circle"}
+                size={14}
+                color={isAtLimit ? "#ff4444" : NAVY}
+              />
+              <Text style={[styles.limitBarText, isAtLimit && styles.limitBarTextFull]}>
+                {isAtLimit
+                  ? "Limit reached! Remove a file to add more."
+                  : `${media.length}/10 files • ${imageCount} photo${imageCount !== 1 ? "s" : ""}, ${videoCount} video${videoCount !== 1 ? "s" : ""}`}
+              </Text>
+            </View>
+            <View style={styles.limitProgressOuter}>
+              <View style={[styles.limitProgressInner, { width: `${(media.length / 10) * 100}%` as any, backgroundColor: isAtLimit ? "#ff4444" : NAVY }]} />
+            </View>
           </View>
-        )}
 
-        {/* Description */}
-        <Text style={styles.sectionLabel}>Description</Text>
-        <TextInput
-          style={styles.descriptionInput}
-          multiline
-          numberOfLines={5}
-          placeholder="Describe your item in detail..."
-          value={description}
-          onChangeText={setDescription}
-        />
+          {/* Size limits info */}
+          <View style={styles.sizeLimitsRow}>
+            <View style={styles.sizeLimitBadge}>
+              <Ionicons name="image-outline" size={12} color="#666" />
+              <Text style={styles.sizeLimitText}>Images: max {MAX_FILE_SIZE_MB}MB</Text>
+            </View>
+            <View style={styles.sizeLimitBadge}>
+              <Ionicons name="videocam-outline" size={12} color="#666" />
+              <Text style={styles.sizeLimitText}>Videos: max {MAX_VIDEO_SIZE_MB}MB · 60s</Text>
+            </View>
+          </View>
 
-        {/* Submit */}
-        <TouchableOpacity style={[styles.submitButton, isLoading && styles.submitButtonDisabled]} onPress={handleSubmit} disabled={isLoading}>
-          {isLoading ? (
-            <ActivityIndicator size="small" color="white" />
-          ) : (
-            <>
-              <Ionicons name="cloud-upload" size={18} color="white" />
-              <Text style={styles.submitText}>Submit</Text>
-            </>
+          <View style={styles.photoRow}>
+            {media.map((item, index) => (
+              <View key={index} style={styles.photoWrapper}>
+                <TouchableOpacity onPress={() => openPreview(item)}>
+                  {item.type === "image" ? (
+                    <Image source={{ uri: item.uri }} style={styles.photoBox} />
+                  ) : (
+                    <View style={styles.videoThumb}>
+                      <View style={styles.videoThumbOverlay}>
+                        <Ionicons name="play-circle" size={40} color="white" />
+                        <Text style={styles.videoLabel}>Tap to preview</Text>
+                      </View>
+                    </View>
+                  )}
+                </TouchableOpacity>
+                {/* Type badge */}
+                <View style={[styles.typeBadge, item.type === "video" && styles.typeBadgeVideo]}>
+                  <Ionicons name={item.type === "video" ? "videocam" : "image"} size={10} color="white" />
+                </View>
+                <TouchableOpacity style={styles.removePhotoBtn} onPress={() => removeMedia(index)}>
+                  <Ionicons name="close" size={16} color="white" />
+                </TouchableOpacity>
+              </View>
+            ))}
+
+            {!isAtLimit && (
+              <TouchableOpacity style={styles.addPhotoBox} onPress={pickMedia}>
+                <Ionicons name="add" size={32} color="#999" />
+                <Text style={styles.addPhotoText}>Photo/Video</Text>
+              </TouchableOpacity>
+            )}
+          </View>
+
+          {/* Title */}
+          <Text style={styles.sectionLabel}>Title</Text>
+          <TextInput
+            style={styles.input}
+            placeholder="Brief title for your item"
+            placeholderTextColor="#aaa"
+            value={title}
+            onChangeText={setTitle}
+          />
+
+          {/* Category */}
+          <Text style={styles.sectionLabel}>Category</Text>
+          <TouchableOpacity style={styles.dropdownButton} onPress={() => setIsCategoryOpen(!isCategoryOpen)}>
+            <Text style={styles.dropdownText}>{CATEGORIES.find((c) => c.id === selectedCategory)?.label || "Select Category"}</Text>
+            <Ionicons name={isCategoryOpen ? "chevron-up" : "chevron-down"} size={20} color={NAVY} />
+          </TouchableOpacity>
+          {isCategoryOpen && (
+            <View style={styles.dropdownMenu}>
+              {CATEGORIES.map((cat) => (
+                <TouchableOpacity key={cat.id} style={styles.dropdownItem} onPress={() => { setSelectedCategory(cat.id); setIsCategoryOpen(false); }}>
+                  <Text style={[styles.dropdownItemText, selectedCategory === cat.id && styles.dropdownItemSelected]}>{cat.label}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
           )}
-        </TouchableOpacity>
-      </ScrollView>
+
+          {/* Condition */}
+          <Text style={styles.sectionLabel}>Condition</Text>
+          <TouchableOpacity style={styles.dropdownButton} onPress={() => setIsConditionOpen(!isConditionOpen)}>
+            <Text style={styles.dropdownText}>{CONDITIONS.find((c) => c.id === selectedCondition)?.label || "Select Condition"}</Text>
+            <Ionicons name={isConditionOpen ? "chevron-up" : "chevron-down"} size={20} color={NAVY} />
+          </TouchableOpacity>
+          {isConditionOpen && (
+            <View style={styles.dropdownMenu}>
+              {CONDITIONS.map((cond) => (
+                <TouchableOpacity key={cond.id} style={styles.dropdownItem} onPress={() => { setSelectedCondition(cond.id); setIsConditionOpen(false); }}>
+                  <Text style={[styles.dropdownItemText, selectedCondition === cond.id && styles.dropdownItemSelected]}>{cond.label}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          )}
+
+          {/* Description */}
+          <Text style={styles.sectionLabel}>Description</Text>
+          <TextInput
+            style={styles.descriptionInput}
+            multiline
+            numberOfLines={5}
+            placeholder="Describe your item in detail..."
+            placeholderTextColor="#aaa"
+            value={description}
+            onChangeText={setDescription}
+          />
+
+          {/* Submit */}
+          <TouchableOpacity style={[styles.submitButton, isLoading && styles.submitButtonDisabled]} onPress={handleSubmit} disabled={isLoading}>
+            {isLoading ? (
+              <ActivityIndicator size="small" color="white" />
+            ) : (
+              <>
+                <Ionicons name="cloud-upload" size={18} color="white" />
+                <Text style={styles.submitText}>Submit</Text>
+              </>
+            )}
+          </TouchableOpacity>
+        </ScrollView>
+      </KeyboardAvoidingView>
 
       {/* Preview Modal */}
       <Modal visible={previewModalVisible} transparent animationType="fade" onRequestClose={() => setPreviewModalVisible(false)}>
@@ -491,7 +505,7 @@ export default function AddItemScreen() {
             {selectedMedia?.type === "image" ? (
               <Image
                 source={{ uri: selectedMedia.uri }}
-                style={styles.modalImage}
+                style={{ width: screenWidth, height: screenHeight * 0.75 }}
                 resizeMode="contain"
               />
             ) : selectedMedia?.type === "video" ? (
@@ -568,14 +582,14 @@ const styles = StyleSheet.create({
   addPhotoBox: { width: 100, height: 100, backgroundColor: "#f0f0f5", borderRadius: 12, justifyContent: "center", alignItems: "center", borderWidth: 2, borderColor: "#ddd", borderStyle: "dashed" } as ViewStyle,
   addPhotoText: { fontSize: 10, color: "#999", marginTop: 4 } as TextStyle,
 
-  input: { backgroundColor: "#f0f0f5", borderRadius: 12, padding: 12, fontSize: 14, marginBottom: 12, marginHorizontal: 16 } as TextStyle,
+  input: { backgroundColor: "#f0f0f5", borderRadius: 12, padding: 12, fontSize: 14, color: "#111", marginBottom: 12, marginHorizontal: 16 } as TextStyle,
   dropdownButton: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", backgroundColor: "#f0f0f5", borderRadius: 12, padding: 12, marginBottom: 8, marginHorizontal: 16 } as ViewStyle,
   dropdownText: { fontSize: 14, color: "#333", flex: 1 } as TextStyle,
   dropdownMenu: { backgroundColor: "#fff", borderWidth: 1, borderColor: "#ddd", borderRadius: 8, marginBottom: 12, marginHorizontal: 16, overflow: "hidden" } as ViewStyle,
   dropdownItem: { paddingVertical: 12, paddingHorizontal: 16, borderBottomWidth: 1, borderBottomColor: "#f0f0f5" } as ViewStyle,
   dropdownItemText: { fontSize: 14, color: "#333" } as TextStyle,
   dropdownItemSelected: { color: NAVY, fontWeight: "600" } as TextStyle,
-  descriptionInput: { backgroundColor: "#f0f0f5", borderRadius: 12, padding: 12, height: 130, textAlignVertical: "top", fontSize: 14, marginBottom: 24, marginHorizontal: 16 } as TextStyle,
+  descriptionInput: { backgroundColor: "#f0f0f5", borderRadius: 12, padding: 12, height: 130, textAlignVertical: "top", fontSize: 14, color: "#111", marginBottom: 24, marginHorizontal: 16 } as TextStyle,
   submitButton: { backgroundColor: NAVY, flexDirection: "row", alignItems: "center", justifyContent: "center", paddingVertical: 14, borderRadius: 10, marginBottom: 30, marginHorizontal: 16 } as ViewStyle,
   submitButtonDisabled: { opacity: 0.6 } as ViewStyle,
   submitText: { color: "white", fontWeight: "700", fontSize: 15, marginLeft: 8 } as TextStyle,
@@ -584,8 +598,8 @@ const styles = StyleSheet.create({
   modalHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 16, paddingTop: 54, paddingBottom: 12, borderBottomWidth: 1, borderBottomColor: "#222" } as ViewStyle,
   modalHeaderText: { color: "white", fontSize: 16, fontWeight: "600" } as TextStyle,
   modalCloseBtn: { width: 36, height: 36, borderRadius: 18, backgroundColor: "#333", justifyContent: "center", alignItems: "center" } as ViewStyle,
-  modalContent: { flex: 1, justifyContent: "center", alignItems: "center", width: "100%", backgroundColor: "#000" } as ViewStyle,
-  modalImage: { width: "100%", height: "100%" } as any,
+  modalContent: { flex: 1, justifyContent: "center", alignItems: "center", width: "100%", backgroundColor: "#000", paddingVertical: 8 } as ViewStyle,
+  modalImage: { flex: 1, width: "100%", height: "100%" } as any,
   modalVideo: {
     width: "100%",
     aspectRatio: 16 / 9,
