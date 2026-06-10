@@ -1,12 +1,13 @@
 import { Ionicons } from "@expo/vector-icons";
 import { Tabs, useRouter } from "expo-router";
 import { onAuthStateChanged } from "firebase/auth";
-import React, { useEffect } from "react";
+import React, { useEffect, useState } from "react";
 import { Platform, StyleSheet, Text, View } from "react-native";
 
 import { HapticTab } from "@/components/haptic-tab";
 import { Colors } from "@/constants/theme";
 import { auth } from "../../firebaseConfig";
+import { badgeStore } from "../../services/badgeStore";
 
 const styles = StyleSheet.create({
   tabIconContainer: {
@@ -50,6 +51,13 @@ const styles = StyleSheet.create({
 
 export default function TabLayout() {
   const router = useRouter();
+  const [inboxBadge, setInboxBadge] = useState<number>(badgeStore.getCount());
+
+  // Subscribe to badge store updates from InboxScreen
+  useEffect(() => {
+    const unsub = badgeStore.subscribe(setInboxBadge);
+    return unsub;
+  }, []);
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (user) => {
@@ -132,6 +140,18 @@ export default function TabLayout() {
         name="inbox"
         options={{
           title: "Inbox",
+          // Show count badge when > 0, hide it completely when 0
+          tabBarBadge:
+            inboxBadge > 0 ? (inboxBadge > 99 ? "99+" : inboxBadge) : undefined,
+          tabBarBadgeStyle: {
+            backgroundColor: "#ef4444",
+            color: "#fff",
+            fontSize: 10,
+            fontWeight: "700",
+            minWidth: 18,
+            height: 18,
+            lineHeight: 18,
+          },
           tabBarIcon: ({ color, focused }) => (
             <View
               style={[styles.tabIconContainer, focused && styles.tabIconActive]}

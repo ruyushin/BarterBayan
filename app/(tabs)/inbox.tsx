@@ -1,7 +1,7 @@
 import { Ionicons } from "@expo/vector-icons";
 import { useFocusEffect } from "@react-navigation/native";
 import { useRouter } from "expo-router";
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -17,6 +17,7 @@ import {
   View,
 } from "react-native";
 import { auth } from "../../firebaseConfig";
+import { badgeStore } from "../../services/badgeStore";
 import { getUserInfo } from "../../services/itemService";
 import {
   archiveConversation,
@@ -28,7 +29,7 @@ import {
   markConversationAsUnread,
   muteConversation,
   unarchiveConversation,
-  unmuteConversation
+  unmuteConversation,
 } from "../../services/messagingService";
 import {
   deleteNotifications,
@@ -383,9 +384,10 @@ export default function InboxScreen() {
             );
             const avatarUri = resolveAvatar(userInfo);
             // Get unread message count for this conversation
-            const unreadCount = await getUnreadMessageCount(conv.id, currentUserId!).catch(
-              () => 0,
-            );
+            const unreadCount = await getUnreadMessageCount(
+              conv.id,
+              currentUserId!,
+            ).catch(() => 0);
             return {
               ...conv,
               otherUserId,
@@ -394,7 +396,12 @@ export default function InboxScreen() {
               unreadCount,
             };
           } catch {
-            return { ...conv, userName: "User", userAvatar: null, unreadCount: 0 };
+            return {
+              ...conv,
+              userName: "User",
+              userAvatar: null,
+              unreadCount: 0,
+            };
           }
         }),
       );
@@ -698,17 +705,23 @@ export default function InboxScreen() {
   const unreadNotificationConversations = new Set(
     notifications
       .filter((n) => !n.read)
-      .map((n) => n.conversationId || n.otherUserId || n.id)
+      .map((n) => n.conversationId || n.otherUserId || n.id),
   );
   const unreadCount = Math.min(unreadNotificationConversations.size, 99);
-  const unreadNotificationBadge = unreadCount > 99 ? "99+" : unreadCount.toString();
+  const unreadNotificationBadge =
+    unreadCount > 99 ? "99+" : unreadCount.toString();
 
   // Calculate unread conversations based on ACTUAL unread messages (not conversation read state)
   // Count conversations with unreadCount > 0 to match the badge display
   const unreadConversationsCount = conversations.filter(
-    (conv) => (conv.unreadCount || 0) > 0
+    (conv) => (conv.unreadCount || 0) > 0,
   ).length;
-  const totalUnreadBadge = unreadConversationsCount > 99 ? "99+" : unreadConversationsCount.toString();
+  // Keep tab bar badge in sync
+  useEffect(() => {
+    badgeStore.setCount(unreadConversationsCount + unreadCount);
+  }, [unreadConversationsCount, unreadCount]);
+  const totalUnreadBadge =
+    unreadConversationsCount > 99 ? "99+" : unreadConversationsCount.toString();
   // ─── Renders
   const renderMessage = ({ item }: any) => {
     const isMuted = mutedConversations[item.id];
@@ -751,7 +764,9 @@ export default function InboxScreen() {
               <View style={[styles.statusDot, { backgroundColor: "#aaa" }]} />
               {unreadCount > 0 && (
                 <View style={styles.unreadBadgeMessage}>
-                  <Text style={styles.unreadBadgeMessageText}>{unreadBadgeText}</Text>
+                  <Text style={styles.unreadBadgeMessageText}>
+                    {unreadBadgeText}
+                  </Text>
                 </View>
               )}
             </View>
@@ -937,9 +952,7 @@ export default function InboxScreen() {
             />
             {unreadConversationsCount > 0 && (
               <View style={styles.badgePill}>
-                <Text style={styles.badgePillText}>
-                  {totalUnreadBadge}
-                </Text>
+                <Text style={styles.badgePillText}>{totalUnreadBadge}</Text>
               </View>
             )}
           </TouchableOpacity>
