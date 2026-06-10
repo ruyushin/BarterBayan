@@ -8,12 +8,13 @@ import "react-native-reanimated";
 import {
   SafeAreaProvider,
   useSafeAreaInsets,
-} from "react-native-safe-area-context"; // ← add
+} from "react-native-safe-area-context";
+import SplashScreen from "../components/SplashScreen"; // ← adjust path if needed
 import { auth } from "../firebaseConfig";
 
-// ← split into inner component so useSafeAreaInsets can run inside SafeAreaProvider
 function RootLayoutNav() {
   const insets = useSafeAreaInsets();
+  const [showSplash, setShowSplash] = useState(true); // ← splash gate
   const [isLoading, setIsLoading] = useState(true);
   const [user, setUser] = useState<any>(null);
   const segments = useSegments();
@@ -35,6 +36,12 @@ function RootLayoutNav() {
     }
   }, [user, segments, isLoading, router]);
 
+  // ── Show splash first, regardless of auth state ──
+  if (showSplash) {
+    return <SplashScreen onFinish={() => setShowSplash(false)} />;
+  }
+
+  // ── Then show the auth loading spinner ──
   if (isLoading) {
     return (
       <View
@@ -55,7 +62,7 @@ function RootLayoutNav() {
       <Stack
         screenOptions={{
           headerShown: false,
-          contentStyle: { paddingTop: insets.top }, // ← the actual fix
+          contentStyle: { paddingTop: insets.top },
         }}
       >
         <Stack.Screen name="(auth)" />

@@ -34,7 +34,7 @@ import {
   updateItemSave,
 } from "../../services/itemService";
 import { getLikeState, setLikeState } from "../../services/likeCache";
-import { sendMessage } from "../../services/messagingService";
+
 import {
   getPersonalizedSuggestions,
   getTrendingItems,
@@ -425,7 +425,13 @@ function ItemCard({ item, onCommentAdded }: any) {
   const router = useRouter();
 
   const currentUser = auth.currentUser?.uid;
-  const currentUserName = auth.currentUser?.displayName || "Anonymous";
+  const currentUserName =
+    auth.currentUser?.displayName ||
+    (auth.currentUser?.email
+      ? auth.currentUser.email.split("@")[0]
+      : auth.currentUser?.uid
+        ? `User_${auth.currentUser.uid.slice(0, 5)}`
+        : "User");
   const currentUserPhotoURL =
     auth.currentUser?.photoURL || "https://i.pravatar.cc/150?img=1";
   const isOwnItem = !!currentUser && currentUser === item?.ownerId;
@@ -543,7 +549,7 @@ function ItemCard({ item, onCommentAdded }: any) {
     }
   };
 
-  const handleSendMessage = async () => {
+  const handleSendMessage = () => {
     if (!currentUser) {
       Alert.alert("Please log in", "You must be logged in to send messages.");
       return;
@@ -552,21 +558,16 @@ function ItemCard({ item, onCommentAdded }: any) {
       Alert.alert("Cannot message", "You cannot message yourself.");
       return;
     }
-    try {
-      setCommentsLoading(true);
-      await sendMessage(
-        currentUser,
-        item.ownerId,
-        `Hi, I'm interested in your ${item.title}`,
-        item.id,
-      );
-      Alert.alert("Message sent", "Your message has been sent successfully.");
-      router.push("/inbox");
-    } catch {
-      Alert.alert("Error", "Failed to send message.");
-    } finally {
-      setCommentsLoading(false);
-    }
+    // Navigate to inbox/chat with the owner pre-selected so the user
+    // can compose and send their own message — no auto-send.
+    router.push({
+      pathname: "/chat",
+      params: {
+        ownerUserId: item.ownerId,
+        itemId: item.id,
+        itemTitle: item.title,
+      },
+    });
   };
 
   const handleSaveGalleryImage = async () => {
@@ -753,9 +754,6 @@ function ItemCard({ item, onCommentAdded }: any) {
             </Text>
           </View>
         </TouchableOpacity>
-        <View style={styles.badgeContainer}>
-          <Ionicons name="ribbon" size={18} color="#FFC107" />
-        </View>
       </View>
 
       {/* IMAGE */}
@@ -948,17 +946,42 @@ function ItemCard({ item, onCommentAdded }: any) {
               );
               return (
                 <View style={styles.commentItem}>
-                  <Image
-                    source={{
-                      uri:
-                        comment.userAvatar || "https://i.pravatar.cc/150?img=1",
-                    }}
-                    style={styles.commentAvatar}
-                  />
+                  <TouchableOpacity
+                    onPress={() =>
+                      comment.userId &&
+                      router.push({
+                        pathname: "/user-profile",
+                        params: { userId: comment.userId },
+                      })
+                    }
+                    activeOpacity={0.8}
+                  >
+                    <Image
+                      source={{
+                        uri:
+                          comment.userAvatar ||
+                          "https://i.pravatar.cc/150?img=1",
+                      }}
+                      style={styles.commentAvatar}
+                    />
+                  </TouchableOpacity>
                   <View style={styles.commentContent}>
-                    <Text style={styles.commentUserName}>
-                      {comment.userName}
-                    </Text>
+                    <TouchableOpacity
+                      onPress={() =>
+                        comment.userId &&
+                        router.push({
+                          pathname: "/user-profile",
+                          params: { userId: comment.userId },
+                        })
+                      }
+                      activeOpacity={0.8}
+                    >
+                      <Text style={styles.commentUserName}>
+                        {comment.userName && comment.userName.trim().length > 0
+                          ? comment.userName
+                          : "User"}
+                      </Text>
+                    </TouchableOpacity>
                     <Text style={styles.commentText}>{comment.text}</Text>
                     <View style={styles.commentActions}>
                       <Pressable
@@ -1003,18 +1026,43 @@ function ItemCard({ item, onCommentAdded }: any) {
                       <View style={styles.repliesContainer}>
                         {comment.replies.map((reply: any) => (
                           <View key={reply.id} style={styles.replyItem}>
-                            <Image
-                              source={{
-                                uri:
-                                  reply.userAvatar ||
-                                  "https://i.pravatar.cc/150?img=1",
-                              }}
-                              style={styles.replyAvatar}
-                            />
+                            <TouchableOpacity
+                              onPress={() =>
+                                reply.userId &&
+                                router.push({
+                                  pathname: "/user-profile",
+                                  params: { userId: reply.userId },
+                                })
+                              }
+                              activeOpacity={0.8}
+                            >
+                              <Image
+                                source={{
+                                  uri:
+                                    reply.userAvatar ||
+                                    "https://i.pravatar.cc/150?img=1",
+                                }}
+                                style={styles.replyAvatar}
+                              />
+                            </TouchableOpacity>
                             <View style={styles.replyContent}>
-                              <Text style={styles.replyUserName}>
-                                {reply.userName}
-                              </Text>
+                              <TouchableOpacity
+                                onPress={() =>
+                                  reply.userId &&
+                                  router.push({
+                                    pathname: "/user-profile",
+                                    params: { userId: reply.userId },
+                                  })
+                                }
+                                activeOpacity={0.8}
+                              >
+                                <Text style={styles.replyUserName}>
+                                  {reply.userName &&
+                                  reply.userName.trim().length > 0
+                                    ? reply.userName
+                                    : "User"}
+                                </Text>
+                              </TouchableOpacity>
                               <Text style={styles.replyText}>{reply.text}</Text>
                             </View>
                           </View>
@@ -1198,7 +1246,7 @@ const styles = StyleSheet.create({
   userDetails: { flex: 1 },
   username: { fontWeight: "700", fontSize: 14, color: "#1F1F1F" },
   date: { fontSize: 12, color: "#999", marginTop: 2 },
-  badgeContainer: { padding: 6 },
+
   cardImageContainer: {
     position: "relative",
     width: "100%",

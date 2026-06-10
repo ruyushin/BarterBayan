@@ -9,43 +9,60 @@ import { Colors } from "@/constants/theme";
 import { auth } from "../../firebaseConfig";
 import { badgeStore } from "../../services/badgeStore";
 
+const NAVY = "#2f2f6f";
+const NAVY_LIGHT = "#434399";
+const INACTIVE = "#A0A0B0";
+
 const styles = StyleSheet.create({
+  // ── Regular tab icon ────────────────────────────────────────────────────────
   tabIconContainer: {
     flex: 1,
     justifyContent: "center",
     alignItems: "center",
-    paddingVertical: 0,
-    paddingHorizontal: 0,
-    borderBottomWidth: 3,
-    borderBottomColor: "transparent",
+    paddingTop: 2,
   },
-  tabIconActive: {
-    borderBottomColor: "#2f2f6f",
+  tabLabel: {
+    fontSize: 10,
+    fontWeight: "600",
+    marginTop: 3,
+    letterSpacing: 0.2,
   },
+  tabLabelActive: {
+    color: NAVY,
+  },
+  tabLabelInactive: {
+    color: INACTIVE,
+  },
+  // Active pill behind icon
+  activePill: {
+    position: "absolute",
+    top: 0,
+    width: 44,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: "#ECEDF8",
+    zIndex: -1,
+  },
+
+  // ── Center Trade FAB ─────────────────────────────────────────────────────────
   tradeBtn: {
-    top: -15,
-    width: 60,
-    height: 60,
-    borderRadius: 30,
-    backgroundColor: "#434399",
+    top: -18,
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: NAVY_LIGHT,
     justifyContent: "center",
     alignItems: "center",
     borderWidth: 3,
     borderColor: "#fff",
-    shadowColor: "#25252e",
-    shadowOffset: { width: 0, height: -2 },
-    shadowOpacity: 0.25,
-    shadowRadius: 8,
+    shadowColor: NAVY,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 10,
     elevation: 8,
   },
   tradeBtnActive: {
-    backgroundColor: "#1a1a4f",
-  },
-  tradeBtnLabel: {
-    color: "#fff",
-    fontSize: 9,
-    fontWeight: "600",
-    marginTop: 2,
+    backgroundColor: NAVY,
   },
 });
 
@@ -53,7 +70,6 @@ export default function TabLayout() {
   const router = useRouter();
   const [inboxBadge, setInboxBadge] = useState<number>(badgeStore.getCount());
 
-  // Subscribe to badge store updates from InboxScreen
   useEffect(() => {
     const unsub = badgeStore.subscribe(setInboxBadge);
     return unsub;
@@ -67,9 +83,36 @@ export default function TabLayout() {
         router.replace("/verify");
       }
     });
-
     return () => unsubscribe();
   }, [router]);
+
+  // ── Reusable icon renderer ────────────────────────────────────────────────
+  const TabIcon = ({
+    iconName,
+    label,
+    focused,
+  }: {
+    iconName: string;
+    label: string;
+    focused: boolean;
+  }) => (
+    <View style={styles.tabIconContainer}>
+      {focused && <View style={styles.activePill} />}
+      <Ionicons
+        name={iconName as any}
+        size={22}
+        color={focused ? NAVY : INACTIVE}
+      />
+      <Text
+        style={[
+          styles.tabLabel,
+          focused ? styles.tabLabelActive : styles.tabLabelInactive,
+        ]}
+      >
+        {label}
+      </Text>
+    </View>
+  );
 
   return (
     <Tabs
@@ -77,11 +120,21 @@ export default function TabLayout() {
         tabBarActiveTintColor: Colors["light"].tint,
         headerShown: false,
         tabBarButton: HapticTab,
+        tabBarShowLabel: false,
         tabBarStyle: {
           backgroundColor: "#FFFFFF",
-          borderTopWidth: 1,
-          borderTopColor: "#EEEEEE",
+          borderTopWidth: 0.5,
+          borderTopColor: "#E8E8EE",
+          height: Platform.OS === "ios" ? 82 : 64,
+          paddingBottom: Platform.OS === "ios" ? 24 : 8,
+          paddingTop: 8,
           overflow: "visible",
+          // Subtle lift
+          shadowColor: "#000",
+          shadowOffset: { width: 0, height: -2 },
+          shadowOpacity: 0.06,
+          shadowRadius: 12,
+          elevation: 12,
           ...Platform.select({
             ios: { position: "absolute" },
             default: {},
@@ -93,16 +146,12 @@ export default function TabLayout() {
         name="index"
         options={{
           title: "Home",
-          tabBarIcon: ({ color, focused }) => (
-            <View
-              style={[styles.tabIconContainer, focused && styles.tabIconActive]}
-            >
-              <Ionicons
-                name="home"
-                size={24}
-                color={focused ? "#2f2f6f" : color}
-              />
-            </View>
+          tabBarIcon: ({ focused }) => (
+            <TabIcon
+              iconName={focused ? "home" : "home-outline"}
+              label="Home"
+              focused={focused}
+            />
           ),
         }}
       />
@@ -110,16 +159,12 @@ export default function TabLayout() {
         name="explore"
         options={{
           title: "Explore",
-          tabBarIcon: ({ color, focused }) => (
-            <View
-              style={[styles.tabIconContainer, focused && styles.tabIconActive]}
-            >
-              <Ionicons
-                name="compass"
-                size={24}
-                color={focused ? "#2f2f6f" : color}
-              />
-            </View>
+          tabBarIcon: ({ focused }) => (
+            <TabIcon
+              iconName={focused ? "compass" : "compass-outline"}
+              label="Explore"
+              focused={focused}
+            />
           ),
         }}
       />
@@ -130,8 +175,7 @@ export default function TabLayout() {
           tabBarLabel: () => null,
           tabBarIcon: ({ focused }) => (
             <View style={[styles.tradeBtn, focused && styles.tradeBtnActive]}>
-              <Ionicons name="swap-horizontal" size={24} color="#fff" />
-              <Text style={styles.tradeBtnLabel}>Trade</Text>
+              <Ionicons name="swap-horizontal" size={22} color="#fff" />
             </View>
           ),
         }}
@@ -140,7 +184,6 @@ export default function TabLayout() {
         name="inbox"
         options={{
           title: "Inbox",
-          // Show count badge when > 0, hide it completely when 0
           tabBarBadge:
             inboxBadge > 0 ? (inboxBadge > 99 ? "99+" : inboxBadge) : undefined,
           tabBarBadgeStyle: {
@@ -152,16 +195,12 @@ export default function TabLayout() {
             height: 18,
             lineHeight: 18,
           },
-          tabBarIcon: ({ color, focused }) => (
-            <View
-              style={[styles.tabIconContainer, focused && styles.tabIconActive]}
-            >
-              <Ionicons
-                name="mail"
-                size={24}
-                color={focused ? "#2f2f6f" : color}
-              />
-            </View>
+          tabBarIcon: ({ focused }) => (
+            <TabIcon
+              iconName={focused ? "mail" : "mail-outline"}
+              label="Inbox"
+              focused={focused}
+            />
           ),
         }}
       />
@@ -169,16 +208,12 @@ export default function TabLayout() {
         name="profile"
         options={{
           title: "Account",
-          tabBarIcon: ({ color, focused }) => (
-            <View
-              style={[styles.tabIconContainer, focused && styles.tabIconActive]}
-            >
-              <Ionicons
-                name="person"
-                size={24}
-                color={focused ? "#2f2f6f" : color}
-              />
-            </View>
+          tabBarIcon: ({ focused }) => (
+            <TabIcon
+              iconName={focused ? "person" : "person-outline"}
+              label="Account"
+              focused={focused}
+            />
           ),
         }}
       />

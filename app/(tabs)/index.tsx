@@ -1,4 +1,6 @@
-﻿import React, { useState } from "react";
+﻿// index.tsx - patched: replace swap-horizontal icon with BBicon.png in logo mark
+
+import React, { useState } from "react";
 import {
   ActivityIndicator,
   FlatList,
@@ -30,6 +32,7 @@ const CATEGORIES = [
 ];
 
 const MAGNIFIER_IMG = require("../../assets/images/magnifier.png");
+const BB_ICON = require("../../assets/images/BBicon.png");
 
 const NAVY = "#2f2f6f";
 
@@ -122,9 +125,13 @@ export default function HomeScreen() {
         {/* ── Header ── */}
         <View style={styles.header}>
           <View style={styles.headerBrand}>
-            {/* Logo mark */}
+            {/* Logo mark — BBicon.png */}
             <View style={styles.logoMark}>
-              <Ionicons name="swap-horizontal" size={18} color="#fff" />
+              <Image
+                source={BB_ICON}
+                style={styles.logoImage}
+                resizeMode="cover"
+              />
             </View>
             {/* Wordmark */}
             <Text style={styles.headerWordmark}>
@@ -350,8 +357,8 @@ export default function HomeScreen() {
 
 const styles = StyleSheet.create({
   container: {
-  flex: 1,
-  backgroundColor: "#FFFFFF",
+    flex: 1,
+    backgroundColor: "#FFFFFF",
   },
   scrollView: {
     backgroundColor: "#FFFFFF",
@@ -380,14 +387,16 @@ const styles = StyleSheet.create({
     width: 34,
     height: 34,
     borderRadius: 10,
-    backgroundColor: NAVY,
-    justifyContent: "center",
-    alignItems: "center",
+    overflow: "hidden",
     shadowColor: NAVY,
     shadowOffset: { width: 0, height: 3 },
     shadowOpacity: 0.25,
     shadowRadius: 6,
     elevation: 4,
+  },
+  logoImage: {
+    width: 34,
+    height: 34,
   },
   headerWordmark: {
     fontSize: 22,
