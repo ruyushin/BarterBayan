@@ -1,4 +1,3 @@
-
 import { Ionicons } from "@expo/vector-icons";
 import * as ImagePicker from "expo-image-picker";
 import { useRouter } from "expo-router";
@@ -6,13 +5,19 @@ import { onAuthStateChanged, signOut, User } from "firebase/auth";
 import {
   collection,
   doc,
-  getDoc,
   getDocs,
   limit,
+  onSnapshot,
   orderBy,
   query,
 } from "firebase/firestore";
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -81,40 +86,135 @@ function StarRating({
   ratingCount?: number;
   size?: number;
 }) {
-  // When no ratings yet, show all empty stars
   const effectiveRating = (ratingCount ?? 0) > 0 ? rating : 0;
-
-  const stars = Array.from({ length: MAX_RATING }, (_, i) => {
-    const filled = i + 1 <= Math.floor(effectiveRating);
-    const half = !filled && i < effectiveRating && effectiveRating % 1 >= 0.5;
-    return { filled, half, index: i };
-  });
 
   return (
     <View style={ratingStyles.wrapper}>
       <View style={ratingStyles.starsRow}>
-        {stars.map(({ filled, half, index }) => (
-          <Ionicons
-            key={index}
-            name={filled ? "star" : half ? "star-half" : "star-outline"}
-            size={size}
-            color={filled || half ? STAR_FILLED : STAR_EMPTY}
-            style={{ marginRight: 2 }}
-          />
-        ))}
+        {Array.from({ length: MAX_RATING }, (_, i) => {
+          const filled = i + 1 <= Math.floor(effectiveRating);
+          const half =
+            !filled && i < effectiveRating && effectiveRating % 1 >= 0.5;
+          return (
+            <Ionicons
+              key={i}
+              name={filled ? "star" : half ? "star-half" : "star-outline"}
+              size={size}
+              color={filled || half ? STAR_FILLED : STAR_EMPTY}
+              style={{ marginRight: 1 }}
+            />
+          );
+        })}
       </View>
-      <View style={ratingStyles.ratingInfo}>
-        {/* FIX: Only show numeric rating when there are actual reviews */}
-        {ratingCount && ratingCount > 0 ? (
-          <>
-            <Text style={ratingStyles.ratingNumber}>{rating.toFixed(1)}</Text>
-            <Text style={ratingStyles.ratingCount}>
-              ({ratingCount} {ratingCount === 1 ? "review" : "reviews"})
-            </Text>
-          </>
-        ) : (
-          <Text style={ratingStyles.ratingEmpty}>No ratings yet</Text>
-        )}
+    </View>
+  );
+}
+
+// ─── Rating Hero Card ─────────────────────────────────────────────────────────
+// distribution: array[5] of counts indexed 0=1★ … 4=5★
+function RatingHeroCard({
+  rating,
+  ratingCount,
+  distribution,
+}: {
+  rating: number;
+  ratingCount: number;
+  distribution: number[];
+}) {
+  const hasRatings = ratingCount > 0;
+  const displayRating = hasRatings ? rating : 0;
+  const safeDistribution =
+    Array.isArray(distribution) && distribution.length === 5
+      ? distribution
+      : [0, 0, 0, 0, 0];
+  const maxCount = Math.max(...safeDistribution, 1);
+
+  const barAnims = useRef(
+    Array.from({ length: MAX_RATING }, () => new Animated.Value(0)),
+  ).current;
+
+  useEffect(() => {
+    if (!hasRatings) return;
+    Animated.stagger(
+      60,
+      barAnims.map((anim, i) =>
+        Animated.timing(anim, {
+          toValue: distribution[i] / maxCount,
+          duration: 500,
+          useNativeDriver: false,
+        }),
+      ),
+    ).start();
+  }, [hasRatings, distribution.join(",")]);
+
+  return (
+    <View style={heroStyles.card}>
+      {/* Left: big number + stars + count */}
+      <View style={heroStyles.left}>
+        <Text style={heroStyles.bigNumber}>
+          {hasRatings ? displayRating.toFixed(1) : "—"}
+        </Text>
+        <View style={heroStyles.starsRow}>
+          {Array.from({ length: MAX_RATING }, (_, i) => {
+            const filled = i + 1 <= Math.floor(displayRating);
+            const half =
+              !filled && i < displayRating && displayRating % 1 >= 0.5;
+            return (
+              <Ionicons
+                key={i}
+                name={filled ? "star" : half ? "star-half" : "star-outline"}
+                size={15}
+                color={filled || half ? STAR_FILLED : "#E0E0E0"}
+              />
+            );
+          })}
+        </View>
+        <Text style={heroStyles.countLabel}>
+          {hasRatings
+            ? `${ratingCount} ${ratingCount === 1 ? "review" : "reviews"}`
+            : "No ratings yet"}
+        </Text>
+      </View>
+
+      {/* Divider */}
+      <View style={heroStyles.divider} />
+
+      {/* Right: bar breakdown (5 → 1) */}
+      <View style={heroStyles.bars}>
+        {[5, 4, 3, 2, 1].map((star) => {
+          const count = distribution[star - 1];
+          const pct =
+            ratingCount > 0 ? Math.round((count / ratingCount) * 100) : 0;
+          return (
+            <View key={star} style={heroStyles.barRow}>
+              <Text style={heroStyles.barLabel}>{star}</Text>
+              <Ionicons
+                name="star"
+                size={9}
+                color={STAR_FILLED}
+                style={{ marginRight: 5 }}
+              />
+              <View style={heroStyles.barTrack}>
+                <Animated.View
+                  style={[
+                    heroStyles.barFill,
+                    {
+                      width: barAnims[star - 1].interpolate({
+                        inputRange: [0, 1],
+                        outputRange: ["0%", "100%"],
+                      }),
+                      backgroundColor:
+                        star >= 4 ? "#27AE60" : star === 3 ? GOLD : "#E67E22",
+                    },
+                  ]}
+                />
+              </View>
+              <Text style={heroStyles.barPct}>
+                {hasRatings ? `${pct}%` : ""}
+              </Text>
+            </View>
+          );
+        })}
       </View>
     </View>
   );
@@ -142,10 +242,14 @@ function StatCard({
   const inner = (
     <View style={styles.statCard}>
       <Text style={styles.statTopLabel}>{label}</Text>
-      <Ionicons name={iconName as any} size={26} color="#2e2d7c" style={{ marginVertical: 2 }} />
+      <Ionicons
+        name={iconName as any}
+        size={26}
+        color="#2e2d7c"
+        style={{ marginVertical: 2 }}
+      />
       <Text style={styles.statCountNum}>{count}</Text>
       <Text style={styles.statCountLabel}>{label}</Text>
-      {/* FIX: Show chevron hint when tappable */}
       {onPress && <Text style={styles.statTapHint}>tap to view</Text>}
     </View>
   );
@@ -215,7 +319,6 @@ function SettingsRow({
 }
 
 // ─── Overview Modal ───────────────────────────────────────────────────────────
-// FIX: Shows real recent reviews pulled from Firestore subcollection
 function OverviewModal({
   visible,
   userId,
@@ -229,34 +332,49 @@ function OverviewModal({
 }) {
   const [reviews, setReviews] = useState<Review[]>([]);
   const [loadingReviews, setLoadingReviews] = useState(false);
+  const [filter, setFilter] = useState<number | null>(null);
 
   useEffect(() => {
     if (!visible || !userId) return;
-
-    const fetchReviews = async () => {
-      setLoadingReviews(true);
-      try {
-        const reviewsRef = collection(db, "users", userId, "reviews");
-        const q = query(reviewsRef, orderBy("createdAt", "desc"), limit(10));
-        const snap = await getDocs(q);
-        const fetched: Review[] = snap.docs.map((d) => ({
-          id: d.id,
-          ...(d.data() as Omit<Review, "id">),
-        }));
-        setReviews(fetched);
-      } catch (err) {
-        console.error("Failed to fetch reviews:", err);
-      } finally {
-        setLoadingReviews(false);
-      }
-    };
-
-    fetchReviews();
+    setLoadingReviews(true);
+    getDocs(
+      query(
+        collection(db, "users", userId, "reviews"),
+        orderBy("createdAt", "desc"),
+        limit(20),
+      ),
+    )
+      .then((snap) =>
+        setReviews(
+          snap.docs.map((d) => ({
+            id: d.id,
+            ...(d.data() as Omit<Review, "id">),
+          })),
+        ),
+      )
+      .catch((e) => console.error("OverviewModal fetch error:", e))
+      .finally(() => setLoadingReviews(false));
   }, [visible, userId]);
 
   const ratingValue =
     typeof userData?.rating === "number" ? userData.rating : 0;
   const ratingCount = userData?.ratingCount ?? 0;
+
+  const distribution = useMemo(() => {
+    const counts = [0, 0, 0, 0, 0];
+    reviews.forEach((r) => {
+      const idx = Math.round(r.rating) - 1;
+      if (idx >= 0 && idx < 5) counts[idx]++;
+    });
+    return counts;
+  }, [reviews]);
+
+  const maxCount = Math.max(...distribution, 1);
+
+  const filtered =
+    filter === null
+      ? reviews
+      : reviews.filter((r) => Math.round(r.rating) === filter);
 
   return (
     <Modal
@@ -265,110 +383,220 @@ function OverviewModal({
       animationType="slide"
       onRequestClose={onClose}
     >
-      <View style={modalStyles.overlay}>
-        <View style={[modalStyles.sheet, { paddingBottom: 32 }]}>
-          <Text style={modalStyles.title}>Account Overview</Text>
+      <View style={ovStyles.overlay}>
+        <View style={ovStyles.sheet}>
+          {/* Handle */}
+          <View style={ovStyles.handle} />
 
-          {/* Summary */}
-          <View style={overviewStyles.summaryRow}>
-            <View style={overviewStyles.summaryCard}>
-              <Text style={overviewStyles.summaryNum}>
+          {/* ── Rating hero ── */}
+          <View style={ovStyles.hero}>
+            <View style={ovStyles.heroLeft}>
+              <Text style={ovStyles.heroNumber}>
                 {ratingCount > 0 ? ratingValue.toFixed(1) : "—"}
               </Text>
-              <Text style={overviewStyles.summaryLabel}>Avg. Rating</Text>
-            </View>
-            <View style={overviewStyles.summaryCard}>
-              <Text style={overviewStyles.summaryNum}>{ratingCount}</Text>
-              <Text style={overviewStyles.summaryLabel}>Reviews</Text>
-            </View>
-            <View style={overviewStyles.summaryCard}>
-              <Text style={overviewStyles.summaryNum}>
-                {userData?.tradesCount ?? 0}
+              <View style={ovStyles.heroStars}>
+                {Array.from({ length: MAX_RATING }, (_, i) => {
+                  const filled = i + 1 <= Math.floor(ratingValue);
+                  const half =
+                    !filled && i < ratingValue && ratingValue % 1 >= 0.5;
+                  return (
+                    <Ionicons
+                      key={i}
+                      name={
+                        filled ? "star" : half ? "star-half" : "star-outline"
+                      }
+                      size={18}
+                      color={filled || half ? STAR_FILLED : "#E0E0E0"}
+                    />
+                  );
+                })}
+              </View>
+              <Text style={ovStyles.heroCount}>
+                {ratingCount} {ratingCount === 1 ? "review" : "reviews"}
               </Text>
-              <Text style={overviewStyles.summaryLabel}>Trades</Text>
+            </View>
+
+            <View style={ovStyles.heroDivider} />
+
+            {/* Bar chart (real distribution) */}
+            <View style={ovStyles.heroBars}>
+              {[5, 4, 3, 2, 1].map((star) => {
+                const count = distribution[star - 1];
+                const pct = ratingCount > 0 ? count / maxCount : 0;
+                return (
+                  <TouchableOpacity
+                    key={star}
+                    style={ovStyles.heroBarRow}
+                    onPress={() => setFilter(filter === star ? null : star)}
+                    activeOpacity={0.7}
+                  >
+                    <Text
+                      style={[
+                        ovStyles.heroBarLabel,
+                        filter === star && ovStyles.heroBarLabelActive,
+                      ]}
+                    >
+                      {star}
+                    </Text>
+                    <Ionicons
+                      name="star"
+                      size={9}
+                      color={filter === star ? STAR_FILLED : "#CCC"}
+                      style={{ marginRight: 5 }}
+                    />
+                    <View style={ovStyles.heroBarTrack}>
+                      <View
+                        style={[
+                          ovStyles.heroBarFill,
+                          {
+                            width: `${pct * 100}%`,
+                            backgroundColor:
+                              star >= 4
+                                ? "#27AE60"
+                                : star === 3
+                                  ? GOLD
+                                  : "#E67E22",
+                          },
+                        ]}
+                      />
+                    </View>
+                    <Text style={ovStyles.heroBarCount}>{count}</Text>
+                  </TouchableOpacity>
+                );
+              })}
             </View>
           </View>
 
-          <Text style={overviewStyles.sectionTitle}>Recent Reviews</Text>
+          {/* ── Filter pills ── */}
+          {reviews.length > 0 && (
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={ovStyles.filterRow}
+            >
+              <TouchableOpacity
+                style={[
+                  ovStyles.filterPill,
+                  filter === null && ovStyles.filterPillActive,
+                ]}
+                onPress={() => setFilter(null)}
+              >
+                <Text
+                  style={[
+                    ovStyles.filterPillText,
+                    filter === null && ovStyles.filterPillTextActive,
+                  ]}
+                >
+                  All
+                </Text>
+              </TouchableOpacity>
+              {[5, 4, 3, 2, 1].map((s) => (
+                <TouchableOpacity
+                  key={s}
+                  style={[
+                    ovStyles.filterPill,
+                    filter === s && ovStyles.filterPillActive,
+                  ]}
+                  onPress={() => setFilter(filter === s ? null : s)}
+                >
+                  <Ionicons
+                    name="star"
+                    size={11}
+                    color={filter === s ? "#fff" : STAR_FILLED}
+                    style={{ marginRight: 3 }}
+                  />
+                  <Text
+                    style={[
+                      ovStyles.filterPillText,
+                      filter === s && ovStyles.filterPillTextActive,
+                    ]}
+                  >
+                    {s}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+          )}
 
+          {/* ── Reviews list ── */}
           {loadingReviews ? (
             <ActivityIndicator
               color={DARK_BLUE}
-              style={{ marginVertical: 20 }}
+              style={{ marginVertical: 24 }}
             />
-          ) : reviews.length === 0 ? (
-            <View style={overviewStyles.emptyBox}>
-              <Ionicons name="chatbubble-outline" size={36} color="#D8D8D8" style={{ marginBottom: 8 }} />
-              <Text style={overviewStyles.emptyText}>
-                No reviews yet. Complete trades to earn ratings from other
-                traders.
+          ) : filtered.length === 0 ? (
+            <View style={ovStyles.empty}>
+              <Ionicons name="chatbubble-outline" size={36} color="#D8D8D8" />
+              <Text style={ovStyles.emptyText}>
+                {filter !== null
+                  ? `No ${filter}-star reviews yet`
+                  : "No reviews yet. Complete trades to earn ratings."}
               </Text>
             </View>
           ) : (
             <ScrollView
-              style={{ maxHeight: 340 }}
+              style={{ flex: 1 }}
               showsVerticalScrollIndicator={false}
+              contentContainerStyle={{ paddingBottom: 20 }}
             >
-              {reviews.map((r) => (
-                <View key={r.id} style={overviewStyles.reviewCard}>
-                  <View style={overviewStyles.reviewHeader}>
+              {filtered.map((r) => (
+                <View key={r.id} style={ovStyles.reviewCard}>
+                  <View style={ovStyles.reviewTop}>
                     {r.reviewerAvatar ? (
                       <Image
                         source={{ uri: r.reviewerAvatar }}
-                        style={overviewStyles.reviewAvatar}
+                        style={ovStyles.avatar}
                       />
                     ) : (
-                      <View
-                        style={[
-                          overviewStyles.reviewAvatar,
-                          overviewStyles.reviewAvatarPlaceholder,
-                        ]}
-                      >
-                        <Text style={overviewStyles.reviewAvatarInitial}>
+                      <View style={[ovStyles.avatar, ovStyles.avatarFallback]}>
+                        <Text style={ovStyles.avatarInitial}>
                           {(r.reviewerName ?? "?")[0].toUpperCase()}
                         </Text>
                       </View>
                     )}
                     <View style={{ flex: 1 }}>
-                      <Text style={overviewStyles.reviewerName}>
+                      <Text style={ovStyles.reviewerName}>
                         {r.reviewerName}
                       </Text>
-                      <View style={overviewStyles.reviewStars}>
+                      <View style={ovStyles.reviewStars}>
                         {Array.from({ length: MAX_RATING }, (_, i) => (
-                          <Text
+                          <Ionicons
                             key={i}
-                            style={{
-                              fontSize: 13,
-                              color:
-                                i + 1 <= r.rating ? STAR_FILLED : STAR_EMPTY,
-                            }}
-                          >
-                            ★
-                          </Text>
+                            name={i + 1 <= r.rating ? "star" : "star-outline"}
+                            size={13}
+                            color={i + 1 <= r.rating ? STAR_FILLED : STAR_EMPTY}
+                          />
                         ))}
+                        <Text style={ovStyles.reviewRatingNum}>
+                          {r.rating.toFixed(1)}
+                        </Text>
                       </View>
                     </View>
                     {r.createdAt?.toDate && (
-                      <Text style={overviewStyles.reviewDate}>
+                      <Text style={ovStyles.reviewDate}>
                         {r.createdAt.toDate().toLocaleDateString("en-PH", {
                           month: "short",
                           day: "numeric",
+                          year: "numeric",
                         })}
                       </Text>
                     )}
                   </View>
                   {r.comment ? (
-                    <Text style={overviewStyles.reviewComment}>
-                      {r.comment}
-                    </Text>
-                  ) : null}
+                    <View style={ovStyles.commentBox}>
+                      <Text style={ovStyles.commentQuote}>"</Text>
+                      <Text style={ovStyles.comment}>{r.comment}</Text>
+                    </View>
+                  ) : (
+                    <Text style={ovStyles.noComment}>No written review</Text>
+                  )}
                 </View>
               ))}
             </ScrollView>
           )}
 
-          <TouchableOpacity style={modalStyles.cancelBtn} onPress={onClose}>
-            <Text style={modalStyles.cancelText}>Close</Text>
+          <TouchableOpacity style={ovStyles.closeBtn} onPress={onClose}>
+            <Text style={ovStyles.closeBtnText}>Close</Text>
           </TouchableOpacity>
         </View>
       </View>
@@ -395,7 +623,6 @@ function FeedbackModal({
       );
       return;
     }
-    // TODO: send feedback to your backend / Firestore
     setSubmitted(true);
     setTimeout(() => {
       setSubmitted(false);
@@ -519,7 +746,6 @@ function ReportModal({
       );
       return;
     }
-    // TODO: upload photos and send report to your backend / Firestore
     setSubmitted(true);
     setTimeout(() => {
       reset();
@@ -646,6 +872,137 @@ function ReportModal({
   );
 }
 
+// ─── Recent Reviews Section ───────────────────────────────────────────────────
+function RecentReviewsSection({
+  userId,
+  ratingCount,
+  onSeeAll,
+}: {
+  userId: string | null;
+  ratingCount: number;
+  onSeeAll: () => void;
+}) {
+  const [reviews, setReviews] = useState<Review[]>([]);
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    if (!userId) return;
+    setLoading(true);
+
+    const reviewsRef = collection(db, "users", userId, "reviews");
+    const q = query(reviewsRef, orderBy("createdAt", "desc"), limit(3));
+
+    getDocs(q)
+      .then((snap) => {
+        setReviews(
+          snap.docs.map((d) => ({
+            id: d.id,
+            ...(d.data() as Omit<Review, "id">),
+          })),
+        );
+      })
+      .catch((e) => console.error("RecentReviewsSection fetch error:", e))
+      .finally(() => setLoading(false));
+  }, [userId]);
+
+  return (
+    <View style={reviewSectionStyles.wrapper}>
+      {/* Header row */}
+      <View style={reviewSectionStyles.header}>
+        <Text style={reviewSectionStyles.title}>Ratings & Reviews</Text>
+        {ratingCount > 0 && (
+          <View style={reviewSectionStyles.countPill}>
+            <Text style={reviewSectionStyles.countPillText}>{ratingCount}</Text>
+          </View>
+        )}
+      </View>
+
+      {loading ? (
+        <ActivityIndicator
+          color={DARK_BLUE}
+          style={{ marginVertical: 16 }}
+          size="small"
+        />
+      ) : reviews.length === 0 ? (
+        <View style={reviewSectionStyles.emptyBox}>
+          <Ionicons name="star-outline" size={28} color="#D8D8D8" />
+          <Text style={reviewSectionStyles.emptyText}>
+            No reviews yet. Complete trades to earn ratings.
+          </Text>
+        </View>
+      ) : (
+        <>
+          {reviews.map((r) => (
+            <View key={r.id} style={reviewSectionStyles.reviewRow}>
+              {r.reviewerAvatar ? (
+                <Image
+                  source={{ uri: r.reviewerAvatar }}
+                  style={reviewSectionStyles.avatar}
+                />
+              ) : (
+                <View
+                  style={[
+                    reviewSectionStyles.avatar,
+                    reviewSectionStyles.avatarPlaceholder,
+                  ]}
+                >
+                  <Text style={reviewSectionStyles.avatarInitial}>
+                    {(r.reviewerName ?? "?")[0].toUpperCase()}
+                  </Text>
+                </View>
+              )}
+
+              <View style={reviewSectionStyles.reviewBody}>
+                <View style={reviewSectionStyles.reviewMeta}>
+                  <Text style={reviewSectionStyles.reviewerName}>
+                    {r.reviewerName}
+                  </Text>
+                  <View style={reviewSectionStyles.starsRow}>
+                    {Array.from({ length: MAX_RATING }, (_, i) => (
+                      <Ionicons
+                        key={i}
+                        name={i + 1 <= r.rating ? "star" : "star-outline"}
+                        size={12}
+                        color={i + 1 <= r.rating ? STAR_FILLED : STAR_EMPTY}
+                      />
+                    ))}
+                  </View>
+                  {r.createdAt?.toDate && (
+                    <Text style={reviewSectionStyles.date}>
+                      {r.createdAt.toDate().toLocaleDateString("en-PH", {
+                        month: "short",
+                        day: "numeric",
+                      })}
+                    </Text>
+                  )}
+                </View>
+                {r.comment ? (
+                  <Text style={reviewSectionStyles.comment} numberOfLines={2}>
+                    {r.comment}
+                  </Text>
+                ) : null}
+              </View>
+            </View>
+          ))}
+
+          {ratingCount > 3 && (
+            <TouchableOpacity
+              style={reviewSectionStyles.seeAllBtn}
+              onPress={onSeeAll}
+              activeOpacity={0.7}
+            >
+              <Text style={reviewSectionStyles.seeAllText}>
+                See all {ratingCount} reviews
+              </Text>
+              <Ionicons name="chevron-forward" size={14} color={DARK_BLUE} />
+            </TouchableOpacity>
+          )}
+        </>
+      )}
+    </View>
+  );
+}
+
 // ─── Main Component ───────────────────────────────────────────────────────────
 export default function ProfileScreen() {
   const [userData, setUserData] = useState<UserData | null>(null);
@@ -656,98 +1013,133 @@ export default function ProfileScreen() {
   const [feedbackVisible, setFeedbackVisible] = useState(false);
   const [reportVisible, setReportVisible] = useState(false);
   const [overviewVisible, setOverviewVisible] = useState(false);
+  // Real review data fetched once — shared by RatingHeroCard and RecentReviewsSection
+  const [recentReviews, setRecentReviews] = useState<Review[]>([]);
+  const [reviewDistribution, setReviewDistribution] = useState<number[]>([
+    0, 0, 0, 0, 0,
+  ]);
   const router = useRouter();
 
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const slideAnim = useRef(new Animated.Value(30)).current;
+  const hasAnimated = useRef(false);
 
-  const fetchProfile = useCallback(
-    async (currentUser: User) => {
-      setLoading(true);
-      try {
-        const docRef = doc(db, "users", currentUser.uid);
-        const docSnap = await getDoc(docRef);
+  const animateIn = useCallback(() => {
+    if (hasAnimated.current) return;
+    hasAnimated.current = true;
+    Animated.parallel([
+      Animated.timing(fadeAnim, {
+        toValue: 1,
+        duration: 400,
+        useNativeDriver: true,
+      }),
+      Animated.spring(slideAnim, { toValue: 0, useNativeDriver: true }),
+    ]).start();
+  }, [fadeAnim, slideAnim]);
 
-        if (docSnap.exists()) {
-          const data = docSnap.data();
-          // Calculate saved count from savedItems array
-          const savedItems = data.savedItems || [];
-          const savedCount = Array.isArray(savedItems) ? savedItems.length : 0;
-          
-          setUserData({
-            ...data,
-            // FIX: ensure rating is always a proper number
-            rating:
-              typeof data.rating === "number"
-                ? data.rating
-                : parseFloat(data.rating) || 0,
-            ratingCount:
-              typeof data.ratingCount === "number" ? data.ratingCount : 0,
-            // FIX: calculate saved count from savedItems array
-            savedCount: savedCount,
-          } as UserData);
-          setError(null);
-        } else {
-          setError("Profile not found in database.");
+  useEffect(() => {
+    const unsubAuth = onAuthStateChanged(auth, (currentUser: User | null) => {
+      setAuthInitialized(true);
+
+      if (!currentUser) {
+        router.replace("/login");
+        return;
+      }
+
+      setUserId(currentUser.uid);
+
+      const userRef = doc(db, "users", currentUser.uid);
+
+      const unsubDoc = onSnapshot(
+        userRef,
+        (snap) => {
+          if (snap.exists()) {
+            const data = snap.data();
+            const savedItems = data.savedItems ?? [];
+            setUserData({
+              ...data,
+              rating:
+                typeof data.rating === "number"
+                  ? data.rating
+                  : parseFloat(data.rating) || 0,
+              ratingCount:
+                typeof data.ratingCount === "number" ? data.ratingCount : 0,
+              tradesCount:
+                typeof data.tradesCount === "number" ? data.tradesCount : 0,
+              exchangedCount:
+                typeof data.exchangedCount === "number"
+                  ? data.exchangedCount
+                  : 0,
+              savedCount: Array.isArray(savedItems) ? savedItems.length : 0,
+            } as UserData);
+            setError(null);
+          } else {
+            setUserData({
+              email: currentUser.email ?? undefined,
+              username: currentUser.displayName ?? "Unknown User",
+              rating: 0,
+              ratingCount: 0,
+              tradesCount: 0,
+              exchangedCount: 0,
+              savedCount: 0,
+            });
+          }
+          setLoading(false);
+          animateIn();
+        },
+        (err) => {
+          const isOffline =
+            err?.code === "unavailable" ||
+            /client is offline/i.test(err?.message ?? "");
+          setError(
+            isOffline
+              ? "You appear to be offline. Showing cached data."
+              : "Failed to load profile.",
+          );
           setUserData({
             email: currentUser.email ?? undefined,
-            username: currentUser.displayName ?? "Unknown User",
+            username: currentUser.displayName ?? "Offline User",
             rating: 0,
             ratingCount: 0,
             tradesCount: 0,
             exchangedCount: 0,
             savedCount: 0,
           });
-        }
-      } catch (err: any) {
-        const isOffline =
-          err?.code === "unavailable" ||
-          /client is offline/i.test(err?.message ?? "");
-        setError(
-          isOffline
-            ? "You appear to be offline. Showing cached data."
-            : "Failed to load profile.",
-        );
-        setUserData({
-          email: currentUser.email ?? undefined,
-          username: currentUser.displayName ?? "Offline User",
-          rating: 0,
-          ratingCount: 0,
-          tradesCount: 0,
-          exchangedCount: 0,
-          savedCount: 0,
-        });
-      } finally {
-        setLoading(false);
-        // Animate in
-        Animated.parallel([
-          Animated.timing(fadeAnim, {
-            toValue: 1,
-            duration: 400,
-            useNativeDriver: true,
-          }),
-          Animated.spring(slideAnim, { toValue: 0, useNativeDriver: true }),
-        ]).start();
-      }
-    },
-    [fadeAnim, slideAnim],
-  );
+          setLoading(false);
+          animateIn();
+        },
+      );
+
+      return unsubDoc;
+    });
+
+    return () => unsubAuth();
+  }, [router, animateIn]);
 
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(
-      auth,
-      async (currentUser: User | null) => {
-        setAuthInitialized(true);
-        if (!currentUser) {
-          router.replace("/login");
-          return;
-        }
-        setUserId(currentUser.uid);
-        await fetchProfile(currentUser);
-      },
+    if (!userId) return;
+
+    const q = query(
+      collection(db, "users", userId, "reviews"),
+      orderBy("createdAt", "desc"),
+      limit(50),
     );
-    return () => unsubscribe();
-  }, [router, fetchProfile]);
+
+    getDocs(q).then((snap) => {
+      const fetched = snap.docs.map((d) => ({
+        id: d.id,
+        ...(d.data() as Omit<Review, "id">),
+      }));
+      setRecentReviews(fetched);
+
+      const counts = [0, 0, 0, 0, 0];
+      fetched.forEach((r) => {
+        const idx = Math.round(r.rating) - 1;
+        if (idx >= 0 && idx < 5) counts[idx]++;
+      });
+      setReviewDistribution(counts);
+    });
+  }, [userId]);
 
   const handleLogout = async () => {
     try {
@@ -758,21 +1150,10 @@ export default function ProfileScreen() {
     }
   };
 
-  const handleRetry = async () => {
-    const currentUser = auth.currentUser;
-    if (!currentUser) {
-      router.replace("/login");
-      return;
-    }
-    setError(null);
-    await fetchProfile(currentUser);
-  };
-
   const handleHelpCenter = () => {
     router.push("/Faq" as any);
   };
 
-  // FIX: Navigate to saved posts screen
   const handleSavedPress = () => {
     router.push("/saved-posts" as any);
   };
@@ -789,12 +1170,14 @@ export default function ProfileScreen() {
   if (error && !userData) {
     return (
       <View style={styles.errorContainer}>
-        <Ionicons name="alert-circle" size={48} color={ACCENT_RED} style={{ marginBottom: 12 }} />
+        <Ionicons
+          name="alert-circle"
+          size={48}
+          color={ACCENT_RED}
+          style={{ marginBottom: 12 }}
+        />
         <Text style={styles.errorTitle}>Something went wrong</Text>
         <Text style={styles.errorMessage}>{error}</Text>
-        <TouchableOpacity style={styles.retryButton} onPress={handleRetry}>
-          <Text style={styles.retryText}>Try Again</Text>
-        </TouchableOpacity>
         <TouchableOpacity
           style={styles.goLoginButton}
           onPress={() => router.replace("/login")}
@@ -819,7 +1202,6 @@ export default function ProfileScreen() {
         visible={reportVisible}
         onClose={() => setReportVisible(false)}
       />
-      {/* FIX: Overview modal now shows real reviews */}
       <OverviewModal
         visible={overviewVisible}
         userId={userId}
@@ -847,11 +1229,9 @@ export default function ProfileScreen() {
           style={{ opacity: fadeAnim, transform: [{ translateY: slideAnim }] }}
         >
           {error && (
-            <TouchableOpacity style={styles.errorBanner} onPress={handleRetry}>
-              <Text style={styles.errorBannerText}>
-                ⚠️ {error} Tap to retry.
-              </Text>
-            </TouchableOpacity>
+            <View style={styles.errorBanner}>
+              <Text style={styles.errorBannerText}>⚠️ {error}</Text>
+            </View>
           )}
 
           {/* ── Avatar + Identity ── */}
@@ -884,35 +1264,24 @@ export default function ProfileScreen() {
               {userData?.phone ?? userData?.email ?? ""}
             </Text>
 
-            {/* FIX: Bio displayed on profile */}
             {userData?.bio ? (
               <Text style={styles.bioText}>{userData.bio}</Text>
             ) : null}
 
-            {/* ── Rating Card ── */}
-            <View style={styles.ratingSection}>
-              <Text style={styles.ratingTitle}>Trader Rating</Text>
-              {/* FIX: Pass ratingCount so StarRating shows correct empty/filled state */}
-              <StarRating
-                rating={ratingValue}
-                ratingCount={ratingCount}
-                size={24}
-              />
-              {ratingCount === 0 && (
-                <Text style={styles.ratingNoData}>
-                  Complete trades to start earning ratings.
-                </Text>
-              )}
-            </View>
+            {/* ── Rating Hero Card ── */}
+            <RatingHeroCard
+              rating={ratingValue}
+              ratingCount={ratingCount}
+              distribution={reviewDistribution}
+            />
 
             {/* ── Overview Badge ── */}
-            {/* FIX: Opens the Overview modal instead of routing */}
             <TouchableOpacity
               style={styles.overviewBadge}
               onPress={() => setOverviewVisible(true)}
               activeOpacity={0.8}
             >
-              <Text style={styles.overviewText}>Overview</Text>
+              <Text style={styles.overviewText}>View All Reviews</Text>
               <Ionicons name="star" size={18} color="#FFB800" />
             </TouchableOpacity>
           </View>
@@ -931,7 +1300,6 @@ export default function ProfileScreen() {
               count={userData?.exchangedCount ?? 0}
             />
             <View style={styles.statDivider} />
-            {/* FIX: Saved stat card is now tappable → navigates to saved posts */}
             <StatCard
               iconName="bookmark"
               label="Saved"
@@ -939,6 +1307,13 @@ export default function ProfileScreen() {
               onPress={handleSavedPress}
             />
           </View>
+
+          {/* ── Recent Reviews ── */}
+          <RecentReviewsSection
+            userId={userId}
+            ratingCount={ratingCount}
+            onSeeAll={() => setOverviewVisible(true)}
+          />
 
           {/* ── Settings ── */}
           <Text style={styles.sectionTitle}>Settings</Text>
@@ -1005,7 +1380,6 @@ const styles = StyleSheet.create({
     padding: 32,
     backgroundColor: "#F4F5F9",
   },
-  errorIcon: { fontSize: 48, marginBottom: 12 },
   errorTitle: {
     fontSize: 20,
     fontWeight: "800",
@@ -1019,14 +1393,6 @@ const styles = StyleSheet.create({
     marginBottom: 24,
     lineHeight: 20,
   },
-  retryButton: {
-    backgroundColor: DARK_BLUE,
-    paddingVertical: 14,
-    paddingHorizontal: 40,
-    borderRadius: 12,
-    marginBottom: 12,
-  },
-  retryText: { color: "#fff", fontWeight: "700", fontSize: 15 },
   goLoginButton: {
     paddingVertical: 12,
     paddingHorizontal: 32,
@@ -1058,7 +1424,6 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     alignItems: "center",
   },
-  editButtonText: { fontSize: 16 },
   scrollContent: {
     paddingBottom: 40,
   },
@@ -1130,7 +1495,6 @@ const styles = StyleSheet.create({
     fontSize: 13.5,
     marginTop: 3,
   },
-  // FIX: Bio text style
   bioText: {
     color: "#555",
     fontSize: 13.5,
@@ -1139,36 +1503,6 @@ const styles = StyleSheet.create({
     lineHeight: 19,
     paddingHorizontal: 12,
     fontStyle: "italic",
-  },
-  ratingSection: {
-    alignItems: "center",
-    marginTop: 16,
-    marginBottom: 4,
-    backgroundColor: "#fff",
-    borderRadius: 14,
-    paddingVertical: 16,
-    paddingHorizontal: 24,
-    elevation: 2,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.07,
-    shadowRadius: 6,
-    width: "100%",
-  },
-  ratingTitle: {
-    fontSize: 11,
-    fontWeight: "700",
-    color: "#888",
-    textTransform: "uppercase",
-    letterSpacing: 1,
-    marginBottom: 8,
-  },
-  ratingNoData: {
-    fontSize: 12,
-    color: "#AAAAAA",
-    marginTop: 8,
-    fontStyle: "italic",
-    textAlign: "center",
   },
   overviewBadge: {
     flexDirection: "row",
@@ -1191,7 +1525,6 @@ const styles = StyleSheet.create({
     fontSize: 14,
     letterSpacing: 0.3,
   },
-  overviewStar: { fontSize: 14 },
   statsRow: {
     flexDirection: "row",
     justifyContent: "space-between",
@@ -1225,7 +1558,6 @@ const styles = StyleSheet.create({
     textTransform: "uppercase",
     letterSpacing: 0.5,
   },
-  statEmoji: { fontSize: 26, marginVertical: 2 },
   statCountNum: {
     fontSize: 17,
     fontWeight: "800",
@@ -1236,7 +1568,6 @@ const styles = StyleSheet.create({
     color: "#999",
     fontWeight: "500",
   },
-  // FIX: "tap to view" hint on tappable stat cards
   statTapHint: {
     fontSize: 9,
     color: GOLD,
@@ -1317,26 +1648,90 @@ const styles = StyleSheet.create({
 
 // ─── Rating Sub-Styles ────────────────────────────────────────────────────────
 const ratingStyles = StyleSheet.create({
-  wrapper: { alignItems: "center", gap: 6 },
-  starsRow: { flexDirection: "row", gap: 3 },
-  star: { lineHeight: 30 },
-  ratingInfo: { flexDirection: "row", alignItems: "baseline", gap: 6 },
-  ratingNumber: {
-    fontSize: 20,
+  wrapper: { alignItems: "center" },
+  starsRow: { flexDirection: "row" },
+});
+
+// ─── Rating Hero Card Styles ──────────────────────────────────────────────────
+const heroStyles = StyleSheet.create({
+  card: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginTop: 16,
+    marginBottom: 4,
+    backgroundColor: "#fff",
+    borderRadius: 16,
+    paddingVertical: 18,
+    paddingHorizontal: 20,
+    elevation: 2,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.07,
+    shadowRadius: 6,
+    width: "100%",
+  },
+  left: {
+    alignItems: "center",
+    width: 90,
+    gap: 4,
+  },
+  bigNumber: {
+    fontSize: 42,
     fontWeight: "800",
     color: "#1A1A2E",
+    lineHeight: 46,
+    letterSpacing: -1,
   },
-  ratingCount: {
-    fontSize: 12,
+  starsRow: {
+    flexDirection: "row",
+    gap: 2,
+  },
+  countLabel: {
+    fontSize: 11,
     color: "#AAAAAA",
     fontWeight: "500",
+    textAlign: "center",
+    marginTop: 2,
   },
-  // FIX: Style for the empty rating state
-  ratingEmpty: {
-    fontSize: 14,
-    color: "#CCCCCC",
-    fontWeight: "500",
-    fontStyle: "italic",
+  divider: {
+    width: 1,
+    height: 70,
+    backgroundColor: "#ECECEC",
+    marginHorizontal: 16,
+  },
+  bars: {
+    flex: 1,
+    gap: 5,
+  },
+  barRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 2,
+  },
+  barLabel: {
+    fontSize: 11,
+    color: "#888",
+    fontWeight: "600",
+    width: 10,
+    textAlign: "right",
+    marginRight: 2,
+  },
+  barTrack: {
+    flex: 1,
+    height: 6,
+    backgroundColor: "#F0F0F0",
+    borderRadius: 3,
+    overflow: "hidden",
+  },
+  barFill: {
+    height: "100%",
+    borderRadius: 3,
+  },
+  barPct: {
+    fontSize: 10,
+    color: "#AAAAAA",
+    width: 30,
+    textAlign: "right",
   },
 });
 
@@ -1472,12 +1867,6 @@ const reportStyles = StyleSheet.create({
     alignItems: "center",
     elevation: 3,
   },
-  photoRemoveText: {
-    color: "#fff",
-    fontSize: 10,
-    fontWeight: "800",
-    lineHeight: 12,
-  },
   photoAddBtn: {
     width: 72,
     height: 72,
@@ -1502,103 +1891,356 @@ const reportStyles = StyleSheet.create({
   },
 });
 
-// ─── Overview Modal Styles ────────────────────────────────────────────────────
-const overviewStyles = StyleSheet.create({
-  summaryRow: {
-    flexDirection: "row",
-    gap: 10,
-    marginBottom: 20,
-    marginTop: 4,
-  },
-  summaryCard: {
+// ─── Overview Modal Styles (redesigned) ───────────────────────────────────────
+const ovStyles = StyleSheet.create({
+  overlay: {
     flex: 1,
-    backgroundColor: "#F4F5F9",
-    borderRadius: 12,
-    paddingVertical: 12,
+    backgroundColor: "rgba(0,0,0,0.45)",
+    justifyContent: "flex-end",
+  },
+  sheet: {
+    backgroundColor: "#fff",
+    borderTopLeftRadius: 28,
+    borderTopRightRadius: 28,
+    paddingHorizontal: 20,
+    paddingBottom: 12,
+    maxHeight: "88%",
+    flex: 1,
+  },
+  handle: {
+    width: 40,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: "#DDD",
+    alignSelf: "center",
+    marginTop: 12,
+    marginBottom: 20,
+  },
+  hero: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#F7F8FC",
+    borderRadius: 16,
+    padding: 18,
+    marginBottom: 16,
+  },
+  heroLeft: {
+    alignItems: "center",
+    width: 88,
+    gap: 4,
+  },
+  heroNumber: {
+    fontSize: 46,
+    fontWeight: "800",
+    color: "#1A1A2E",
+    lineHeight: 50,
+    letterSpacing: -1,
+  },
+  heroStars: {
+    flexDirection: "row",
+    gap: 2,
+  },
+  heroCount: {
+    fontSize: 11,
+    color: "#AAAAAA",
+    fontWeight: "500",
+    marginTop: 2,
+    textAlign: "center",
+  },
+  heroDivider: {
+    width: 1,
+    height: 72,
+    backgroundColor: "#E0E0E0",
+    marginHorizontal: 16,
+  },
+  heroBars: {
+    flex: 1,
+    gap: 6,
+  },
+  heroBarRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 2,
+  },
+  heroBarLabel: {
+    fontSize: 11,
+    color: "#AAAAAA",
+    fontWeight: "600",
+    width: 10,
+    textAlign: "right",
+    marginRight: 2,
+  },
+  heroBarLabelActive: {
+    color: "#1A1A2E",
+  },
+  heroBarTrack: {
+    flex: 1,
+    height: 7,
+    backgroundColor: "#E8E8E8",
+    borderRadius: 4,
+    overflow: "hidden",
+  },
+  heroBarFill: {
+    height: "100%",
+    borderRadius: 4,
+  },
+  heroBarCount: {
+    fontSize: 10,
+    color: "#AAAAAA",
+    width: 18,
+    textAlign: "right",
+  },
+  filterRow: {
+    flexDirection: "row",
+    gap: 8,
+    paddingBottom: 14,
+  },
+  filterPill: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 14,
+    paddingVertical: 6,
+    borderRadius: 20,
+    backgroundColor: "#F0F0F0",
+    borderWidth: 1.5,
+    borderColor: "transparent",
+  },
+  filterPillActive: {
+    backgroundColor: DARK_BLUE,
+    borderColor: DARK_BLUE,
+  },
+  filterPillText: {
+    fontSize: 13,
+    fontWeight: "600",
+    color: "#555",
+  },
+  filterPillTextActive: {
+    color: "#fff",
+  },
+  reviewCard: {
+    backgroundColor: "#F9F9FB",
+    borderRadius: 14,
+    padding: 14,
+    marginBottom: 10,
+  },
+  reviewTop: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: 10,
+    marginBottom: 8,
+  },
+  avatar: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: "#E8E8E8",
+  },
+  avatarFallback: {
+    backgroundColor: DARK_BLUE,
+    justifyContent: "center",
     alignItems: "center",
   },
-  summaryNum: {
-    fontSize: 22,
+  avatarInitial: {
+    color: "#fff",
+    fontSize: 15,
     fontWeight: "800",
-    color: DARK_BLUE,
   },
-  summaryLabel: {
+  reviewerName: {
+    fontSize: 14,
+    fontWeight: "700",
+    color: "#1A1A2E",
+    marginBottom: 3,
+  },
+  reviewStars: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 2,
+  },
+  reviewRatingNum: {
     fontSize: 11,
     color: "#888",
     fontWeight: "600",
-    marginTop: 2,
-    textTransform: "uppercase",
-    letterSpacing: 0.5,
+    marginLeft: 4,
   },
-  sectionTitle: {
-    fontSize: 13,
+  reviewDate: {
+    fontSize: 11,
+    color: "#AAAAAA",
+    fontWeight: "500",
+    marginLeft: "auto",
+    flexShrink: 0,
+  },
+  commentBox: {
+    flexDirection: "row",
+    gap: 4,
+    paddingLeft: 48,
+  },
+  commentQuote: {
+    fontSize: 24,
+    color: "#E0E0E0",
     fontWeight: "800",
+    lineHeight: 22,
+    marginTop: -4,
+  },
+  comment: {
+    flex: 1,
+    fontSize: 13,
+    color: "#555",
+    lineHeight: 19,
+    fontStyle: "italic",
+  },
+  noComment: {
+    fontSize: 12,
+    color: "#CCCCCC",
+    paddingLeft: 48,
+    fontStyle: "italic",
+  },
+  empty: {
+    alignItems: "center",
+    paddingVertical: 40,
+    gap: 10,
+  },
+  emptyText: {
+    fontSize: 13,
+    color: "#AAAAAA",
+    textAlign: "center",
+    lineHeight: 19,
+    paddingHorizontal: 24,
+    fontStyle: "italic",
+  },
+  closeBtn: {
+    paddingVertical: 14,
+    alignItems: "center",
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: "#ECECEC",
+    marginTop: 4,
+  },
+  closeBtnText: {
+    fontSize: 15,
+    fontWeight: "700",
     color: "#888",
-    textTransform: "uppercase",
-    letterSpacing: 0.8,
-    marginBottom: 12,
+  },
+});
+
+// ─── Recent Reviews Section Styles ───────────────────────────────────────────
+const reviewSectionStyles = StyleSheet.create({
+  wrapper: {
+    marginHorizontal: 16,
+    backgroundColor: "#fff",
+    borderRadius: 14,
+    padding: 16,
+    marginBottom: 20,
+    elevation: 2,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.07,
+    shadowRadius: 6,
+  },
+  header: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    marginBottom: 14,
+  },
+  title: {
+    fontSize: 15,
+    fontWeight: "800",
+    color: "#1A1A2E",
+    letterSpacing: 0.2,
+  },
+  countPill: {
+    backgroundColor: DARK_BLUE,
+    borderRadius: 10,
+    minWidth: 22,
+    height: 22,
+    justifyContent: "center",
+    alignItems: "center",
+    paddingHorizontal: 6,
+  },
+  countPillText: {
+    color: "#fff",
+    fontSize: 11,
+    fontWeight: "700",
   },
   emptyBox: {
     alignItems: "center",
-    paddingVertical: 28,
+    paddingVertical: 20,
     gap: 8,
   },
-  emptyEmoji: { fontSize: 36 },
   emptyText: {
     fontSize: 13,
     color: "#AAAAAA",
     textAlign: "center",
     lineHeight: 18,
-    paddingHorizontal: 16,
     fontStyle: "italic",
+    paddingHorizontal: 8,
   },
-  reviewCard: {
-    backgroundColor: "#F9F9FB",
-    borderRadius: 12,
-    padding: 12,
-    marginBottom: 10,
-  },
-  reviewHeader: {
+  reviewRow: {
     flexDirection: "row",
-    alignItems: "center",
     gap: 10,
-    marginBottom: 6,
+    paddingVertical: 10,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: "#ECECEC",
+    alignItems: "flex-start",
   },
-  reviewAvatar: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: "#ddd",
+  avatar: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: "#E8E8E8",
   },
-  reviewAvatarPlaceholder: {
+  avatarPlaceholder: {
     backgroundColor: DARK_BLUE,
     justifyContent: "center",
     alignItems: "center",
   },
-  reviewAvatarInitial: {
+  avatarInitial: {
     color: "#fff",
-    fontSize: 15,
+    fontSize: 14,
     fontWeight: "800",
+  },
+  reviewBody: {
+    flex: 1,
+    gap: 3,
+  },
+  reviewMeta: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    flexWrap: "wrap",
   },
   reviewerName: {
     fontSize: 13,
     fontWeight: "700",
     color: "#1A1A2E",
   },
-  reviewStars: {
+  starsRow: {
     flexDirection: "row",
     gap: 1,
-    marginTop: 2,
   },
-  reviewDate: {
+  date: {
     fontSize: 11,
     color: "#AAAAAA",
     fontWeight: "500",
+    marginLeft: "auto",
   },
-  reviewComment: {
+  comment: {
     fontSize: 13,
     color: "#555",
     lineHeight: 18,
-    marginLeft: 46,
+  },
+  seeAllBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 4,
+    paddingTop: 12,
+    marginTop: 2,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: "#ECECEC",
+  },
+  seeAllText: {
+    fontSize: 13,
+    fontWeight: "700",
+    color: DARK_BLUE,
   },
 });

@@ -104,7 +104,11 @@ function MediaSlide({
       }}
       minDurationMs={500}
     >
-      <TouchableOpacity activeOpacity={0.9} onPress={onPress} style={slide.wrapper}>
+      <TouchableOpacity
+        activeOpacity={0.9}
+        onPress={onPress}
+        style={slide.wrapper}
+      >
         <Image
           source={{ uri }}
           style={slide.media}
@@ -178,10 +182,14 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
   const mediaItems: string[] = (() => {
     const all: string[] = [];
     if (Array.isArray(item?.images)) {
-      item.images.forEach((u: string) => { if (isValidMediaUrl(u)) all.push(u); });
+      item.images.forEach((u: string) => {
+        if (isValidMediaUrl(u)) all.push(u);
+      });
     }
     if (Array.isArray(item?.videos)) {
-      item.videos.forEach((u: string) => { if (isValidMediaUrl(u)) all.push(u); });
+      item.videos.forEach((u: string) => {
+        if (isValidMediaUrl(u)) all.push(u);
+      });
     }
     if (all.length === 0) {
       if (isValidMediaUrl(item?.image)) all.push(item.image);
@@ -250,7 +258,10 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
       }
       const filename = `BarterBayan_${Date.now()}.jpg`;
       const fileDir = (FileSystem as any).documentDirectory || "";
-      const result = await FileSystem.downloadAsync(current, fileDir + filename);
+      const result = await FileSystem.downloadAsync(
+        current,
+        fileDir + filename,
+      );
       await MediaLibrary.saveToLibraryAsync(result.uri);
       Alert.alert("Success", "Image saved to your gallery");
     } catch {
@@ -289,10 +300,14 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
     });
   };
 
+  // Replace the existing ownerDisplayName line
   const ownerDisplayName =
     ownerInfo?.firstName && ownerInfo?.lastName
       ? `${ownerInfo.firstName} ${ownerInfo.lastName}`
-      : ownerInfo?.username || "Unknown User";
+      : ownerInfo?.username ||
+        ownerInfo?.displayName ||
+        item?.userName || //  fallback to item's own userName field
+        "Unknown User";
 
   // ── Full-screen image viewer ──────────────────────────────────────────────
   const renderFullScreen = () => {
@@ -432,7 +447,10 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
                 <Ionicons name="close" size={26} color={NAVY} />
               </TouchableOpacity>
               <Text style={styles.headerTitle}>Product Details</Text>
-              <TouchableOpacity onPress={handleEnlargePress} style={styles.headerBtn}>
+              <TouchableOpacity
+                onPress={handleEnlargePress}
+                style={styles.headerBtn}
+              >
                 <Ionicons name="expand" size={22} color={NAVY} />
               </TouchableOpacity>
             </View>
@@ -462,7 +480,9 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
                     </Text>
                     {item.description.length > 1000 && (
                       <TouchableOpacity
-                        onPress={() => setDescriptionExpanded(!descriptionExpanded)}
+                        onPress={() =>
+                          setDescriptionExpanded(!descriptionExpanded)
+                        }
                         style={styles.seeMoreButton}
                       >
                         <Text style={styles.seeMoreText}>
@@ -497,22 +517,45 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
                 <View style={styles.ownerCard}>
                   <View style={styles.ownerHeader}>
                     {/* Tappable avatar */}
-                    <TouchableOpacity onPress={handleOwnerPress} activeOpacity={0.8}>
-                      <Image
-                        source={{
-                          uri: ownerInfo.avatarUrl || "https://via.placeholder.com/52",
-                        }}
-                        style={styles.ownerAvatar}
-                        onError={() => {}}
-                      />
+                    <TouchableOpacity
+                      onPress={handleOwnerPress}
+                      activeOpacity={0.8}
+                    >
+                      {ownerInfo?.avatarUrl ? (
+                        <Image
+                          source={{ uri: ownerInfo.avatarUrl }}
+                          style={styles.ownerAvatar}
+                          onError={() => {}}
+                        />
+                      ) : (
+                        <View
+                          style={[
+                            styles.ownerAvatar,
+                            styles.ownerAvatarFallback,
+                          ]}
+                        >
+                          <Text style={styles.ownerAvatarInitial}>
+                            {(ownerDisplayName || "?")[0].toUpperCase()}
+                          </Text>
+                        </View>
+                      )}
                     </TouchableOpacity>
 
                     <View style={styles.ownerDetails}>
                       {/* Tappable name */}
-                      <TouchableOpacity onPress={handleOwnerPress} activeOpacity={0.8}>
+                      <TouchableOpacity
+                        onPress={handleOwnerPress}
+                        activeOpacity={0.8}
+                      >
                         <View style={styles.ownerNameRow}>
-                          <Text style={styles.ownerName}>{ownerDisplayName}</Text>
-                          <Ionicons name="chevron-forward" size={14} color="#aaa" />
+                          <Text style={styles.ownerName}>
+                            {ownerDisplayName}
+                          </Text>
+                          <Ionicons
+                            name="chevron-forward"
+                            size={14}
+                            color="#aaa"
+                          />
                         </View>
                       </TouchableOpacity>
 
@@ -583,7 +626,11 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
                 </View>
               ) : (
                 <View style={styles.ownItemBanner}>
-                  <Ionicons name="information-circle-outline" size={16} color="#888" />
+                  <Ionicons
+                    name="information-circle-outline"
+                    size={16}
+                    color="#888"
+                  />
                   <Text style={styles.ownItemText}>This is your listing.</Text>
                 </View>
               )}
@@ -917,5 +964,15 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: "#888",
     fontWeight: "500",
+  } as TextStyle,
+  ownerAvatarFallback: {
+    backgroundColor: NAVY,
+    justifyContent: "center",
+    alignItems: "center",
+  } as ViewStyle,
+  ownerAvatarInitial: {
+    color: "#fff",
+    fontSize: 20,
+    fontWeight: "800",
   } as TextStyle,
 });

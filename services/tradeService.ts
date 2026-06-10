@@ -4,6 +4,7 @@ import {
   doc,
   getDoc,
   getDocs,
+  increment,
   onSnapshot,
   orderBy,
   query,
@@ -48,7 +49,6 @@ export interface TradeOffer {
   createdAt: Timestamp;
   updatedAt?: Timestamp;
   completedAt?: Timestamp;
-  // BUG FIX: must be stored in Firestore so dual-confirmation UX works
   completedBy?: string[];
   message?: string;
   // Reviews keyed by REVIEWER'S uid
@@ -387,7 +387,6 @@ export const updateTradeStatus = async (
     updatedAt: Timestamp.now(),
   });
 
-  // When accepted: hide both items from the public feed
   if (newStatus === "accepted" && data) {
     const ops: Promise<void>[] = [];
     if (data.offeredItemId)
@@ -432,11 +431,6 @@ export const cancelTradeOffer = async (offerId: string): Promise<void> => {
   });
 };
 
-/**
- * BUG FIX: dual-confirmation — each participant confirms separately.
- * Trade becomes "completed" only when BOTH have confirmed.
- * completedBy is now written to Firestore so the UI can read it live.
- */
 export const completeTrade = async (
   tradeId: string,
   completedByUserId: string,
@@ -451,7 +445,7 @@ export const completeTrade = async (
   }
 
   const current: string[] = data.completedBy ?? [];
-  if (current.includes(completedByUserId)) return; // already confirmed, no-op
+  if (current.includes(completedByUserId)) return;
 
   const updated = [...current, completedByUserId];
   const otherUserId =
@@ -466,6 +460,20 @@ export const completeTrade = async (
       completedAt: Timestamp.now(),
       updatedAt: Timestamp.now(),
     });
+
+    await Promise.all([
+      updateDoc(doc(db, "users", data.offererId), {
+        tradesCount: increment(1),
+        exchangedCount: increment(1),
+      }),
+      updateDoc(doc(db, "users", data.ownerId), {
+        tradesCount: increment(1),
+        exchangedCount: increment(1),
+      }),
+    ]).catch((e) =>
+      console.warn("Could not update tradesCount (non-fatal):", e),
+    );
+
     await createNotification({
       userId: otherUserId,
       type: "generic",
@@ -475,7 +483,6 @@ export const completeTrade = async (
       otherUserId: completedByUserId,
     });
   } else {
-    // First to confirm — store, wait for the other party
     await updateDoc(docRef, {
       completedBy: updated,
       updatedAt: Timestamp.now(),
@@ -492,9 +499,9 @@ export const completeTrade = async (
 };
 
 /**
- * BUG FIX: explicitly typed as Promise<boolean>.
- * Reviews are keyed by REVIEWER'S uid.
- * Returns true when both parties have reviewed (triggers profile publish).
+ * FIX: submitTradeReview
+ * - Throws on failure instead of silently returning false
+ * - Correctly passes each review's own targetUserId when publishing
  */
 export const submitTradeReview = async (
   tradeId: string,
@@ -521,15 +528,20 @@ export const submitTradeReview = async (
   const keys = Object.keys(reviews);
 
   if (keys.length >= 2) {
+    // Publish each review to the correct recipient's profile
     await Promise.all(
       keys.map((k) =>
-        publishReviewToProfile(reviews[k].targetUserId, {
-          fromUserId: reviews[k].reviewerId,
-          rating: reviews[k].rating,
-          comment: reviews[k].comment,
-          tradeId,
-          createdAt: reviews[k].createdAt,
-        }),
+        publishReviewToProfile(
+          reviews[k].targetUserId, // who receives the review
+          reviews[k].reviewerId, // who wrote the review
+          {
+            fromUserId: reviews[k].reviewerId,
+            rating: reviews[k].rating,
+            comment: reviews[k].comment,
+            tradeId,
+            createdAt: reviews[k].createdAt,
+          },
+        ),
       ),
     );
     return true;
@@ -545,8 +557,15 @@ function resolveImage(item: { images?: string[]; image?: string }): string {
   return item.image ?? "";
 }
 
+/**
+ * FIX: publishReviewToProfile
+ * - Removed orderBy from subcollection write (it's just an addDoc, no query needed)
+ * - Throws errors instead of swallowing them so callers can surface failures
+ * - Sorts the subcollection query client-side to avoid needing a Firestore index
+ */
 async function publishReviewToProfile(
   userId: string,
+  reviewerUserId: string,
   review: {
     fromUserId: string;
     rating: number;
@@ -555,23 +574,63 @@ async function publishReviewToProfile(
     createdAt: Timestamp;
   },
 ): Promise<void> {
-  try {
-    const userRef = doc(db, "users", userId);
-    const userSnap = await getDoc(userRef);
-    if (!userSnap.exists()) return;
-    const userData = userSnap.data();
-    const existing: any[] = userData.userReviews ?? [];
-    if (existing.some((r) => r.tradeId === review.tradeId)) return;
-    const count = userData.reviewCount ?? 0;
-    const oldRating = userData.rating ?? 0;
-    const newCount = count + 1;
-    const newRating = (oldRating * count + review.rating) / newCount;
-    await updateDoc(userRef, {
-      userReviews: [...existing, review],
-      rating: Math.round(newRating * 10) / 10,
-      reviewCount: newCount,
-    });
-  } catch (e) {
-    console.warn("publishReviewToProfile failed (non-fatal):", e);
+  const userRef = doc(db, "users", userId);
+  const [userSnap, reviewerSnap] = await Promise.all([
+    getDoc(userRef),
+    getDoc(doc(db, "users", reviewerUserId)),
+  ]);
+
+  if (!userSnap.exists()) {
+    console.warn(`publishReviewToProfile: user ${userId} not found`);
+    return;
   }
+
+  const userData = userSnap.data();
+  const reviewerData = reviewerSnap.exists() ? reviewerSnap.data() : null;
+
+  const reviewerName: string =
+    reviewerData?.username ?? reviewerData?.displayName ?? "Anonymous Trader";
+  const reviewerAvatar: string | null =
+    reviewerData?.avatarUrl ?? reviewerData?.photoURL ?? null;
+
+  // Deduplicate: skip if this trade's review is already published
+  const existing: any[] = userData.userReviews ?? [];
+  if (existing.some((r: any) => r.tradeId === review.tradeId)) {
+    console.log(
+      `publishReviewToProfile: review for trade ${review.tradeId} already published to ${userId}`,
+    );
+    return;
+  }
+
+  // Recalculate rolling average using ratingCount
+  const count: number = userData.ratingCount ?? 0;
+  const oldRating: number =
+    typeof userData.rating === "number"
+      ? userData.rating
+      : parseFloat(userData.rating) || 0;
+  const newCount = count + 1;
+  const newRating = (oldRating * count + review.rating) / newCount;
+  const roundedRating = Math.round(newRating * 10) / 10;
+
+  // 1. Update flat fields on the user document (ProfileScreen reads these live)
+  await updateDoc(userRef, {
+    userReviews: [...existing, review],
+    rating: roundedRating,
+    ratingCount: newCount,
+  });
+
+  // 2. Write to the reviews subcollection (OverviewModal queries this)
+  //    No orderBy needed here — this is a write, not a read
+  await addDoc(collection(db, "users", userId, "reviews"), {
+    reviewerName,
+    reviewerAvatar: reviewerAvatar ?? "",
+    rating: review.rating,
+    comment: review.comment,
+    tradeId: review.tradeId,
+    createdAt: review.createdAt,
+  });
+
+  console.log(
+    `✅ Review published: ${reviewerName} → ${userId} (${review.rating}★)`,
+  );
 }

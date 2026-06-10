@@ -2,26 +2,26 @@ import { Ionicons } from "@expo/vector-icons";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useEffect, useRef, useState } from "react";
 import {
-    ActivityIndicator,
-    Alert,
-    Animated,
-    Image,
-    Modal,
-    SafeAreaView,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TouchableOpacity,
-    TouchableWithoutFeedback,
-    View,
+  ActivityIndicator,
+  Alert,
+  Animated,
+  Image,
+  Modal,
+  SafeAreaView,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  TouchableWithoutFeedback,
+  View,
 } from "react-native";
 import { TradeChatModal } from "../../components/TradeChatModal";
 import { auth } from "../../firebaseConfig";
 import {
-    TradeOffer,
-    cancelTradeOffer,
-    completeTrade,
-    subscribeToSentOffers,
+  TradeOffer,
+  cancelTradeOffer,
+  completeTrade,
+  subscribeToSentOffers,
 } from "../../services/tradeService";
 
 const NAVY = "#2e2d7c";

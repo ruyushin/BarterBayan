@@ -67,7 +67,11 @@ function safeUriList(images: any): string[] {
 // ─────────────────────────────────────────────────────────────────────────────
 
 export default function Screen() {
-  const params = useLocalSearchParams<{ filter?: string; search?: string; type?: string }>();
+  const params = useLocalSearchParams<{
+    filter?: string;
+    search?: string;
+    type?: string;
+  }>();
   const router = useRouter();
   const [search, setSearch] = useState("");
   const [sortType, setSortType] = useState("none");
@@ -77,7 +81,9 @@ export default function Screen() {
   const [loading, setLoading] = useState(true);
   const [userId, setUserId] = useState<string | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
-  const [typeFilter, setTypeFilter] = useState<"all" | "trending" | "personalized">("all");
+  const [typeFilter, setTypeFilter] = useState<
+    "all" | "trending" | "personalized"
+  >("all");
   const [isInitialLoad, setIsInitialLoad] = useState(true);
   const [searchPopupVisible, setSearchPopupVisible] = useState(false);
 
@@ -89,42 +95,54 @@ export default function Screen() {
   }, []);
 
   useEffect(() => {
-  const fetchItems = async () => {
-    try {
-      if (isInitialLoad) setLoading(true);
-      let items;
+    const fetchItems = async () => {
+      try {
+        if (isInitialLoad) setLoading(true);
 
-      if (typeFilter === "trending") {
-        items = await getTrendingItems(50);
-      } else if (typeFilter === "personalized") {
-        items = userId
-          ? await getPersonalizedSuggestions(userId, 50)
-          : await getAllItems();
-      } else {
-        items = await getAllItems();
+        // Single enrichment fetch — always needed for userName / userAvatar
+        const allEnriched = await getAllItems();
+        const enrichMap = Object.fromEntries(
+          allEnriched.map((i: any) => [i.id, i]),
+        );
+
+        let items: any[];
+
+        if (typeFilter === "trending") {
+          const trending = await getTrendingItems(50);
+          items = trending.map((item: any) => ({
+            ...enrichMap[item.id], // enriched first — has userName, userAvatar
+            ...item, // overlay trending-specific fields
+            userName:
+              enrichMap[item.id]?.userName || item.userName || "Unknown User",
+            userAvatar: enrichMap[item.id]?.userAvatar || item.userAvatar || "",
+          }));
+        } else if (typeFilter === "personalized") {
+          const personalized = userId
+            ? await getPersonalizedSuggestions(userId, 50)
+            : allEnriched;
+          items = personalized.map((item: any) => ({
+            ...enrichMap[item.id],
+            ...item,
+            userName:
+              enrichMap[item.id]?.userName || item.userName || "Unknown User",
+            userAvatar: enrichMap[item.id]?.userAvatar || item.userAvatar || "",
+          }));
+        } else {
+          // "all" — reuse the enrichment fetch, no extra call needed
+          items = allEnriched;
+        }
+
+        setAllItems(items);
+        setIsInitialLoad(false);
+      } catch (error) {
+        console.error("Error fetching items:", error);
+      } finally {
+        if (isInitialLoad) setLoading(false);
       }
+    };
 
-      // ── Enrich items that are missing userName/userAvatar ──
-      const allEnriched = await getAllItems();
-      const enrichMap = Object.fromEntries(allEnriched.map((i: any) => [i.id, i]));
-      items = items.map((item: any) => ({
-        ...enrichMap[item.id],   // pulls userName, userAvatar from getAllItems
-        ...item,                 // keeps trending/personalized-specific fields
-        userName: enrichMap[item.id]?.userName || item.userName || "Unknown User",
-        userAvatar: enrichMap[item.id]?.userAvatar || item.userAvatar || "",
-      }));
-      // ──────────────────────────────────────────────────────
-
-      setAllItems(items);
-      setIsInitialLoad(false);
-    } catch (error) {
-      console.error("Error fetching items:", error);
-    } finally {
-      if (isInitialLoad) setLoading(false);
-    }
-  };
-  fetchItems();
-}, [refreshKey, userId, typeFilter]);
+    fetchItems();
+  }, [refreshKey, userId, typeFilter]);
 
   useEffect(() => {
     if (
@@ -145,7 +163,8 @@ export default function Screen() {
     .filter((item) => {
       const matchSearch =
         search.length === 0 ||
-        (item.title && item.title.toLowerCase().includes(search.toLowerCase())) ||
+        (item.title &&
+          item.title.toLowerCase().includes(search.toLowerCase())) ||
         (item.description &&
           item.description.toLowerCase().includes(search.toLowerCase()));
       const matchFilter = filter === "All" || item.category === filter;
@@ -153,7 +172,8 @@ export default function Screen() {
     })
     .sort((a, b) => {
       if (sortType === "likes") return (b.likes || 0) - (a.likes || 0);
-      if (sortType === "name") return (a.title || "").localeCompare(b.title || "");
+      if (sortType === "name")
+        return (a.title || "").localeCompare(b.title || "");
       return 0;
     });
 
@@ -329,7 +349,8 @@ export default function Screen() {
                 <Text
                   style={[
                     styles.typeFilterText,
-                    typeFilter === "personalized" && styles.typeFilterTextActive,
+                    typeFilter === "personalized" &&
+                      styles.typeFilterTextActive,
                   ]}
                 >
                   {"Suggested"}
@@ -401,7 +422,9 @@ function ItemCard({ item, onCommentAdded }: any) {
   const [commentsLoading, setCommentsLoading] = useState(false);
   const [showImageGallery, setShowImageGallery] = useState(false);
   const [currentImageIndex, setCurrentImageIndex] = useState(0);
-  const [replyingToCommentId, setReplyingToCommentId] = useState<string | null>(null);
+  const [replyingToCommentId, setReplyingToCommentId] = useState<string | null>(
+    null,
+  );
   const [replyText, setReplyText] = useState("");
   const [deleteToastVisible, setDeleteToastVisible] = useState(false);
   const [deletedCommentData, setDeletedCommentData] = useState<any>(null);
@@ -425,6 +448,16 @@ function ItemCard({ item, onCommentAdded }: any) {
   })();
 
   const imageUrl = imagesList[0];
+
+  // Resolved avatar — never falls back to a remote placeholder
+  const resolvedAvatar = safeUri(item?.userAvatar);
+  const hasAvatar = resolvedAvatar !== PLACEHOLDER;
+
+  // Resolved username — never blank
+  const resolvedName =
+    item?.userName && item.userName.trim().length > 0
+      ? item.userName
+      : "Unknown User";
 
   useEffect(() => {
     if (currentUser && item?.likedBy?.includes(currentUser)) setIsLiked(true);
@@ -586,7 +619,10 @@ function ItemCard({ item, onCommentAdded }: any) {
     }
   };
 
-  const handleCommentLike = async (commentId: string, commentLiked: boolean) => {
+  const handleCommentLike = async (
+    commentId: string,
+    commentLiked: boolean,
+  ) => {
     if (!currentUser) {
       Alert.alert("Please log in", "You must be logged in to like comments");
       return;
@@ -673,19 +709,19 @@ function ItemCard({ item, onCommentAdded }: any) {
           }
           activeOpacity={0.8}
         >
-          <Image
-            source={{
-              uri:
-                safeUri(item.userAvatar) === PLACEHOLDER
-                  ? "https://i.pravatar.cc/150?img=1"
-                  : safeUri(item.userAvatar),
-            }}
-            style={styles.avatar}
-          />
+          {/* Avatar — initials fallback when no valid image */}
+          {hasAvatar ? (
+            <Image source={{ uri: resolvedAvatar }} style={styles.avatar} />
+          ) : (
+            <View style={[styles.avatar, styles.avatarFallback]}>
+              <Text style={styles.avatarInitial}>
+                {resolvedName[0].toUpperCase()}
+              </Text>
+            </View>
+          )}
+
           <View style={styles.userDetails}>
-            <Text style={styles.username}>
-              {item.userName || "Unknown User"}
-            </Text>
+            <Text style={styles.username}>{resolvedName}</Text>
             <Text style={styles.date}>
               {item.date || new Date().toLocaleDateString()}
             </Text>
@@ -749,13 +785,22 @@ function ItemCard({ item, onCommentAdded }: any) {
               <Image
                 key={idx}
                 source={{ uri: img }}
-                style={{ width: screenWidth, height: screenHeight, resizeMode: "contain" }}
-                onError={() => console.warn("Failed to load gallery image:", img)}
+                style={{
+                  width: screenWidth,
+                  height: screenHeight,
+                  resizeMode: "contain",
+                }}
+                onError={() =>
+                  console.warn("Failed to load gallery image:", img)
+                }
               />
             ))}
           </ScrollView>
           <View style={styles.galleryControls}>
-            <TouchableOpacity style={styles.galleryBtn} onPress={handleSaveImage}>
+            <TouchableOpacity
+              style={styles.galleryBtn}
+              onPress={handleSaveImage}
+            >
               <Ionicons name="download" size={24} color="white" />
             </TouchableOpacity>
             <Text style={styles.imageCounter}>
@@ -780,7 +825,11 @@ function ItemCard({ item, onCommentAdded }: any) {
       {/* ACTION BUTTONS */}
       {isOwnItem ? (
         <View style={styles.ownItemBanner}>
-          <Ionicons name="information-circle-outline" size={14} color="#AAAAAA" />
+          <Ionicons
+            name="information-circle-outline"
+            size={14}
+            color="#AAAAAA"
+          />
           <Text style={styles.ownItemText}>{"Your listing"}</Text>
         </View>
       ) : (
@@ -871,21 +920,28 @@ function ItemCard({ item, onCommentAdded }: any) {
             keyExtractor={(c) => c.id}
             scrollEnabled={false}
             renderItem={({ item: comment }) => {
-              const isCommentLiked = (comment.likedBy || []).includes(currentUser);
+              const isCommentLiked = (comment.likedBy || []).includes(
+                currentUser,
+              );
               return (
                 <View style={styles.commentItem}>
                   <Image
                     source={{
-                      uri: comment.userAvatar || "https://i.pravatar.cc/150?img=1",
+                      uri:
+                        comment.userAvatar || "https://i.pravatar.cc/150?img=1",
                     }}
                     style={styles.commentAvatar}
                   />
                   <View style={styles.commentContent}>
-                    <Text style={styles.commentUserName}>{comment.userName}</Text>
+                    <Text style={styles.commentUserName}>
+                      {comment.userName}
+                    </Text>
                     <Text style={styles.commentText}>{comment.text}</Text>
                     <View style={styles.commentActions}>
                       <Pressable
-                        onPress={() => handleCommentLike(comment.id, isCommentLiked)}
+                        onPress={() =>
+                          handleCommentLike(comment.id, isCommentLiked)
+                        }
                         style={styles.commentLikeBtn}
                       >
                         <Ionicons
@@ -900,7 +956,9 @@ function ItemCard({ item, onCommentAdded }: any) {
                       <Pressable
                         onPress={() =>
                           setReplyingToCommentId(
-                            replyingToCommentId === comment.id ? null : comment.id,
+                            replyingToCommentId === comment.id
+                              ? null
+                              : comment.id,
                           )
                         }
                         style={styles.commentReplyBtn}
@@ -931,7 +989,9 @@ function ItemCard({ item, onCommentAdded }: any) {
                               style={styles.replyAvatar}
                             />
                             <View style={styles.replyContent}>
-                              <Text style={styles.replyUserName}>{reply.userName}</Text>
+                              <Text style={styles.replyUserName}>
+                                {reply.userName}
+                              </Text>
                               <Text style={styles.replyText}>{reply.text}</Text>
                             </View>
                           </View>
@@ -1019,9 +1079,18 @@ const styles = StyleSheet.create({
     elevation: 30,
     zIndex: 10000,
   },
-  popupTitle: { fontSize: 14, fontWeight: "700", color: "#111827", marginBottom: 10 },
+  popupTitle: {
+    fontSize: 14,
+    fontWeight: "700",
+    color: "#111827",
+    marginBottom: 10,
+  },
   searchResultLink: { width: "100%" },
-  searchResultItem: { paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: "#E5E7EB" },
+  searchResultItem: {
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: "#E5E7EB",
+  },
   searchResultText: { fontSize: 14, fontWeight: "600", color: "#111827" },
   searchResultCategory: { fontSize: 12, color: "#6B7280", marginTop: 2 },
   noResultsText: { color: "#6B7280", fontSize: 13, lineHeight: 20 },
@@ -1036,7 +1105,13 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   filterText: { marginRight: 5, fontSize: 13 },
-  typeFilterRow: { flexDirection: "row", marginHorizontal: 12, marginBottom: 16, gap: 10, marginTop: 12 },
+  typeFilterRow: {
+    flexDirection: "row",
+    marginHorizontal: 12,
+    marginBottom: 16,
+    gap: 10,
+    marginTop: 12,
+  },
   typeFilterBtn: {
     flexDirection: "row",
     alignItems: "center",
@@ -1084,13 +1159,35 @@ const styles = StyleSheet.create({
     borderBottomColor: "#F0F0F0",
   },
   userInfo: { flexDirection: "row", alignItems: "center", flex: 1 },
-  avatar: { width: 40, height: 40, borderRadius: 20, marginRight: 12 },
+  avatar: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    marginRight: 12,
+    backgroundColor: "#E8E8E8",
+  },
+  // ── NEW: initials fallback ──
+  avatarFallback: {
+    backgroundColor: "#2f2f6f",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  avatarInitial: {
+    color: "#fff",
+    fontSize: 16,
+    fontWeight: "800",
+  },
   userDetails: { flex: 1 },
   username: { fontWeight: "700", fontSize: 14, color: "#1F1F1F" },
   date: { fontSize: 12, color: "#999", marginTop: 2 },
   badgeContainer: { padding: 6 },
   cardImage: { width: "100%", height: 220, backgroundColor: "#F5F5F5" },
-  cardImageContainer: { position: "relative", width: "100%", height: 220, backgroundColor: "#F5F5F5" },
+  cardImageContainer: {
+    position: "relative",
+    width: "100%",
+    height: 220,
+    backgroundColor: "#F5F5F5",
+  },
   imageCountBadge: {
     position: "absolute",
     bottom: 10,
@@ -1135,7 +1232,13 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     alignItems: "center",
   },
-  imageCounter: { color: "white", fontSize: 16, fontWeight: "600", textAlign: "center", flex: 1 },
+  imageCounter: {
+    color: "white",
+    fontSize: 16,
+    fontWeight: "600",
+    textAlign: "center",
+    flex: 1,
+  },
   cardContent: { padding: 14 },
   title: { fontWeight: "700", fontSize: 16, color: "#1F1F1F", marginBottom: 6 },
   description: { fontSize: 13, color: "#666", lineHeight: 18 },
@@ -1158,7 +1261,11 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     gap: 5,
   },
-  actionBtnTrade: { backgroundColor: "#FEF9EC", borderWidth: 1, borderColor: "#F0D98A" },
+  actionBtnTrade: {
+    backgroundColor: "#FEF9EC",
+    borderWidth: 1,
+    borderColor: "#F0D98A",
+  },
   actionBtnText: { fontSize: 12, fontWeight: "600", color: "#2f2f6f" },
   actionBtnTextTrade: { color: "#C9A227" },
   ownItemBanner: {
@@ -1173,12 +1280,27 @@ const styles = StyleSheet.create({
     backgroundColor: "#FAFAFA",
   },
   ownItemText: { fontSize: 12, color: "#AAAAAA", fontWeight: "500" },
-  cardFooter: { paddingHorizontal: 14, paddingVertical: 12, borderTopWidth: 1, borderTopColor: "#F0F0F0" },
+  cardFooter: {
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    borderTopWidth: 1,
+    borderTopColor: "#F0F0F0",
+  },
   statRow: { flexDirection: "row", justifyContent: "space-around" },
   stat: { alignItems: "center", paddingHorizontal: 12 },
   statText: { fontSize: 12, color: "#666", marginTop: 4 },
-  commentsSection: { borderTopWidth: 1, borderTopColor: "#F0F0F0", padding: 14, backgroundColor: "#FAFAFA" },
-  commentsTitle: { fontSize: 14, fontWeight: "700", color: "#1F1F1F", marginBottom: 12 },
+  commentsSection: {
+    borderTopWidth: 1,
+    borderTopColor: "#F0F0F0",
+    padding: 14,
+    backgroundColor: "#FAFAFA",
+  },
+  commentsTitle: {
+    fontSize: 14,
+    fontWeight: "700",
+    color: "#1F1F1F",
+    marginBottom: 12,
+  },
   commentInputContainer: { flexDirection: "row", marginBottom: 14, gap: 8 },
   commentInput: {
     flex: 1,
@@ -1210,7 +1332,13 @@ const styles = StyleSheet.create({
   commentDeleteBtn: { padding: 4 },
   commentReplyBtn: { flexDirection: "row", alignItems: "center", gap: 4 },
   commentReplyText: { fontSize: 11, color: "#2f2f6f", fontWeight: "600" },
-  repliesContainer: { marginTop: 10, marginLeft: 10, paddingLeft: 10, borderLeftWidth: 2, borderLeftColor: "#E0E0E0" },
+  repliesContainer: {
+    marginTop: 10,
+    marginLeft: 10,
+    paddingLeft: 10,
+    borderLeftWidth: 2,
+    borderLeftColor: "#E0E0E0",
+  },
   replyItem: { flexDirection: "row", marginBottom: 10 },
   replyAvatar: { width: 28, height: 28, borderRadius: 14, marginRight: 8 },
   replyContent: { flex: 1 },
@@ -1238,7 +1366,12 @@ const styles = StyleSheet.create({
   },
   loaderContainer: { flex: 1, justifyContent: "center", alignItems: "center" },
   loadingText: { marginTop: 10, fontSize: 14, color: "#777" },
-  emptyContainer: { flex: 1, justifyContent: "center", alignItems: "center", marginVertical: 50 },
+  emptyContainer: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+    marginVertical: 50,
+  },
   emptyText: { fontSize: 14, color: "#777", textAlign: "center" },
   deleteToast: {
     position: "absolute",
@@ -1260,5 +1393,10 @@ const styles = StyleSheet.create({
     zIndex: 1000,
   },
   deleteToastText: { fontSize: 14, color: "white", fontWeight: "500", flex: 1 },
-  deleteToastUndo: { fontSize: 14, fontWeight: "600", color: "#2f2f6f", marginLeft: 12 },
+  deleteToastUndo: {
+    fontSize: 14,
+    fontWeight: "600",
+    color: "#2f2f6f",
+    marginLeft: 12,
+  },
 });
