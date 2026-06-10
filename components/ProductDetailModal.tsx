@@ -12,6 +12,7 @@ import {
   Image,
   ImageStyle,
   Modal,
+  Platform,
   ScrollView,
   StyleSheet,
   Text,
@@ -20,19 +21,21 @@ import {
   View,
   ViewStyle,
 } from "react-native";
-import { LongPressGestureHandler, State } from "react-native-gesture-handler";
 import { auth } from "../firebaseConfig";
 import { getUserInfo, updateItemLikes } from "../services/itemService";
+import { getLikeState, setLikeState } from "../services/likeCache";
 import { trackItemView, trackUserActivity } from "../services/trendingService";
 import { ProposeTradeModal } from "./ProposeTradeModal";
 
 const SCREEN_WIDTH = Dimensions.get("window").width;
 const NAVY = "#2f2f6f";
+const GOLD = "#C9A227";
 
 interface ProductDetailModalProps {
   visible: boolean;
   item: any;
   onClose: () => void;
+  onLikeChange?: (liked: boolean, count: number) => void;
 }
 
 // ─── Media helpers ─────────────────────────────────────────────────────────
@@ -45,7 +48,7 @@ const isVideoUrl = (url: string): boolean => {
     lower.includes(".avi") ||
     lower.includes(".webm") ||
     lower.includes("videos%2F") ||
-    lower.includes("/video/upload/") // Cloudinary video URLs
+    lower.includes("/video/upload/")
   );
 };
 
@@ -56,16 +59,41 @@ const isValidMediaUrl = (url: string | undefined): boolean => {
   return true;
 };
 
+// ─── Cross-platform save ────────────────────────────────────────────────────
+async function saveImageCrossPlatform(url: string) {
+  if (Platform.OS === "web") {
+    try {
+      const res = await fetch(url);
+      const blob = await res.blob();
+      const objectUrl = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = objectUrl;
+      a.download = `barterbayan-${Date.now()}.jpg`;
+      a.click();
+      URL.revokeObjectURL(objectUrl);
+    } catch {
+      Alert.alert("Error", "Failed to download image.");
+    }
+  } else {
+    try {
+      const { status } = await MediaLibrary.requestPermissionsAsync();
+      if (status !== "granted") {
+        Alert.alert("Permission denied", "Camera roll permission is required.");
+        return;
+      }
+      const filename = `BarterBayan_${Date.now()}.jpg`;
+      const fileDir = (FileSystem as any).documentDirectory || "";
+      const result = await FileSystem.downloadAsync(url, fileDir + filename);
+      await MediaLibrary.saveToLibraryAsync(result.uri);
+      Alert.alert("Saved!", "Image saved to your gallery.");
+    } catch {
+      Alert.alert("Error", "Failed to save image.");
+    }
+  }
+}
+
 // ─── Single media slide ────────────────────────────────────────────────────
-function MediaSlide({
-  uri,
-  onLongPress,
-  onPress,
-}: {
-  uri: string;
-  onLongPress: () => void;
-  onPress: () => void;
-}) {
+function MediaSlide({ uri }: { uri: string }) {
   const [imgError, setImgError] = useState(false);
   const isVideo = isVideoUrl(uri);
 
@@ -98,32 +126,22 @@ function MediaSlide({
   }
 
   return (
-    <LongPressGestureHandler
-      onHandlerStateChange={({ nativeEvent }) => {
-        if (nativeEvent.state === State.ACTIVE) onLongPress();
-      }}
-      minDurationMs={500}
-    >
-      <TouchableOpacity
-        activeOpacity={0.9}
-        onPress={onPress}
-        style={slide.wrapper}
-      >
-        <Image
-          source={{ uri }}
-          style={slide.media}
-          resizeMode="contain"
-          onError={() => setImgError(true)}
-        />
-      </TouchableOpacity>
-    </LongPressGestureHandler>
+    <View style={slide.wrapper}>
+      <Image
+        source={{ uri }}
+        style={slide.media}
+        // FIX: was "cover" which zoomed/cropped images — "contain" shows the full image
+        resizeMode="contain"
+        onError={() => setImgError(true)}
+      />
+    </View>
   );
 }
 
 const slide = StyleSheet.create({
   wrapper: {
     width: SCREEN_WIDTH,
-    height: 300,
+    height: 320,
     backgroundColor: "#1a1a2e",
     justifyContent: "center",
     alignItems: "center",
@@ -164,6 +182,7 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
   visible,
   item,
   onClose,
+  onLikeChange,
 }) => {
   const router = useRouter();
   const [currentMediaIndex, setCurrentMediaIndex] = useState(0);
@@ -176,21 +195,20 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
   const [fullScreenIndex, setFullScreenIndex] = useState<number | null>(null);
   const [tradeModalVisible, setTradeModalVisible] = useState(false);
 
+  // No per-component like refs needed — likeCache is the shared source of truth.
+
   const isOwnItem = !!currentUser && currentUser === item?.ownerId;
 
-  // Build media list: images[] + videos[] arrays, fallback to single image/video
   const mediaItems: string[] = (() => {
     const all: string[] = [];
-    if (Array.isArray(item?.images)) {
+    if (Array.isArray(item?.images))
       item.images.forEach((u: string) => {
         if (isValidMediaUrl(u)) all.push(u);
       });
-    }
-    if (Array.isArray(item?.videos)) {
+    if (Array.isArray(item?.videos))
       item.videos.forEach((u: string) => {
         if (isValidMediaUrl(u)) all.push(u);
       });
-    }
     if (all.length === 0) {
       if (isValidMediaUrl(item?.image)) all.push(item.image);
       if (isValidMediaUrl(item?.video)) all.push(item.video);
@@ -200,17 +218,29 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
 
   const imageOnlyItems = mediaItems.filter((u) => !isVideoUrl(u));
 
+  // Every time the modal opens (or a different item is shown), read from the
+  // shared likeCache first — it holds the freshest value written by either
+  // this modal OR the full-screen detail page.  Fall back to the item prop
+  // only when the cache has no entry yet (first time this item is seen).
   useEffect(() => {
     if (visible && item) {
       setCurrentMediaIndex(0);
-      setLikeCount(item.likes || 0);
       loadOwnerInfo();
-      checkIfLiked();
-      if (currentUser) {
-        trackItemView(item.id, currentUser).catch(console.error);
+      if (currentUser) trackItemView(item.id, currentUser).catch(console.error);
+
+      const cached = getLikeState(item.id);
+      if (cached) {
+        setIsLiked(cached.isLiked);
+        setLikeCount(cached.likeCount);
+      } else {
+        const liked = !!(currentUser && item?.likedBy?.includes(currentUser));
+        const count = item.likes || 0;
+        setIsLiked(liked);
+        setLikeCount(count);
+        setLikeState(item.id, liked, count);
       }
     }
-  }, [visible, item, currentUser]);
+  }, [visible, item?.id]);
 
   const loadOwnerInfo = async () => {
     try {
@@ -222,51 +252,38 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
     }
   };
 
-  const checkIfLiked = () => {
-    setIsLiked(!!(currentUser && item?.likedBy?.includes(currentUser)));
-  };
-
   const handleLike = async () => {
     if (!currentUser) {
-      Alert.alert("Please log in", "You must be logged in to like items");
+      Alert.alert("Please log in", "You must be logged in to like items.");
       return;
     }
     try {
       setLoading(true);
       const nowLiked = !isLiked;
       await updateItemLikes(item.id, currentUser, nowLiked);
+      const newCount = nowLiked ? likeCount + 1 : Math.max(0, likeCount - 1);
       setIsLiked(nowLiked);
-      setLikeCount((prev) => (nowLiked ? prev + 1 : Math.max(0, prev - 1)));
+      setLikeCount(newCount);
+      // Write to shared cache so the full-screen page picks up the change.
+      setLikeState(item.id, nowLiked, newCount);
+      onLikeChange?.(nowLiked, newCount);
       if (nowLiked) {
         await trackUserActivity(currentUser, "like", item.id, item.category);
       }
     } catch {
-      Alert.alert("Error", "Failed to update like status");
+      Alert.alert("Error", "Failed to update like status.");
     } finally {
       setLoading(false);
     }
   };
 
-  const handleSaveImage = async () => {
-    try {
-      const current = mediaItems[currentMediaIndex];
-      if (!current || isVideoUrl(current)) return;
-      const { status } = await MediaLibrary.requestPermissionsAsync();
-      if (status !== "granted") {
-        Alert.alert("Permission denied", "Camera roll permission is required");
-        return;
-      }
-      const filename = `BarterBayan_${Date.now()}.jpg`;
-      const fileDir = (FileSystem as any).documentDirectory || "";
-      const result = await FileSystem.downloadAsync(
-        current,
-        fileDir + filename,
-      );
-      await MediaLibrary.saveToLibraryAsync(result.uri);
-      Alert.alert("Success", "Image saved to your gallery");
-    } catch {
-      Alert.alert("Error", "Failed to save image");
+  const handleSaveCurrentImage = async () => {
+    const current = mediaItems[currentMediaIndex];
+    if (!current || isVideoUrl(current)) {
+      Alert.alert("Cannot save", "Videos cannot be saved this way.");
+      return;
     }
+    await saveImageCrossPlatform(current);
   };
 
   const handleSendMessage = () => {
@@ -284,13 +301,33 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
 
   const handleEnlargePress = () => {
     onClose();
+    // FIX: Pass the up-to-date like state so the full-screen detail page
+    // initialises correctly and doesn't allow a duplicate like.
+    const updatedLikedBy: string[] = (() => {
+      const base: string[] = Array.isArray(item?.likedBy)
+        ? [...item.likedBy]
+        : [];
+      if (isLiked && currentUser && !base.includes(currentUser)) {
+        base.push(currentUser);
+      } else if (!isLiked && currentUser) {
+        return base.filter((id) => id !== currentUser);
+      }
+      return base;
+    })();
+
     router.push({
       pathname: "/product-details",
-      params: { itemId: item.id, item: JSON.stringify(item) },
+      params: {
+        itemId: item.id,
+        item: JSON.stringify({
+          ...item,
+          likes: likeCount,
+          likedBy: updatedLikedBy,
+        }),
+      },
     });
   };
 
-  // Tapping avatar OR name navigates to owner's profile
   const handleOwnerPress = () => {
     if (!item?.ownerId) return;
     onClose();
@@ -300,16 +337,15 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
     });
   };
 
-  // Replace the existing ownerDisplayName line
   const ownerDisplayName =
     ownerInfo?.firstName && ownerInfo?.lastName
       ? `${ownerInfo.firstName} ${ownerInfo.lastName}`
       : ownerInfo?.username ||
         ownerInfo?.displayName ||
-        item?.userName || //  fallback to item's own userName field
+        item?.userName ||
         "Unknown User";
 
-  // ── Full-screen image viewer ──────────────────────────────────────────────
+  // ── Full-screen viewer ────────────────────────────────────────────────────
   const renderFullScreen = () => {
     if (fullScreenIndex === null) return null;
     const url = imageOnlyItems[fullScreenIndex];
@@ -327,11 +363,16 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
           >
             <Ionicons name="close" size={28} color="#fff" />
           </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.fullScreenSaveButton}
+            onPress={() => saveImageCrossPlatform(url)}
+          >
+            <Ionicons name="download-outline" size={22} color="#fff" />
+          </TouchableOpacity>
           <Image
             source={{ uri: url }}
             style={styles.fullScreenImage}
             resizeMode="contain"
-            onError={() => console.warn("Full-screen image failed:", url)}
           />
           {imageOnlyItems.length > 1 && (
             <View style={styles.fullScreenControls}>
@@ -381,16 +422,17 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
             data={mediaItems}
             keyExtractor={(_, i) => `media-${i}`}
             renderItem={({ item: uri }) => (
-              <MediaSlide
-                uri={uri}
-                onLongPress={handleSaveImage}
+              <TouchableOpacity
+                activeOpacity={0.95}
                 onPress={() => {
                   if (!isVideoUrl(uri)) {
                     const idx = imageOnlyItems.indexOf(uri);
                     if (idx >= 0) setFullScreenIndex(idx);
                   }
                 }}
-              />
+              >
+                <MediaSlide uri={uri} />
+              </TouchableOpacity>
             )}
             onMomentumScrollEnd={(e) => {
               const idx = Math.round(
@@ -400,6 +442,17 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
               setCurrentMediaIndex(idx);
             }}
           />
+
+          {/* Save button — top right */}
+          {!isVideoUrl(mediaItems[currentMediaIndex]) && (
+            <TouchableOpacity
+              style={styles.saveImageBtn}
+              onPress={handleSaveCurrentImage}
+              activeOpacity={0.8}
+            >
+              <Ionicons name="download-outline" size={18} color="#fff" />
+            </TouchableOpacity>
+          )}
 
           {mediaItems.length > 1 && (
             <View style={styles.pagination}>
@@ -416,12 +469,6 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
               <Text style={styles.paginationText}>
                 {`${currentMediaIndex + 1} / ${mediaItems.length}`}
               </Text>
-            </View>
-          )}
-
-          {!isVideoUrl(mediaItems[currentMediaIndex]) && (
-            <View style={styles.holdToSaveContainer}>
-              <Text style={styles.holdToSaveText}>Hold to save</Text>
             </View>
           )}
         </>
@@ -474,11 +521,11 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
                     <Text style={styles.descriptionText}>
                       {descriptionExpanded
                         ? item.description
-                        : item.description.length > 1000
-                          ? item.description.substring(0, 1000) + "..."
+                        : item.description.length > 200
+                          ? item.description.substring(0, 200) + "..."
                           : item.description}
                     </Text>
-                    {item.description.length > 1000 && (
+                    {item.description.length > 200 && (
                       <TouchableOpacity
                         onPress={() =>
                           setDescriptionExpanded(!descriptionExpanded)
@@ -512,53 +559,37 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
                 )}
               </View>
 
-              {/* Owner card — avatar + name both navigate to profile */}
+              {/* Owner card */}
               {!!ownerInfo && (
-                <View style={styles.ownerCard}>
+                <TouchableOpacity
+                  style={styles.ownerCard}
+                  onPress={handleOwnerPress}
+                  activeOpacity={0.85}
+                >
                   <View style={styles.ownerHeader}>
-                    {/* Tappable avatar */}
-                    <TouchableOpacity
-                      onPress={handleOwnerPress}
-                      activeOpacity={0.8}
-                    >
-                      {ownerInfo?.avatarUrl ? (
-                        <Image
-                          source={{ uri: ownerInfo.avatarUrl }}
-                          style={styles.ownerAvatar}
-                          onError={() => {}}
-                        />
-                      ) : (
-                        <View
-                          style={[
-                            styles.ownerAvatar,
-                            styles.ownerAvatarFallback,
-                          ]}
-                        >
-                          <Text style={styles.ownerAvatarInitial}>
-                            {(ownerDisplayName || "?")[0].toUpperCase()}
-                          </Text>
-                        </View>
-                      )}
-                    </TouchableOpacity>
-
-                    <View style={styles.ownerDetails}>
-                      {/* Tappable name */}
-                      <TouchableOpacity
-                        onPress={handleOwnerPress}
-                        activeOpacity={0.8}
+                    {ownerInfo?.avatarUrl ? (
+                      <Image
+                        source={{ uri: ownerInfo.avatarUrl }}
+                        style={styles.ownerAvatar}
+                      />
+                    ) : (
+                      <View
+                        style={[styles.ownerAvatar, styles.ownerAvatarFallback]}
                       >
-                        <View style={styles.ownerNameRow}>
-                          <Text style={styles.ownerName}>
-                            {ownerDisplayName}
-                          </Text>
-                          <Ionicons
-                            name="chevron-forward"
-                            size={14}
-                            color="#aaa"
-                          />
-                        </View>
-                      </TouchableOpacity>
-
+                        <Text style={styles.ownerAvatarInitial}>
+                          {(ownerDisplayName || "?")[0].toUpperCase()}
+                        </Text>
+                      </View>
+                    )}
+                    <View style={styles.ownerDetails}>
+                      <View style={styles.ownerNameRow}>
+                        <Text style={styles.ownerName}>{ownerDisplayName}</Text>
+                        <Ionicons
+                          name="chevron-forward"
+                          size={14}
+                          color="#aaa"
+                        />
+                      </View>
                       <View style={styles.ratingContainer}>
                         <Ionicons name="star" size={13} color="#FFB800" />
                         <Text style={styles.rating}>
@@ -570,14 +601,19 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
                       </View>
                     </View>
                   </View>
-
                   {!!ownerInfo.bio && (
                     <Text style={styles.bio}>{ownerInfo.bio}</Text>
                   )}
-                </View>
+                  <View style={styles.viewProfileRow}>
+                    <Text style={styles.viewProfileText}>
+                      View full profile
+                    </Text>
+                    <Ionicons name="arrow-forward" size={13} color={NAVY} />
+                  </View>
+                </TouchableOpacity>
               )}
 
-              {/* Like button — matches ProductDetails screen style (outlined, bordered) */}
+              {/* Like button */}
               <TouchableOpacity
                 style={[styles.likeButton, isLiked && styles.likeButtonActive]}
                 onPress={handleLike}
@@ -678,7 +714,7 @@ const styles = StyleSheet.create({
     color: NAVY,
   } as TextStyle,
   carouselContainer: {
-    height: 300,
+    height: 320,
     backgroundColor: "#1a1a2e",
     position: "relative",
   } as ViewStyle,
@@ -690,6 +726,17 @@ const styles = StyleSheet.create({
     backgroundColor: "#f5f5f5",
   } as ViewStyle,
   noMediaText: { color: "#aaa", fontSize: 13 } as TextStyle,
+  saveImageBtn: {
+    position: "absolute",
+    top: 12,
+    right: 12,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: "rgba(0,0,0,0.55)",
+    justifyContent: "center",
+    alignItems: "center",
+  } as ViewStyle,
   pagination: {
     position: "absolute",
     bottom: 12,
@@ -719,20 +766,6 @@ const styles = StyleSheet.create({
     fontWeight: "600",
     marginLeft: 6,
   } as TextStyle,
-  holdToSaveContainer: {
-    position: "absolute",
-    top: 10,
-    right: 10,
-    backgroundColor: "rgba(0,0,0,0.55)",
-    paddingHorizontal: 9,
-    paddingVertical: 5,
-    borderRadius: 8,
-  } as ViewStyle,
-  holdToSaveText: {
-    color: "#fff",
-    fontSize: 11,
-    fontWeight: "600",
-  } as TextStyle,
   fullScreenContainer: {
     flex: 1,
     backgroundColor: "rgba(0,0,0,0.95)",
@@ -744,6 +777,24 @@ const styles = StyleSheet.create({
     top: 44,
     right: 20,
     zIndex: 10,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: "rgba(255,255,255,0.15)",
+    justifyContent: "center",
+    alignItems: "center",
+  } as ViewStyle,
+  fullScreenSaveButton: {
+    position: "absolute",
+    top: 44,
+    left: 20,
+    zIndex: 10,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: "rgba(255,255,255,0.15)",
+    justifyContent: "center",
+    alignItems: "center",
   } as ViewStyle,
   fullScreenImage: {
     width: "100%",
@@ -854,6 +905,16 @@ const styles = StyleSheet.create({
     borderRadius: 26,
     backgroundColor: "#E5E7EB",
   } as ImageStyle,
+  ownerAvatarFallback: {
+    backgroundColor: NAVY,
+    justifyContent: "center",
+    alignItems: "center",
+  } as ViewStyle,
+  ownerAvatarInitial: {
+    color: "#fff",
+    fontSize: 20,
+    fontWeight: "800",
+  } as TextStyle,
   ownerDetails: { flex: 1 } as ViewStyle,
   ownerNameRow: {
     flexDirection: "row",
@@ -886,17 +947,22 @@ const styles = StyleSheet.create({
     color: "#4B5563",
     lineHeight: 18,
   } as TextStyle,
-
-  // ── Like button — matches ProductDetails screen:
-  //    inactive: white bg + navy border + navy text/icon
-  //    active:   navy bg + white text/icon
+  viewProfileRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+  } as ViewStyle,
+  viewProfileText: {
+    fontSize: 13,
+    fontWeight: "700",
+    color: NAVY,
+  } as TextStyle,
   likeButton: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
     gap: 8,
     paddingVertical: 14,
-    paddingHorizontal: 16,
     borderRadius: 12,
     borderWidth: 2,
     borderColor: NAVY,
@@ -911,10 +977,7 @@ const styles = StyleSheet.create({
     fontWeight: "600",
     color: NAVY,
   } as TextStyle,
-  likeButtonTextActive: {
-    color: "#fff",
-  } as TextStyle,
-
+  likeButtonTextActive: { color: "#fff" } as TextStyle,
   actionRow: {
     flexDirection: "row",
     gap: 10,
@@ -940,7 +1003,7 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "#C9A227",
+    backgroundColor: GOLD,
     borderRadius: 12,
     paddingVertical: 14,
     gap: 6,
@@ -964,15 +1027,5 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: "#888",
     fontWeight: "500",
-  } as TextStyle,
-  ownerAvatarFallback: {
-    backgroundColor: NAVY,
-    justifyContent: "center",
-    alignItems: "center",
-  } as ViewStyle,
-  ownerAvatarInitial: {
-    color: "#fff",
-    fontSize: 20,
-    fontWeight: "800",
   } as TextStyle,
 });

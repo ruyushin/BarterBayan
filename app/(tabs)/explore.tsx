@@ -1,7 +1,9 @@
 import { FontAwesome, Ionicons } from "@expo/vector-icons";
-import { useLocalSearchParams, useRouter } from "expo-router";
+import * as FileSystem from "expo-file-system";
+import * as MediaLibrary from "expo-media-library";
+import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 import { onAuthStateChanged } from "firebase/auth";
-import React, { useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -9,10 +11,10 @@ import {
   FlatList,
   Image,
   Modal,
+  Platform,
   Pressable,
   SafeAreaView,
   ScrollView,
-  Share,
   StyleSheet,
   Text,
   TextInput,
@@ -31,6 +33,7 @@ import {
   updateItemLikes,
   updateItemSave,
 } from "../../services/itemService";
+import { getLikeState, setLikeState } from "../../services/likeCache";
 import { sendMessage } from "../../services/messagingService";
 import {
   getPersonalizedSuggestions,
@@ -38,7 +41,8 @@ import {
 } from "../../services/trendingService";
 
 const { width: screenWidth, height: screenHeight } = Dimensions.get("window");
-
+const NAVY = "#2f2f6f";
+const GOLD = "#C9A227";
 const PLACEHOLDER = "https://via.placeholder.com/400x200?text=No+Image";
 
 const FILTER_CATEGORIES = [
@@ -50,7 +54,7 @@ const FILTER_CATEGORIES = [
   "Household",
 ];
 
-// ── Centralised URI guard ─────────────────────────────────────────────────────
+// ── URI guard ─────────────────────────────────────────────────────────────────
 function safeUri(uri: any): string {
   if (!uri || typeof uri !== "string") return PLACEHOLDER;
   if (uri.startsWith("blob:")) return PLACEHOLDER;
@@ -64,8 +68,41 @@ function safeUriList(images: any): string[] {
   const raw = Array.isArray(images) ? images : [];
   return raw.map(safeUri).filter((u) => u !== PLACEHOLDER);
 }
-// ─────────────────────────────────────────────────────────────────────────────
 
+// ── Cross-platform save ───────────────────────────────────────────────────────
+async function saveImageCrossPlatform(url: string) {
+  if (Platform.OS === "web") {
+    try {
+      const res = await fetch(url);
+      const blob = await res.blob();
+      const objectUrl = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = objectUrl;
+      a.download = `barterbayan-${Date.now()}.jpg`;
+      a.click();
+      URL.revokeObjectURL(objectUrl);
+    } catch {
+      Alert.alert("Error", "Failed to download image.");
+    }
+  } else {
+    try {
+      const { status } = await MediaLibrary.requestPermissionsAsync();
+      if (status !== "granted") {
+        Alert.alert("Permission denied", "Camera roll permission is required.");
+        return;
+      }
+      const filename = `BarterBayan_${Date.now()}.jpg`;
+      const fileDir = (FileSystem as any).documentDirectory || "";
+      const result = await FileSystem.downloadAsync(url, fileDir + filename);
+      await MediaLibrary.saveToLibraryAsync(result.uri);
+      Alert.alert("Saved!", "Image saved to your gallery.");
+    } catch {
+      Alert.alert("Error", "Failed to save image.");
+    }
+  }
+}
+
+// ── Main Screen ───────────────────────────────────────────────────────────────
 export default function Screen() {
   const params = useLocalSearchParams<{
     filter?: string;
@@ -94,24 +131,29 @@ export default function Screen() {
     return () => unsubscribe();
   }, []);
 
+  // Refetch on screen focus so likes/saves stay in sync when returning
+  // from product-details or any other screen
+  useFocusEffect(
+    useCallback(() => {
+      setRefreshKey((k) => k + 1);
+    }, []),
+  );
+
   useEffect(() => {
     const fetchItems = async () => {
       try {
         if (isInitialLoad) setLoading(true);
-
-        // Single enrichment fetch — always needed for userName / userAvatar
         const allEnriched = await getAllItems();
         const enrichMap = Object.fromEntries(
           allEnriched.map((i: any) => [i.id, i]),
         );
 
         let items: any[];
-
         if (typeFilter === "trending") {
           const trending = await getTrendingItems(50);
           items = trending.map((item: any) => ({
-            ...enrichMap[item.id], // enriched first — has userName, userAvatar
-            ...item, // overlay trending-specific fields
+            ...enrichMap[item.id],
+            ...item,
             userName:
               enrichMap[item.id]?.userName || item.userName || "Unknown User",
             userAvatar: enrichMap[item.id]?.userAvatar || item.userAvatar || "",
@@ -128,7 +170,6 @@ export default function Screen() {
             userAvatar: enrichMap[item.id]?.userAvatar || item.userAvatar || "",
           }));
         } else {
-          // "all" — reuse the enrichment fetch, no extra call needed
           items = allEnriched;
         }
 
@@ -140,7 +181,6 @@ export default function Screen() {
         if (isInitialLoad) setLoading(false);
       }
     };
-
     fetchItems();
   }, [refreshKey, userId, typeFilter]);
 
@@ -182,19 +222,12 @@ export default function Screen() {
       prev === "none" ? "likes" : prev === "likes" ? "name" : "none",
     );
 
-  const handleFilterToggle = () => setIsFilterOpen((prev) => !prev);
-
-  const handleCategorySelect = (category: string) => {
-    setFilter(category);
-    setIsFilterOpen(false);
-  };
-
   if (loading) {
     return (
       <SafeAreaView style={styles.container}>
         <View style={styles.loaderContainer}>
-          <ActivityIndicator size="large" color="#2f2f6f" />
-          <Text style={styles.loadingText}>{"Loading items..."}</Text>
+          <ActivityIndicator size="large" color={NAVY} />
+          <Text style={styles.loadingText}>Loading items...</Text>
         </View>
       </SafeAreaView>
     );
@@ -213,7 +246,7 @@ export default function Screen() {
         )}
         ListHeaderComponent={
           <>
-            {/* ── Search Bar ── */}
+            {/* Search Bar */}
             <View style={styles.searchWrapper}>
               <View style={styles.searchContainer}>
                 <Ionicons
@@ -279,7 +312,7 @@ export default function Screen() {
                           ))
                         ) : (
                           <Text style={styles.noResultsText}>
-                            {"Try a different keyword or category."}
+                            Try a different keyword.
                           </Text>
                         )}
                       </>
@@ -289,81 +322,57 @@ export default function Screen() {
               )}
             </View>
 
+            {/* Type filter pills */}
             <View style={styles.typeFilterRow}>
-              <Pressable
-                style={[
-                  styles.typeFilterBtn,
-                  typeFilter === "all" && styles.typeFilterBtnActive,
-                ]}
-                onPress={() => setTypeFilter("all")}
-              >
-                <Ionicons
-                  name="grid"
-                  size={16}
-                  color={typeFilter === "all" ? "#fff" : "#2f2f6f"}
-                />
-                <Text
-                  style={[
-                    styles.typeFilterText,
-                    typeFilter === "all" && styles.typeFilterTextActive,
-                  ]}
-                >
-                  {"All"}
-                </Text>
-              </Pressable>
-
-              <Pressable
-                style={[
-                  styles.typeFilterBtn,
-                  typeFilter === "trending" && styles.typeFilterBtnActive,
-                ]}
-                onPress={() => setTypeFilter("trending")}
-              >
-                <Ionicons
-                  name="flame"
-                  size={16}
-                  color={typeFilter === "trending" ? "#fff" : "#2f2f6f"}
-                />
-                <Text
-                  style={[
-                    styles.typeFilterText,
-                    typeFilter === "trending" && styles.typeFilterTextActive,
-                  ]}
-                >
-                  {"Trending"}
-                </Text>
-              </Pressable>
-
-              <Pressable
-                style={[
-                  styles.typeFilterBtn,
-                  typeFilter === "personalized" && styles.typeFilterBtnActive,
-                ]}
-                onPress={() => setTypeFilter("personalized")}
-              >
-                <Ionicons
-                  name="sparkles"
-                  size={16}
-                  color={typeFilter === "personalized" ? "#fff" : "#2f2f6f"}
-                />
-                <Text
-                  style={[
-                    styles.typeFilterText,
-                    typeFilter === "personalized" &&
-                      styles.typeFilterTextActive,
-                  ]}
-                >
-                  {"Suggested"}
-                </Text>
-              </Pressable>
+              {(["all", "trending", "personalized"] as const).map((type) => {
+                const icons = {
+                  all: "grid",
+                  trending: "flame",
+                  personalized: "sparkles",
+                } as const;
+                const labels = {
+                  all: "All",
+                  trending: "Trending",
+                  personalized: "Suggested",
+                };
+                const isActive = typeFilter === type;
+                return (
+                  <Pressable
+                    key={type}
+                    style={[
+                      styles.typeFilterBtn,
+                      isActive && styles.typeFilterBtnActive,
+                    ]}
+                    onPress={() => setTypeFilter(type)}
+                  >
+                    <Ionicons
+                      name={icons[type]}
+                      size={16}
+                      color={isActive ? "#fff" : NAVY}
+                    />
+                    <Text
+                      style={[
+                        styles.typeFilterText,
+                        isActive && styles.typeFilterTextActive,
+                      ]}
+                    >
+                      {labels[type]}
+                    </Text>
+                  </Pressable>
+                );
+              })}
             </View>
 
+            {/* Sort / Filter row */}
             <View style={styles.filterRow}>
               <Pressable style={styles.filterBtn} onPress={handleSort}>
                 <Text style={styles.filterText}>{`Sort (${sortType})`}</Text>
                 <Ionicons name="swap-vertical" size={14} />
               </Pressable>
-              <Pressable style={styles.filterBtn} onPress={handleFilterToggle}>
+              <Pressable
+                style={styles.filterBtn}
+                onPress={() => setIsFilterOpen((p) => !p)}
+              >
                 <Text style={styles.filterText}>{`Filter (${filter})`}</Text>
                 <Ionicons
                   name={isFilterOpen ? "chevron-up" : "chevron-down"}
@@ -377,7 +386,10 @@ export default function Screen() {
                 {FILTER_CATEGORIES.map((category) => (
                   <Pressable
                     key={category}
-                    onPress={() => handleCategorySelect(category)}
+                    onPress={() => {
+                      setFilter(category);
+                      setIsFilterOpen(false);
+                    }}
                     style={styles.dropdownItem}
                   >
                     <Text
@@ -397,7 +409,7 @@ export default function Screen() {
         ListEmptyComponent={
           <View style={styles.emptyContainer}>
             <Text style={styles.emptyText}>
-              {"No items found. Try adjusting your search or filters."}
+              No items found. Try adjusting your search or filters.
             </Text>
           </View>
         }
@@ -412,8 +424,23 @@ export default function Screen() {
 function ItemCard({ item, onCommentAdded }: any) {
   const router = useRouter();
 
-  const [isLiked, setIsLiked] = useState(false);
-  const [likes, setLikes] = useState(item.likes || 0);
+  const currentUser = auth.currentUser?.uid;
+  const currentUserName = auth.currentUser?.displayName || "Anonymous";
+  const currentUserPhotoURL =
+    auth.currentUser?.photoURL || "https://i.pravatar.cc/150?img=1";
+  const isOwnItem = !!currentUser && currentUser === item?.ownerId;
+
+  // ── Like state — seed from likeCache first, fall back to item prop ──────────
+  const _cached = getLikeState(item.id);
+  const [isLiked, setIsLiked] = useState(
+    _cached
+      ? _cached.isLiked
+      : !!(currentUser && item?.likedBy?.includes(currentUser)),
+  );
+  const [likes, setLikes] = useState(
+    _cached ? _cached.likeCount : item.likes || 0,
+  );
+
   const [isSaved, setIsSaved] = useState(false);
   const [comments, setComments] = useState<any[]>(item.comments || []);
   const [showComments, setShowComments] = useState(false);
@@ -429,15 +456,7 @@ function ItemCard({ item, onCommentAdded }: any) {
   const [deleteToastVisible, setDeleteToastVisible] = useState(false);
   const [deletedCommentData, setDeletedCommentData] = useState<any>(null);
   const deleteTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
   const [tradeModalVisible, setTradeModalVisible] = useState(false);
-
-  const currentUser = auth.currentUser?.uid;
-  const currentUserName = auth.currentUser?.displayName || "Anonymous";
-  const currentUserPhotoURL =
-    auth.currentUser?.photoURL || "https://i.pravatar.cc/150?img=1";
-
-  const isOwnItem = !!currentUser && currentUser === item?.ownerId;
 
   const imagesList = (() => {
     const safe = safeUriList(item?.images);
@@ -448,19 +467,27 @@ function ItemCard({ item, onCommentAdded }: any) {
   })();
 
   const imageUrl = imagesList[0];
-
-  // Resolved avatar — never falls back to a remote placeholder
   const resolvedAvatar = safeUri(item?.userAvatar);
   const hasAvatar = resolvedAvatar !== PLACEHOLDER;
-
-  // Resolved username — never blank
   const resolvedName =
     item?.userName && item.userName.trim().length > 0
       ? item.userName
       : "Unknown User";
 
+  // Sync like state: prefer likeCache (holds changes from modal/detail screen),
+  // fall back to fresh item prop when no cache entry exists yet.
   useEffect(() => {
-    if (currentUser && item?.likedBy?.includes(currentUser)) setIsLiked(true);
+    const entry = getLikeState(item.id);
+    if (entry) {
+      setIsLiked(entry.isLiked);
+      setLikes(entry.likeCount);
+    } else {
+      setLikes(item.likes || 0);
+      setIsLiked(!!(currentUser && item?.likedBy?.includes(currentUser)));
+    }
+  }, [item.likes, item.likedBy, item.id, currentUser]);
+
+  useEffect(() => {
     checkIfSaved();
   }, [item, currentUser]);
 
@@ -476,16 +503,21 @@ function ItemCard({ item, onCommentAdded }: any) {
 
   const handleLike = async () => {
     if (!currentUser) {
-      Alert.alert("Please log in", "You must be logged in to like items");
+      Alert.alert("Please log in", "You must be logged in to like items.");
       return;
     }
     try {
       setLoading(true);
-      await updateItemLikes(item.id, currentUser, !isLiked);
-      setIsLiked(!isLiked);
-      setLikes(isLiked ? likes - 1 : likes + 1);
+      const nowLiked = !isLiked;
+      const newCount = nowLiked ? likes + 1 : Math.max(0, likes - 1);
+      await updateItemLikes(item.id, currentUser, nowLiked);
+      setIsLiked(nowLiked);
+      setLikes(newCount);
+      // Write to shared cache so ProductDetailModal and ProductDetailsScreen
+      // see the same value without a Firestore round-trip.
+      setLikeState(item.id, nowLiked, newCount);
     } catch {
-      Alert.alert("Error", "Failed to update like status");
+      Alert.alert("Error", "Failed to update like status.");
     } finally {
       setLoading(false);
     }
@@ -493,7 +525,7 @@ function ItemCard({ item, onCommentAdded }: any) {
 
   const handleSave = async () => {
     if (!currentUser) {
-      Alert.alert("Please log in", "You must be logged in to save items");
+      Alert.alert("Please log in", "You must be logged in to save items.");
       return;
     }
     try {
@@ -505,7 +537,7 @@ function ItemCard({ item, onCommentAdded }: any) {
         isSaved ? "Item removed from saved" : "Item saved successfully",
       );
     } catch {
-      Alert.alert("Error", "Failed to save item");
+      Alert.alert("Error", "Failed to save item.");
     } finally {
       setCommentsLoading(false);
     }
@@ -513,11 +545,11 @@ function ItemCard({ item, onCommentAdded }: any) {
 
   const handleSendMessage = async () => {
     if (!currentUser) {
-      Alert.alert("Please log in", "You must be logged in to send messages");
+      Alert.alert("Please log in", "You must be logged in to send messages.");
       return;
     }
     if (isOwnItem) {
-      Alert.alert("Cannot message", "You cannot message yourself");
+      Alert.alert("Cannot message", "You cannot message yourself.");
       return;
     }
     try {
@@ -528,32 +560,25 @@ function ItemCard({ item, onCommentAdded }: any) {
         `Hi, I'm interested in your ${item.title}`,
         item.id,
       );
-      Alert.alert("Message sent", "Your message has been sent successfully");
+      Alert.alert("Message sent", "Your message has been sent successfully.");
       router.push("/inbox");
     } catch {
-      Alert.alert("Error", "Failed to send message");
+      Alert.alert("Error", "Failed to send message.");
     } finally {
       setCommentsLoading(false);
     }
   };
 
-  const handleSaveImage = async () => {
-    try {
-      const currentImage = imagesList[currentImageIndex];
-      await Share.share({
-        url: currentImage,
-        message: `Check out this image from ${item.title}`,
-        title: item.title,
-      });
-    } catch {
-      Alert.alert("Error", "Failed to save image");
-    }
+  const handleSaveGalleryImage = async () => {
+    const currentImage = imagesList[currentImageIndex];
+    if (!currentImage || currentImage === PLACEHOLDER) return;
+    await saveImageCrossPlatform(currentImage);
   };
 
   const handleAddComment = async () => {
     if (!currentUser || !commentText.trim()) {
       if (!currentUser)
-        Alert.alert("Please log in", "You must be logged in to comment");
+        Alert.alert("Please log in", "You must be logged in to comment.");
       return;
     }
     try {
@@ -568,7 +593,7 @@ function ItemCard({ item, onCommentAdded }: any) {
       setComments([...comments, newComment]);
       setCommentText("");
     } catch {
-      Alert.alert("Error", "Failed to add comment");
+      Alert.alert("Error", "Failed to add comment.");
     } finally {
       setCommentsLoading(false);
     }
@@ -577,7 +602,7 @@ function ItemCard({ item, onCommentAdded }: any) {
   const handleAddReply = async (commentId: string) => {
     if (!currentUser || !replyText.trim()) {
       if (!currentUser)
-        Alert.alert("Please log in", "You must be logged in to reply");
+        Alert.alert("Please log in", "You must be logged in to reply.");
       return;
     }
     try {
@@ -590,30 +615,31 @@ function ItemCard({ item, onCommentAdded }: any) {
         currentUserName,
         currentUserPhotoURL,
       );
-      const updatedComments = comments.map((c) => {
-        if (c.id === commentId) {
-          return {
-            ...c,
-            replies: [
-              ...(c.replies || []),
-              {
-                id: Date.now().toString(),
-                userId: currentUser,
-                userName: currentUserName,
-                userAvatar: currentUserPhotoURL,
-                text: replyText.trim(),
-                createdAt: new Date(),
-              },
-            ],
-          };
-        }
-        return c;
-      });
-      setComments(updatedComments);
+      setComments(
+        comments.map((c) => {
+          if (c.id === commentId) {
+            return {
+              ...c,
+              replies: [
+                ...(c.replies || []),
+                {
+                  id: Date.now().toString(),
+                  userId: currentUser,
+                  userName: currentUserName,
+                  userAvatar: currentUserPhotoURL,
+                  text: replyText.trim(),
+                  createdAt: new Date(),
+                },
+              ],
+            };
+          }
+          return c;
+        }),
+      );
       setReplyText("");
       setReplyingToCommentId(null);
     } catch {
-      Alert.alert("Error", "Failed to add reply");
+      Alert.alert("Error", "Failed to add reply.");
     } finally {
       setCommentsLoading(false);
     }
@@ -624,29 +650,30 @@ function ItemCard({ item, onCommentAdded }: any) {
     commentLiked: boolean,
   ) => {
     if (!currentUser) {
-      Alert.alert("Please log in", "You must be logged in to like comments");
+      Alert.alert("Please log in", "You must be logged in to like comments.");
       return;
     }
     try {
       await updateCommentLike(item.id, commentId, currentUser, !commentLiked);
-      const updatedComments = comments.map((c) => {
-        if (c.id === commentId) {
-          const likedByArray = c.likedBy || [];
-          return {
-            ...c,
-            likedBy: !commentLiked
-              ? [...likedByArray, currentUser]
-              : likedByArray.filter((id: string) => id !== currentUser),
-            likes: !commentLiked
-              ? (c.likes || 0) + 1
-              : Math.max((c.likes || 0) - 1, 0),
-          };
-        }
-        return c;
-      });
-      setComments(updatedComments);
+      setComments(
+        comments.map((c) => {
+          if (c.id === commentId) {
+            const likedByArray = c.likedBy || [];
+            return {
+              ...c,
+              likedBy: !commentLiked
+                ? [...likedByArray, currentUser]
+                : likedByArray.filter((id: string) => id !== currentUser),
+              likes: !commentLiked
+                ? (c.likes || 0) + 1
+                : Math.max((c.likes || 0) - 1, 0),
+            };
+          }
+          return c;
+        }),
+      );
     } catch {
-      Alert.alert("Error", "Failed to update comment like");
+      Alert.alert("Error", "Failed to update comment like.");
     }
   };
 
@@ -658,11 +685,12 @@ function ItemCard({ item, onCommentAdded }: any) {
       setDeletedCommentData(commentToDeleteObj);
       setDeleteToastVisible(true);
       if (deleteTimerRef.current) clearTimeout(deleteTimerRef.current);
-      deleteTimerRef.current = setTimeout(() => {
-        setDeleteToastVisible(false);
-      }, 5000);
+      deleteTimerRef.current = setTimeout(
+        () => setDeleteToastVisible(false),
+        5000,
+      );
     } catch {
-      Alert.alert("Error", "Failed to delete comment");
+      Alert.alert("Error", "Failed to delete comment.");
     }
   };
 
@@ -681,7 +709,7 @@ function ItemCard({ item, onCommentAdded }: any) {
         deletedCommentData.userAvatar,
       );
     } catch {
-      Alert.alert("Error", "Failed to undo delete");
+      Alert.alert("Error", "Failed to undo delete.");
     }
   };
 
@@ -709,7 +737,6 @@ function ItemCard({ item, onCommentAdded }: any) {
           }
           activeOpacity={0.8}
         >
-          {/* Avatar — initials fallback when no valid image */}
           {hasAvatar ? (
             <Image source={{ uri: resolvedAvatar }} style={styles.avatar} />
           ) : (
@@ -719,7 +746,6 @@ function ItemCard({ item, onCommentAdded }: any) {
               </Text>
             </View>
           )}
-
           <View style={styles.userDetails}>
             <Text style={styles.username}>{resolvedName}</Text>
             <Text style={styles.date}>
@@ -790,18 +816,16 @@ function ItemCard({ item, onCommentAdded }: any) {
                   height: screenHeight,
                   resizeMode: "contain",
                 }}
-                onError={() =>
-                  console.warn("Failed to load gallery image:", img)
-                }
               />
             ))}
           </ScrollView>
           <View style={styles.galleryControls}>
+            {/* Save button */}
             <TouchableOpacity
               style={styles.galleryBtn}
-              onPress={handleSaveImage}
+              onPress={handleSaveGalleryImage}
             >
-              <Ionicons name="download" size={24} color="white" />
+              <Ionicons name="download-outline" size={22} color="white" />
             </TouchableOpacity>
             <Text style={styles.imageCounter}>
               {`${currentImageIndex + 1} / ${imagesList.length}`}
@@ -830,7 +854,7 @@ function ItemCard({ item, onCommentAdded }: any) {
             size={14}
             color="#AAAAAA"
           />
-          <Text style={styles.ownItemText}>{"Your listing"}</Text>
+          <Text style={styles.ownItemText}>Your listing</Text>
         </View>
       ) : (
         <View style={styles.actionButtons}>
@@ -840,18 +864,17 @@ function ItemCard({ item, onCommentAdded }: any) {
             disabled={commentsLoading}
             activeOpacity={0.8}
           >
-            <Ionicons name="send" size={14} color="#2f2f6f" />
-            <Text style={styles.actionBtnText}>{"Message"}</Text>
+            <Ionicons name="send" size={14} color={NAVY} />
+            <Text style={styles.actionBtnText}>Message</Text>
           </TouchableOpacity>
-
           <TouchableOpacity
             style={[styles.actionBtn, styles.actionBtnTrade]}
             onPress={() => setTradeModalVisible(true)}
             activeOpacity={0.8}
           >
-            <Ionicons name="swap-horizontal" size={14} color="#C9A227" />
+            <Ionicons name="swap-horizontal" size={14} color={GOLD} />
             <Text style={[styles.actionBtnText, styles.actionBtnTextTrade]}>
-              {"Propose Trade"}
+              Propose Trade
             </Text>
           </TouchableOpacity>
         </View>
@@ -885,19 +908,19 @@ function ItemCard({ item, onCommentAdded }: any) {
             <FontAwesome
               name={isSaved ? "bookmark" : "bookmark-o"}
               size={16}
-              color={isSaved ? "#2f2f6f" : "#666"}
+              color={isSaved ? NAVY : "#666"}
             />
             <Text style={styles.statText}>{isSaved ? "Saved" : "Save"}</Text>
           </Pressable>
         </View>
       </View>
 
-      {/* COMMENTS SECTION */}
+      {/* COMMENTS */}
       {showComments && (
         <View style={styles.commentsSection}>
-          <Text style={styles.commentsTitle}>
-            {`Comments (${getTopLevelCommentCount()})`}
-          </Text>
+          <Text
+            style={styles.commentsTitle}
+          >{`Comments (${getTopLevelCommentCount()})`}</Text>
           <View style={styles.commentInputContainer}>
             <TextInput
               style={styles.commentInput}
@@ -911,7 +934,7 @@ function ItemCard({ item, onCommentAdded }: any) {
               onPress={handleAddComment}
               disabled={commentsLoading || !commentText.trim()}
             >
-              <Ionicons name="send" size={16} color="#2f2f6f" />
+              <Ionicons name="send" size={16} color={NAVY} />
             </TouchableOpacity>
           </View>
 
@@ -963,8 +986,8 @@ function ItemCard({ item, onCommentAdded }: any) {
                         }
                         style={styles.commentReplyBtn}
                       >
-                        <Ionicons name="arrow-redo" size={14} color="#2f2f6f" />
-                        <Text style={styles.commentReplyText}>{"Reply"}</Text>
+                        <Ionicons name="arrow-redo" size={14} color={NAVY} />
+                        <Text style={styles.commentReplyText}>Reply</Text>
                       </Pressable>
                       {currentUser === comment.userId && (
                         <Pressable
@@ -1013,7 +1036,7 @@ function ItemCard({ item, onCommentAdded }: any) {
                           onPress={() => handleAddReply(comment.id)}
                           disabled={commentsLoading || !replyText.trim()}
                         >
-                          <Ionicons name="send" size={14} color="#2f2f6f" />
+                          <Ionicons name="send" size={14} color={NAVY} />
                         </TouchableOpacity>
                       </View>
                     )}
@@ -1029,10 +1052,10 @@ function ItemCard({ item, onCommentAdded }: any) {
       {deleteToastVisible && (
         <View style={styles.deleteToast}>
           <Text style={styles.deleteToastText}>
-            {"1 comment deleted. Tap to undo."}
+            1 comment deleted. Tap to undo.
           </Text>
           <TouchableOpacity onPress={handleUndoDelete}>
-            <Text style={styles.deleteToastUndo}>{"Undo"}</Text>
+            <Text style={styles.deleteToastUndo}>Undo</Text>
           </TouchableOpacity>
         </View>
       )}
@@ -1094,17 +1117,6 @@ const styles = StyleSheet.create({
   searchResultText: { fontSize: 14, fontWeight: "600", color: "#111827" },
   searchResultCategory: { fontSize: 12, color: "#6B7280", marginTop: 2 },
   noResultsText: { color: "#6B7280", fontSize: 13, lineHeight: 20 },
-  filterRow: { flexDirection: "row", marginHorizontal: 15, marginBottom: 10 },
-  filterBtn: {
-    flexDirection: "row",
-    backgroundColor: "#D9D9D9",
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 6,
-    marginRight: 10,
-    alignItems: "center",
-  },
-  filterText: { marginRight: 5, fontSize: 13 },
   typeFilterRow: {
     flexDirection: "row",
     marginHorizontal: 12,
@@ -1123,9 +1135,20 @@ const styles = StyleSheet.create({
     borderColor: "transparent",
     gap: 6,
   },
-  typeFilterBtnActive: { backgroundColor: "#2f2f6f", borderColor: "#2f2f6f" },
+  typeFilterBtnActive: { backgroundColor: NAVY, borderColor: NAVY },
   typeFilterText: { fontSize: 13, fontWeight: "600", color: "#666" },
   typeFilterTextActive: { color: "#FFFFFF", fontWeight: "700" },
+  filterRow: { flexDirection: "row", marginHorizontal: 15, marginBottom: 10 },
+  filterBtn: {
+    flexDirection: "row",
+    backgroundColor: "#D9D9D9",
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 6,
+    marginRight: 10,
+    alignItems: "center",
+  },
+  filterText: { marginRight: 5, fontSize: 13 },
   filterDropdown: {
     marginHorizontal: 15,
     backgroundColor: "white",
@@ -1137,7 +1160,7 @@ const styles = StyleSheet.create({
   },
   dropdownItem: { paddingVertical: 12, paddingHorizontal: 15 },
   dropdownText: { fontSize: 13, color: "#333" },
-  dropdownTextActive: { fontWeight: "700", color: "#2f2f6f" },
+  dropdownTextActive: { fontWeight: "700", color: NAVY },
   card: {
     backgroundColor: "#FFFFFF",
     marginHorizontal: 12,
@@ -1166,33 +1189,28 @@ const styles = StyleSheet.create({
     marginRight: 12,
     backgroundColor: "#E8E8E8",
   },
-  // ── NEW: initials fallback ──
   avatarFallback: {
-    backgroundColor: "#2f2f6f",
+    backgroundColor: NAVY,
     justifyContent: "center",
     alignItems: "center",
   },
-  avatarInitial: {
-    color: "#fff",
-    fontSize: 16,
-    fontWeight: "800",
-  },
+  avatarInitial: { color: "#fff", fontSize: 16, fontWeight: "800" },
   userDetails: { flex: 1 },
   username: { fontWeight: "700", fontSize: 14, color: "#1F1F1F" },
   date: { fontSize: 12, color: "#999", marginTop: 2 },
   badgeContainer: { padding: 6 },
-  cardImage: { width: "100%", height: 220, backgroundColor: "#F5F5F5" },
   cardImageContainer: {
     position: "relative",
     width: "100%",
     height: 220,
     backgroundColor: "#F5F5F5",
   },
+  cardImage: { width: "100%", height: 220, backgroundColor: "#F5F5F5" },
   imageCountBadge: {
     position: "absolute",
     bottom: 10,
     right: 10,
-    backgroundColor: "rgba(0, 0, 0, 0.6)",
+    backgroundColor: "rgba(0,0,0,0.6)",
     paddingHorizontal: 10,
     paddingVertical: 6,
     borderRadius: 20,
@@ -1205,7 +1223,7 @@ const styles = StyleSheet.create({
     position: "absolute",
     top: 10,
     right: 10,
-    backgroundColor: "rgba(0, 0, 0, 0.6)",
+    backgroundColor: "rgba(0,0,0,0.6)",
     paddingHorizontal: 10,
     paddingVertical: 8,
     borderRadius: 8,
@@ -1228,7 +1246,7 @@ const styles = StyleSheet.create({
     width: 50,
     height: 50,
     borderRadius: 25,
-    backgroundColor: "rgba(255, 255, 255, 0.3)",
+    backgroundColor: "rgba(255,255,255,0.3)",
     justifyContent: "center",
     alignItems: "center",
   },
@@ -1266,8 +1284,8 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: "#F0D98A",
   },
-  actionBtnText: { fontSize: 12, fontWeight: "600", color: "#2f2f6f" },
-  actionBtnTextTrade: { color: "#C9A227" },
+  actionBtnText: { fontSize: 12, fontWeight: "600", color: NAVY },
+  actionBtnTextTrade: { color: GOLD },
   ownItemBanner: {
     flexDirection: "row",
     alignItems: "center",
@@ -1331,7 +1349,7 @@ const styles = StyleSheet.create({
   commentLikeText: { fontSize: 11, color: "#999" },
   commentDeleteBtn: { padding: 4 },
   commentReplyBtn: { flexDirection: "row", alignItems: "center", gap: 4 },
-  commentReplyText: { fontSize: 11, color: "#2f2f6f", fontWeight: "600" },
+  commentReplyText: { fontSize: 11, color: NAVY, fontWeight: "600" },
   repliesContainer: {
     marginTop: 10,
     marginLeft: 10,
@@ -1396,7 +1414,7 @@ const styles = StyleSheet.create({
   deleteToastUndo: {
     fontSize: 14,
     fontWeight: "600",
-    color: "#2f2f6f",
+    color: GOLD,
     marginLeft: 12,
   },
 });
