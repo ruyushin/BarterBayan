@@ -1,11 +1,7 @@
 import { Ionicons } from "@expo/vector-icons";
 import * as ImagePicker from "expo-image-picker";
 import { useRouter } from "expo-router";
-import {
-  onAuthStateChanged,
-  updateProfile,
-  User
-} from "firebase/auth";
+import { onAuthStateChanged, updateProfile, User } from "firebase/auth";
 import { doc, getDoc, updateDoc } from "firebase/firestore";
 import React, { useEffect, useRef, useState } from "react";
 import {
@@ -27,8 +23,10 @@ import { DeleteAccountModal } from "../components/DeleteAccountModal";
 import { auth, db } from "../firebaseConfig";
 
 // ─── Cloudinary Config ────────────────────────────────────────────────────────
-const CLOUDINARY_CLOUD_NAME = process.env.EXPO_PUBLIC_CLOUDINARY_CLOUD_NAME ?? "";
-const CLOUDINARY_UPLOAD_PRESET = process.env.EXPO_PUBLIC_CLOUDINARY_UPLOAD_PRESET ?? "";
+const CLOUDINARY_CLOUD_NAME =
+  process.env.EXPO_PUBLIC_CLOUDINARY_CLOUD_NAME ?? "";
+const CLOUDINARY_UPLOAD_PRESET =
+  process.env.EXPO_PUBLIC_CLOUDINARY_UPLOAD_PRESET ?? "";
 const CLOUDINARY_UPLOAD_URL = `https://api.cloudinary.com/v1_1/${CLOUDINARY_CLOUD_NAME}/image/upload`;
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -55,8 +53,6 @@ interface FormErrors {
 }
 
 // ─── Cross-platform Modal ─────────────────────────────────────────────────────
-// React Native's <Modal> is not supported on Expo Web; this renders an
-// absolutely-positioned overlay that works on web + iOS + Android.
 function AppModal({
   visible,
   onRequestClose,
@@ -124,14 +120,16 @@ async function uploadAvatarToCloudinary(
   if (!CLOUDINARY_CLOUD_NAME || !CLOUDINARY_UPLOAD_PRESET) {
     throw new Error(
       "Cloudinary is not configured.\n\n" +
-      "Environment variables missing:\n" +
-      (CLOUDINARY_CLOUD_NAME ? "" : "- EXPO_PUBLIC_CLOUDINARY_CLOUD_NAME\n") +
-      (CLOUDINARY_UPLOAD_PRESET ? "" : "- EXPO_PUBLIC_CLOUDINARY_UPLOAD_PRESET\n") +
-      "\nMake sure these are set in your .env file.\n" +
-      "If you recently added them, restart your Expo dev server with:\n" +
-      "1. Press Ctrl+C in terminal\n" +
-      "2. Run: npx expo start -c (to clear cache)\n" +
-      "3. Restart the app",
+        "Environment variables missing:\n" +
+        (CLOUDINARY_CLOUD_NAME ? "" : "- EXPO_PUBLIC_CLOUDINARY_CLOUD_NAME\n") +
+        (CLOUDINARY_UPLOAD_PRESET
+          ? ""
+          : "- EXPO_PUBLIC_CLOUDINARY_UPLOAD_PRESET\n") +
+        "\nMake sure these are set in your .env file.\n" +
+        "If you recently added them, restart your Expo dev server with:\n" +
+        "1. Press Ctrl+C in terminal\n" +
+        "2. Run: npx expo start -c (to clear cache)\n" +
+        "3. Restart the app",
     );
   }
 
@@ -165,7 +163,11 @@ async function uploadAvatarToCloudinary(
           reject(new Error("Invalid response from Cloudinary."));
         }
       } else {
-        reject(new Error(`Upload failed with status ${xhr.status}: ${xhr.responseText}`));
+        reject(
+          new Error(
+            `Upload failed with status ${xhr.status}: ${xhr.responseText}`,
+          ),
+        );
       }
     };
     xhr.onerror = () => reject(new Error("Network error during upload."));
@@ -205,20 +207,35 @@ function FloatingInput({
 
   const onFocus = () => {
     setFocused(true);
-    Animated.spring(borderAnim, { toValue: 1, useNativeDriver: false, tension: 120 }).start();
+    Animated.spring(borderAnim, {
+      toValue: 1,
+      useNativeDriver: false,
+      tension: 120,
+    }).start();
   };
   const onBlur = () => {
     setFocused(false);
-    Animated.spring(borderAnim, { toValue: 0, useNativeDriver: false, tension: 120 }).start();
+    Animated.spring(borderAnim, {
+      toValue: 0,
+      useNativeDriver: false,
+      tension: 120,
+    }).start();
   };
 
   const borderColor = borderAnim.interpolate({
     inputRange: [0, 1],
-    outputRange: [error ? ACCENT_RED : "#E0E0E0", error ? ACCENT_RED : DARK_BLUE],
+    outputRange: [
+      error ? ACCENT_RED : "#E0E0E0",
+      error ? ACCENT_RED : DARK_BLUE,
+    ],
   });
 
   const hasValue = value.length > 0;
   const labelActive = focused || hasValue;
+
+  // ── FIX: use explicit Boolean() to prevent raw strings/numbers
+  // being rendered as text nodes inside <View> on React Native Web
+  const showCounter = Boolean(maxLength && focused && !multiline);
 
   return (
     <View style={inputStyles.wrapper}>
@@ -234,7 +251,7 @@ function FloatingInput({
             inputStyles.label,
             labelActive && inputStyles.labelActive,
             focused && inputStyles.labelFocused,
-            error && inputStyles.labelError,
+            !!error && inputStyles.labelError,
           ]}
         >
           {label}
@@ -259,14 +276,21 @@ function FloatingInput({
           placeholderTextColor="transparent"
           placeholder=" "
         />
-        {maxLength && focused && !multiline && (
-          <Text style={inputStyles.counter}>{value.length}/{maxLength}</Text>
+        {showCounter && (
+          <Text style={inputStyles.counter}>
+            {value.length}/{maxLength}
+          </Text>
         )}
       </Animated.View>
 
       {error ? (
         <View style={inputStyles.errorContainer}>
-          <Ionicons name="alert-circle" size={14} color={ACCENT_RED} style={{ marginTop: 1 }} />
+          <Ionicons
+            name="alert-circle"
+            size={14}
+            color={ACCENT_RED}
+            style={{ marginTop: 1 }}
+          />
           <Text style={inputStyles.errorText}>{error}</Text>
         </View>
       ) : hint ? (
@@ -293,16 +317,27 @@ function PhoneInput({
 
   const onFocus = () => {
     setFocused(true);
-    Animated.spring(borderAnim, { toValue: 1, useNativeDriver: false, tension: 120 }).start();
+    Animated.spring(borderAnim, {
+      toValue: 1,
+      useNativeDriver: false,
+      tension: 120,
+    }).start();
   };
   const onBlur = () => {
     setFocused(false);
-    Animated.spring(borderAnim, { toValue: 0, useNativeDriver: false, tension: 120 }).start();
+    Animated.spring(borderAnim, {
+      toValue: 0,
+      useNativeDriver: false,
+      tension: 120,
+    }).start();
   };
 
   const borderColor = borderAnim.interpolate({
     inputRange: [0, 1],
-    outputRange: [error ? ACCENT_RED : "#E0E0E0", error ? ACCENT_RED : DARK_BLUE],
+    outputRange: [
+      error ? ACCENT_RED : "#E0E0E0",
+      error ? ACCENT_RED : DARK_BLUE,
+    ],
   });
 
   let displayValue = value.replace(/^\+63/, "").replace(/\D/g, "");
@@ -326,19 +361,26 @@ function PhoneInput({
             inputStyles.label,
             labelActive && inputStyles.labelActive,
             focused && inputStyles.labelFocused,
-            error && inputStyles.labelError,
+            !!error && inputStyles.labelError,
           ]}
         >
           Mobile Number
         </Text>
         <View style={inputStyles.phonePrefixInputRow}>
           <View style={inputStyles.phonePrefixBox}>
-            <Ionicons name="phone-portrait-outline" size={14} color={DARK_BLUE} />
+            <Ionicons
+              name="phone-portrait-outline"
+              size={14}
+              color={DARK_BLUE}
+            />
             <Text style={inputStyles.phonePrefix}>+63</Text>
           </View>
           <View style={inputStyles.phoneDivider} />
           <TextInput
-            style={[inputStyles.phoneTextInput, !editable && inputStyles.inputDisabled]}
+            style={[
+              inputStyles.phoneTextInput,
+              !editable && inputStyles.inputDisabled,
+            ]}
             value={displayValue}
             onChangeText={(text) => {
               const digits = text.replace(/\D/g, "").slice(0, 10);
@@ -358,11 +400,18 @@ function PhoneInput({
 
       {error ? (
         <View style={inputStyles.errorContainer}>
-          <Ionicons name="alert-circle" size={14} color={ACCENT_RED} style={{ marginTop: 1 }} />
+          <Ionicons
+            name="alert-circle"
+            size={14}
+            color={ACCENT_RED}
+            style={{ marginTop: 1 }}
+          />
           <Text style={inputStyles.errorText}>{error}</Text>
         </View>
       ) : (
-        <Text style={inputStyles.hintText}>Philippine mobile number starting with 9</Text>
+        <Text style={inputStyles.hintText}>
+          Philippine mobile number starting with 9
+        </Text>
       )}
     </View>
   );
@@ -392,7 +441,11 @@ function SaveButton({
   return (
     <Animated.View style={{ transform: [{ scale }] }}>
       <TouchableOpacity
-        style={[saveStyles.btn, { backgroundColor: bgColor }, disabled && saveStyles.btnDisabled]}
+        style={[
+          saveStyles.btn,
+          { backgroundColor: bgColor },
+          disabled && saveStyles.btnDisabled,
+        ]}
         onPress={onPress}
         onPressIn={handlePressIn}
         onPressOut={handlePressOut}
@@ -407,7 +460,9 @@ function SaveButton({
             <Text style={[saveStyles.text, { color: textColor }]}>Saved!</Text>
           </View>
         ) : (
-          <Text style={[saveStyles.text, { color: textColor }]}>Save Changes</Text>
+          <Text style={[saveStyles.text, { color: textColor }]}>
+            Save Changes
+          </Text>
         )}
       </TouchableOpacity>
     </Animated.View>
@@ -418,7 +473,11 @@ function SaveButton({
 function UploadProgress({ progress }: { progress: number }) {
   const widthAnim = useRef(new Animated.Value(0)).current;
   useEffect(() => {
-    Animated.timing(widthAnim, { toValue: progress, duration: 200, useNativeDriver: false }).start();
+    Animated.timing(widthAnim, {
+      toValue: progress,
+      duration: 200,
+      useNativeDriver: false,
+    }).start();
   }, [progress]);
   return (
     <View style={uploadStyles.track}>
@@ -460,7 +519,9 @@ export default function EditProfileScreen() {
   const [originalForm, setOriginalForm] = useState<FormState | null>(null);
 
   const [avatarUri, setAvatarUri] = useState<string | null>(null);
-  const [originalAvatarUri, setOriginalAvatarUri] = useState<string | null>(null);
+  const [originalAvatarUri, setOriginalAvatarUri] = useState<string | null>(
+    null,
+  );
   const [uploadProgress, setUploadProgress] = useState<number>(0);
   const [uploading, setUploading] = useState(false);
 
@@ -477,8 +538,16 @@ export default function EditProfileScreen() {
 
   const animateIn = () => {
     Animated.parallel([
-      Animated.timing(fadeAnim, { toValue: 1, duration: 350, useNativeDriver: true }),
-      Animated.spring(slideAnim, { toValue: 0, useNativeDriver: true, tension: 80 }),
+      Animated.timing(fadeAnim, {
+        toValue: 1,
+        duration: 350,
+        useNativeDriver: true,
+      }),
+      Animated.spring(slideAnim, {
+        toValue: 0,
+        useNativeDriver: true,
+        tension: 80,
+      }),
     ]).start();
   };
 
@@ -494,7 +563,10 @@ export default function EditProfileScreen() {
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, async (user) => {
       setAuthReady(true);
-      if (!user) { router.replace("/login"); return; }
+      if (!user) {
+        router.replace("/login");
+        return;
+      }
       setCurrentUser(user);
       setEmail(user.email ?? "");
 
@@ -534,7 +606,10 @@ export default function EditProfileScreen() {
         }
       } catch (err) {
         console.error("Failed to load profile:", err);
-        Alert.alert("Load Error", "Failed to load your profile. Please try again.");
+        Alert.alert(
+          "Load Error",
+          "Failed to load your profile. Please try again.",
+        );
       } finally {
         setLoading(false);
         animateIn();
@@ -560,10 +635,14 @@ export default function EditProfileScreen() {
   const handlePickAvatar = async () => {
     const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (status !== "granted") {
-      Alert.alert("Permission required", "Please allow access to your photo library.", [
-        { text: "Cancel", style: "cancel" },
-        { text: "Open Settings", onPress: () => Linking.openSettings() },
-      ]);
+      Alert.alert(
+        "Permission required",
+        "Please allow access to your photo library.",
+        [
+          { text: "Cancel", style: "cancel" },
+          { text: "Open Settings", onPress: () => Linking.openSettings() },
+        ],
+      );
       return;
     }
     const result = await ImagePicker.launchImageLibraryAsync({
@@ -670,7 +749,10 @@ export default function EditProfileScreen() {
       }, 1500);
     } catch (err: any) {
       console.error("Save error:", err);
-      Alert.alert("Save failed", err?.message ?? "Something went wrong. Please try again.");
+      Alert.alert(
+        "Save failed",
+        err?.message ?? "Something went wrong. Please try again.",
+      );
     } finally {
       setSaving(false);
     }
@@ -704,7 +786,16 @@ export default function EditProfileScreen() {
     );
   }
 
-  const initial = (form.firstName?.trim()[0] ?? form.lastName?.trim()[0] ?? "U").toUpperCase();
+  const initial = (
+    form.firstName?.trim()[0] ??
+    form.lastName?.trim()[0] ??
+    "U"
+  ).toUpperCase();
+
+  // ── FIX: use explicit boolean check to avoid rendering a raw string
+  // as a text node inside <View> on React Native Web
+  const showNamePreview =
+    form.firstName.trim().length > 0 || form.lastName.trim().length > 0;
 
   return (
     <KeyboardAvoidingView
@@ -713,12 +804,19 @@ export default function EditProfileScreen() {
       keyboardVerticalOffset={0}
     >
       {/* ── Discard Changes Modal ── */}
-      <AppModal visible={showDiscardModal} onRequestClose={() => setShowDiscardModal(false)}>
+      <AppModal
+        visible={showDiscardModal}
+        onRequestClose={() => setShowDiscardModal(false)}
+      >
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
             <View style={styles.modalIconRow}>
               <View style={styles.modalIconBox}>
-                <Ionicons name="arrow-undo-outline" size={22} color={ACCENT_RED} />
+                <Ionicons
+                  name="arrow-undo-outline"
+                  size={22}
+                  color={ACCENT_RED}
+                />
               </View>
             </View>
             <Text style={styles.modalTitle}>Discard Changes?</Text>
@@ -746,12 +844,21 @@ export default function EditProfileScreen() {
       </AppModal>
 
       {/* ── Save Changes Modal ── */}
-      <AppModal visible={showSaveModal} onRequestClose={() => setShowSaveModal(false)}>
+      <AppModal
+        visible={showSaveModal}
+        onRequestClose={() => setShowSaveModal(false)}
+      >
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
             <View style={styles.modalIconRow}>
-              <View style={[styles.modalIconBox, { backgroundColor: "#EEF0FB" }]}>
-                <Ionicons name="checkmark-done-outline" size={22} color={DARK_BLUE} />
+              <View
+                style={[styles.modalIconBox, { backgroundColor: "#EEF0FB" }]}
+              >
+                <Ionicons
+                  name="checkmark-done-outline"
+                  size={22}
+                  color={DARK_BLUE}
+                />
               </View>
             </View>
             <Text style={styles.modalTitle}>Save Changes?</Text>
@@ -827,8 +934,9 @@ export default function EditProfileScreen() {
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
       >
-        <Animated.View style={{ opacity: fadeAnim, transform: [{ translateY: slideAnim }] }}>
-
+        <Animated.View
+          style={{ opacity: fadeAnim, transform: [{ translateY: slideAnim }] }}
+        >
           {/* ── Avatar Section ── */}
           <View style={styles.avatarSection}>
             <View style={styles.avatarOuter}>
@@ -839,7 +947,11 @@ export default function EditProfileScreen() {
                   <Text style={styles.avatarInitial}>{initial}</Text>
                 </View>
               )}
-              <TouchableOpacity style={styles.cameraBadge} onPress={handlePickAvatar} activeOpacity={0.8}>
+              <TouchableOpacity
+                style={styles.cameraBadge}
+                onPress={handlePickAvatar}
+                activeOpacity={0.8}
+              >
                 <Ionicons name="camera" size={18} color="#fff" />
               </TouchableOpacity>
             </View>
@@ -854,7 +966,11 @@ export default function EditProfileScreen() {
             )}
 
             <View style={styles.avatarActions}>
-              <TouchableOpacity style={styles.avatarActionBtn} onPress={handlePickAvatar} activeOpacity={0.75}>
+              <TouchableOpacity
+                style={styles.avatarActionBtn}
+                onPress={handlePickAvatar}
+                activeOpacity={0.75}
+              >
                 <Ionicons name="image-outline" size={14} color={DARK_BLUE} />
                 <Text style={styles.avatarActionText}>Change Photo</Text>
               </TouchableOpacity>
@@ -865,7 +981,14 @@ export default function EditProfileScreen() {
                   activeOpacity={0.75}
                 >
                   <Ionicons name="trash-outline" size={14} color={ACCENT_RED} />
-                  <Text style={[styles.avatarActionText, styles.avatarActionTextDanger]}>Remove</Text>
+                  <Text
+                    style={[
+                      styles.avatarActionText,
+                      styles.avatarActionTextDanger,
+                    ]}
+                  >
+                    Remove
+                  </Text>
                 </TouchableOpacity>
               )}
             </View>
@@ -899,12 +1022,18 @@ export default function EditProfileScreen() {
               autoCapitalize="words"
             />
 
-            {(form.firstName || form.lastName) && (
+            {/* FIX: use a pre-computed boolean instead of a raw string short-circuit
+                so React Native Web never receives a string as a View child */}
+            {showNamePreview && (
               <View style={styles.namePreview}>
                 <Ionicons name="person-outline" size={13} color={DARK_BLUE} />
                 <Text style={styles.namePreviewLabel}>Displays as: </Text>
                 <Text style={styles.namePreviewValue}>
-                  {[form.firstName.trim(), form.middleName.trim(), form.lastName.trim()]
+                  {[
+                    form.firstName.trim(),
+                    form.middleName.trim(),
+                    form.lastName.trim(),
+                  ]
                     .filter(Boolean)
                     .join(" ")}
                 </Text>
@@ -955,11 +1084,17 @@ export default function EditProfileScreen() {
             >
               <View style={styles.dangerRowLeft}>
                 <View style={styles.dangerIconBox}>
-                  <Ionicons name="lock-closed-outline" size={18} color={DARK_BLUE} />
+                  <Ionicons
+                    name="lock-closed-outline"
+                    size={18}
+                    color={DARK_BLUE}
+                  />
                 </View>
                 <View>
                   <Text style={styles.dangerRowLabel}>Change Password</Text>
-                  <Text style={styles.dangerRowSub}>Send a reset link to your email</Text>
+                  <Text style={styles.dangerRowSub}>
+                    Send a reset link to your email
+                  </Text>
                 </View>
               </View>
               <Ionicons name="chevron-forward" size={16} color="#CCCCCC" />
@@ -973,12 +1108,18 @@ export default function EditProfileScreen() {
               onPress={() => setDeleteModalVisible(true)}
             >
               <View style={styles.dangerRowLeft}>
-                <View style={[styles.dangerIconBox, { backgroundColor: "#FEE2E2" }]}>
+                <View
+                  style={[styles.dangerIconBox, { backgroundColor: "#FEE2E2" }]}
+                >
                   <Ionicons name="trash-outline" size={18} color={ACCENT_RED} />
                 </View>
                 <View>
-                  <Text style={[styles.dangerRowLabel, { color: ACCENT_RED }]}>Delete Account</Text>
-                  <Text style={styles.dangerRowSub}>Permanently erase all your data</Text>
+                  <Text style={[styles.dangerRowLabel, { color: ACCENT_RED }]}>
+                    Delete Account
+                  </Text>
+                  <Text style={styles.dangerRowSub}>
+                    Permanently erase all your data
+                  </Text>
                 </View>
               </View>
               <Ionicons name="chevron-forward" size={16} color={ACCENT_RED} />
@@ -1000,7 +1141,7 @@ export default function EditProfileScreen() {
               saved={saved}
               disabled={!isDirty || saving}
             />
-            {!isDirty && !saved && (
+            {Boolean(!isDirty && !saved) && (
               <Text style={styles.noChangesText}>No unsaved changes</Text>
             )}
           </View>
@@ -1035,7 +1176,12 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     alignItems: "center",
   },
-  headerTitle: { color: "#fff", fontSize: 22, fontWeight: "800", letterSpacing: 0.4 },
+  headerTitle: {
+    color: "#fff",
+    fontSize: 22,
+    fontWeight: "800",
+    letterSpacing: 0.4,
+  },
   headerSpacer: { width: 60, minWidth: 60 },
   discardText: {
     color: "rgba(255,255,255,0.9)",
@@ -1057,8 +1203,18 @@ const styles = StyleSheet.create({
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: "#ECECEC",
   },
-  avatarOuter: { position: "relative", width: 100, height: 100, marginBottom: 14 },
-  avatar: { width: 100, height: 100, borderRadius: 50, backgroundColor: "#ddd" },
+  avatarOuter: {
+    position: "relative",
+    width: 100,
+    height: 100,
+    marginBottom: 14,
+  },
+  avatar: {
+    width: 100,
+    height: 100,
+    borderRadius: 50,
+    backgroundColor: "#ddd",
+  },
   avatarPlaceholder: {
     width: 100,
     height: 100,
@@ -1086,7 +1242,12 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.2,
     shadowRadius: 4,
   },
-  uploadProgressWrapper: { width: "60%", alignItems: "center", gap: 6, marginBottom: 8 },
+  uploadProgressWrapper: {
+    width: "60%",
+    alignItems: "center",
+    gap: 6,
+    marginBottom: 8,
+  },
   uploadProgressText: { fontSize: 12, color: "#888", fontWeight: "500" },
   avatarActions: { flexDirection: "row", gap: 10 },
   avatarActionBtn: {
@@ -1100,7 +1261,10 @@ const styles = StyleSheet.create({
     borderColor: DARK_BLUE,
     backgroundColor: "#ECEDF8",
   },
-  avatarActionBtnDanger: { borderColor: ACCENT_RED, backgroundColor: "#FEE2E2" },
+  avatarActionBtnDanger: {
+    borderColor: ACCENT_RED,
+    backgroundColor: "#FEE2E2",
+  },
   avatarActionText: { fontSize: 13, fontWeight: "700", color: DARK_BLUE },
   avatarActionTextDanger: { color: ACCENT_RED },
 
@@ -1136,7 +1300,11 @@ const styles = StyleSheet.create({
   },
   dangerRowLabel: { fontSize: 15, fontWeight: "600", color: "#1A1A2E" },
   dangerRowSub: { fontSize: 12, color: "#AAAAAA", marginTop: 2 },
-  dangerDivider: { height: StyleSheet.hairlineWidth, backgroundColor: "#ECECEC", marginHorizontal: 16 },
+  dangerDivider: {
+    height: StyleSheet.hairlineWidth,
+    backgroundColor: "#ECECEC",
+    marginHorizontal: 16,
+  },
 
   namePreview: {
     flexDirection: "row",
@@ -1150,9 +1318,19 @@ const styles = StyleSheet.create({
     gap: 6,
   },
   namePreviewLabel: { fontSize: 12, color: "#888", fontWeight: "600" },
-  namePreviewValue: { fontSize: 14, color: DARK_BLUE, fontWeight: "700", flex: 1 },
+  namePreviewValue: {
+    fontSize: 14,
+    color: DARK_BLUE,
+    fontWeight: "700",
+    flex: 1,
+  },
 
-  saveWrapper: { marginHorizontal: 16, marginTop: 24, alignItems: "center", gap: 10 },
+  saveWrapper: {
+    marginHorizontal: 16,
+    marginTop: 24,
+    alignItems: "center",
+    gap: 10,
+  },
   noChangesText: { fontSize: 12, color: "#BBBBBB", fontWeight: "500" },
 
   modalOverlay: {
@@ -1235,11 +1413,25 @@ const inputStyles = StyleSheet.create({
     position: "relative",
   },
   containerDisabled: { backgroundColor: "#F0F0F0" },
-  cleanPhoneContainer: { flexDirection: "column", paddingTop: 20, paddingBottom: 10 },
-  phonePrefixInputRow: { flexDirection: "row", alignItems: "center", gap: 0, marginTop: 8 },
+  cleanPhoneContainer: {
+    flexDirection: "column",
+    paddingTop: 20,
+    paddingBottom: 10,
+  },
+  phonePrefixInputRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 0,
+    marginTop: 8,
+  },
   phonePrefixBox: { flexDirection: "row", alignItems: "center", gap: 6 },
   phonePrefix: { fontSize: 15, fontWeight: "700", color: "#1A1A2E" },
-  phoneDivider: { width: 1, height: 28, backgroundColor: "#E0E0E0", marginHorizontal: 12 },
+  phoneDivider: {
+    width: 1,
+    height: 28,
+    backgroundColor: "#E0E0E0",
+    marginHorizontal: 12,
+  },
   phoneTextInput: {
     flex: 1,
     fontSize: 15,
@@ -1249,7 +1441,12 @@ const inputStyles = StyleSheet.create({
     minHeight: 28,
     backgroundColor: "#FAFAFA",
   },
-  phoneCounter: { fontSize: 10, color: "#CCCCCC", fontWeight: "600", paddingLeft: 8 },
+  phoneCounter: {
+    fontSize: 10,
+    color: "#CCCCCC",
+    fontWeight: "600",
+    paddingLeft: 8,
+  },
   label: {
     position: "absolute",
     left: 14,
@@ -1280,10 +1477,34 @@ const inputStyles = StyleSheet.create({
   },
   inputMultiline: { minHeight: 64, paddingTop: 4 },
   inputDisabled: { color: "#AAAAAA" },
-  counter: { position: "absolute", right: 12, bottom: 8, fontSize: 10, color: "#CCCCCC", fontWeight: "600" },
-  errorText: { fontSize: 12, color: ACCENT_RED, fontWeight: "500", marginLeft: 4 },
-  errorContainer: { flexDirection: "row", alignItems: "center", marginTop: 6, marginLeft: 4, gap: 6 },
-  hintText: { fontSize: 11.5, color: "#BBBBBB", marginTop: 4, marginLeft: 4, fontStyle: "italic" },
+  counter: {
+    position: "absolute",
+    right: 12,
+    bottom: 8,
+    fontSize: 10,
+    color: "#CCCCCC",
+    fontWeight: "600",
+  },
+  errorText: {
+    fontSize: 12,
+    color: ACCENT_RED,
+    fontWeight: "500",
+    marginLeft: 4,
+  },
+  errorContainer: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginTop: 6,
+    marginLeft: 4,
+    gap: 6,
+  },
+  hintText: {
+    fontSize: 11.5,
+    color: "#BBBBBB",
+    marginTop: 4,
+    marginLeft: 4,
+    fontStyle: "italic",
+  },
   phoneInputWrapper: { flexDirection: "row", alignItems: "center", gap: 6 },
   phoneInput: { flex: 1 },
 });
@@ -1309,7 +1530,13 @@ const saveStyles = StyleSheet.create({
 
 // ─── Upload Progress Styles ───────────────────────────────────────────────────
 const uploadStyles = StyleSheet.create({
-  track: { width: "100%", height: 4, backgroundColor: "#E0E0E0", borderRadius: 2, overflow: "hidden" },
+  track: {
+    width: "100%",
+    height: 4,
+    backgroundColor: "#E0E0E0",
+    borderRadius: 2,
+    overflow: "hidden",
+  },
   fill: { height: "100%", backgroundColor: DARK_BLUE, borderRadius: 2 },
 });
 
