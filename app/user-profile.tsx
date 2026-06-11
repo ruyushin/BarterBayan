@@ -33,7 +33,6 @@ import {
 } from "react-native";
 import { ProductDetailModal } from "../components/ProductDetailModal";
 import { auth, db } from "../firebaseConfig";
-import { sendMessage } from "../services/messagingService";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 const NAVY = "#2f2f6f";
@@ -195,10 +194,12 @@ function ItemCard({
     <TouchableOpacity style={card.wrap} onPress={onPress} activeOpacity={0.88}>
       <View style={card.imgWrap}>
         {imageUrl ? (
-          <Image 
-            source={{ uri: imageUrl }} 
+          <Image
+            source={{ uri: imageUrl }}
             style={card.img}
-            onError={() => console.warn("Failed to load user profile item image:", imageUrl)}
+            onError={() =>
+              console.warn("Failed to load user profile item image:", imageUrl)
+            }
           />
         ) : (
           <View style={[card.img, card.imgPlaceholder]}>
@@ -269,9 +270,8 @@ export default function UserProfileScreen() {
   const [activeTab, setActiveTab] = useState<"listings" | "reviews">(
     "listings",
   );
-  const [messaging, setMessaging] = useState(false);
-  const [selectedItem, setSelectedItem] = useState<ListedItem | null>(null); // ← NEW
-  const [modalVisible, setModalVisible] = useState(false); // ← NEW
+  const [selectedItem, setSelectedItem] = useState<ListedItem | null>(null);
+  const [modalVisible, setModalVisible] = useState(false);
 
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const slideAnim = useRef(new Animated.Value(24)).current;
@@ -357,22 +357,9 @@ export default function UserProfileScreen() {
   };
 
   // ─── Message handler ────────────────────────────────────────────────────────
-  const handleMessage = async () => {
+  const handleMessage = () => {
     if (!currentUserId || isOwnProfile) return;
-    try {
-      setMessaging(true);
-      await sendMessage(
-        currentUserId,
-        userId!,
-        "Hi! I saw your profile.",
-        undefined,
-      );
-      router.push({ pathname: "/chat", params: { ownerUserId: userId } });
-    } catch (err) {
-      console.error("Message error:", err);
-    } finally {
-      setMessaging(false);
-    }
+    router.push({ pathname: "/chat", params: { ownerUserId: userId } });
   };
 
   // ─── Open listing in modal instead of navigating away ─────────────────────
@@ -440,16 +427,8 @@ export default function UserProfileScreen() {
             : userData.username}
         </Text>
         {!isOwnProfile ? (
-          <TouchableOpacity
-            style={styles.msgBtn}
-            onPress={handleMessage}
-            disabled={messaging}
-          >
-            {messaging ? (
-              <ActivityIndicator size="small" color="#fff" />
-            ) : (
-              <Ionicons name="chatbubble-ellipses" size={20} color="#fff" />
-            )}
+          <TouchableOpacity style={styles.msgBtn} onPress={handleMessage}>
+            <Ionicons name="chatbubble-ellipses" size={20} color="#fff" />
           </TouchableOpacity>
         ) : (
           <TouchableOpacity
@@ -553,7 +532,6 @@ export default function UserProfileScreen() {
               <TouchableOpacity
                 style={styles.primaryBtn}
                 onPress={handleMessage}
-                disabled={messaging}
                 activeOpacity={0.85}
               >
                 <Ionicons
@@ -637,7 +615,7 @@ export default function UserProfileScreen() {
                     <ItemCard
                       key={item.id}
                       item={item}
-                      onPress={() => handleListingPress(item)} // ← PATCHED
+                      onPress={() => handleListingPress(item)}
                     />
                   ))}
                 </View>
@@ -715,7 +693,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "space-between",
     paddingHorizontal: 16,
-    paddingTop: 52,        // ← changed (32 + original 13 + some buffer)
+    paddingTop: 52,
     paddingBottom: 13,
   },
   backBtn: {
