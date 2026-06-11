@@ -2,9 +2,13 @@ import { Ionicons } from "@expo/vector-icons";
 import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
+  Alert,
   Animated,
   FlatList,
   Image,
+  KeyboardAvoidingView,
+  Modal,
+  Platform,
   SafeAreaView,
   StyleSheet,
   Text,
@@ -13,8 +17,12 @@ import {
   View,
 } from "react-native";
 import { auth } from "../../firebaseConfig";
-import { getUserPostedItems } from "../../services/itemService";
+import { deleteItem, getUserPostedItems } from "../../services/itemService";
 import { TradeOffer, subscribeToSentOffers } from "../../services/tradeService";
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Constants
+// ─────────────────────────────────────────────────────────────────────────────
 
 const FILTER_CATEGORIES = [
   "All",
@@ -35,7 +43,6 @@ const STATUS_COLORS: Record<string, { bg: string; text: string }> = {
   completed: { bg: "#E8F5E9", text: "#16A34A" },
 };
 
-// Status priority for the summary pill shown on each offered-item card
 const STATUS_PRIORITY: TradeOffer["status"][] = [
   "accepted",
   "pending",
@@ -44,7 +51,9 @@ const STATUS_PRIORITY: TradeOffer["status"][] = [
   "cancelled",
 ];
 
-/** Returns the highest-priority status among a group of offers */
+const TRADE_SORT_CYCLE = ["none", "recent", "likes", "name"] as const;
+type TradeSortType = (typeof TRADE_SORT_CYCLE)[number];
+
 function dominantStatus(offers: TradeOffer[]): TradeOffer["status"] | null {
   for (const s of STATUS_PRIORITY) {
     if (offers.some((o) => o.status === s)) return s;
@@ -52,60 +61,320 @@ function dominantStatus(offers: TradeOffer[]): TradeOffer["status"] | null {
   return offers[0]?.status ?? null;
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// DeclineReasonModal
+// ─────────────────────────────────────────────────────────────────────────────
+
+const DECLINE_PRESETS = [
+  "Item no longer available",
+  "Not interested in the offered trade",
+  "Condition mismatch",
+  "Looking for a different category",
+  "Other",
+];
+
+export interface DeclineReasonModalProps {
+  visible: boolean;
+  onConfirm: (reason: string) => void | Promise<void>;
+  onCancel: () => void;
+}
+
+export function DeclineReasonModal({
+  visible,
+  onConfirm,
+  onCancel,
+}: DeclineReasonModalProps) {
+  const [selected, setSelected] = useState<string | null>(null);
+  const [customReason, setCustomReason] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+
+  const reset = () => {
+    setSelected(null);
+    setCustomReason("");
+    setSubmitting(false);
+  };
+
+  const handleConfirm = async () => {
+    const reason =
+      selected === "Other"
+        ? customReason.trim()
+        : (selected ?? customReason.trim());
+    if (!reason) {
+      Alert.alert("Reason required", "Please select or enter a reason.");
+      return;
+    }
+    setSubmitting(true);
+    try {
+      await onConfirm(reason);
+      reset();
+    } catch {
+      Alert.alert("Error", "Could not decline the offer. Please try again.");
+      setSubmitting(false);
+    }
+  };
+
+  const handleCancel = () => {
+    reset();
+    onCancel();
+  };
+
+  return (
+    <Modal
+      visible={visible}
+      transparent
+      animationType="fade"
+      statusBarTranslucent
+      onRequestClose={handleCancel}
+    >
+      <KeyboardAvoidingView
+        behavior={Platform.OS === "ios" ? "padding" : "padding"}
+        style={declineStyles.overlay}
+      >
+        <View style={declineStyles.sheet}>
+          <View style={declineStyles.handle} />
+          <Text style={declineStyles.title}>Decline Offer</Text>
+          <Text style={declineStyles.subtitle}>
+            Let the offerer know why you're declining (optional but helpful):
+          </Text>
+
+          {DECLINE_PRESETS.map((preset) => (
+            <TouchableOpacity
+              key={preset}
+              style={[
+                declineStyles.option,
+                selected === preset && declineStyles.optionActive,
+              ]}
+              onPress={() => setSelected(preset)}
+              activeOpacity={0.8}
+              disabled={submitting}
+            >
+              <View
+                style={[
+                  declineStyles.radio,
+                  selected === preset && declineStyles.radioActive,
+                ]}
+              />
+              <Text
+                style={[
+                  declineStyles.optionText,
+                  selected === preset && declineStyles.optionTextActive,
+                ]}
+              >
+                {preset}
+              </Text>
+            </TouchableOpacity>
+          ))}
+
+          {selected === "Other" && (
+            <TextInput
+              style={declineStyles.input}
+              placeholder="Describe your reason…"
+              placeholderTextColor="#AAA"
+              value={customReason}
+              onChangeText={setCustomReason}
+              multiline
+              maxLength={200}
+              editable={!submitting}
+              textAlignVertical="top"
+            />
+          )}
+
+          <View style={declineStyles.actions}>
+            <TouchableOpacity
+              style={declineStyles.cancelBtn}
+              onPress={handleCancel}
+              activeOpacity={0.8}
+              disabled={submitting}
+            >
+              <Text style={declineStyles.cancelText}>Cancel</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[declineStyles.confirmBtn, submitting && { opacity: 0.6 }]}
+              onPress={handleConfirm}
+              activeOpacity={0.8}
+              disabled={submitting}
+            >
+              <Text style={declineStyles.confirmText}>
+                {submitting ? "Declining…" : "Decline Offer"}
+              </Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </KeyboardAvoidingView>
+    </Modal>
+  );
+}
+
+const declineStyles = StyleSheet.create({
+  overlay: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.5)",
+    justifyContent: "flex-end",
+  },
+  sheet: {
+    backgroundColor: "#fff",
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    padding: 24,
+    paddingBottom: 40,
+  },
+  handle: {
+    width: 40,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: "#DDD",
+    alignSelf: "center",
+    marginBottom: 18,
+  },
+  title: {
+    fontSize: 18,
+    fontWeight: "700",
+    color: "#1F1F1F",
+    marginBottom: 6,
+  },
+  subtitle: {
+    fontSize: 13,
+    color: "#666",
+    marginBottom: 16,
+    lineHeight: 18,
+  },
+  option: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    paddingVertical: 11,
+    paddingHorizontal: 14,
+    borderRadius: 10,
+    borderWidth: 1.5,
+    borderColor: "#E5E7EB",
+    marginBottom: 8,
+    backgroundColor: "#FAFAFA",
+  },
+  optionActive: {
+    borderColor: NAVY,
+    backgroundColor: "#EEF0FF",
+  },
+  radio: {
+    width: 16,
+    height: 16,
+    borderRadius: 8,
+    borderWidth: 2,
+    borderColor: "#CCC",
+  },
+  radioActive: {
+    borderColor: NAVY,
+    backgroundColor: NAVY,
+  },
+  optionText: { fontSize: 14, color: "#444" },
+  optionTextActive: { color: NAVY, fontWeight: "600" },
+  input: {
+    borderWidth: 1,
+    borderColor: "#E0E0E0",
+    borderRadius: 10,
+    padding: 12,
+    fontSize: 13,
+    color: "#333",
+    minHeight: 70,
+    marginBottom: 16,
+    marginTop: 4,
+    textAlignVertical: "top",
+  },
+  actions: {
+    flexDirection: "row",
+    gap: 10,
+    marginTop: 8,
+  },
+  cancelBtn: {
+    flex: 1,
+    paddingVertical: 13,
+    borderRadius: 12,
+    alignItems: "center",
+    backgroundColor: "#F3F4F6",
+    borderWidth: 1,
+    borderColor: "#E0E0E0",
+  },
+  cancelText: { fontSize: 14, fontWeight: "600", color: "#555" },
+  confirmBtn: {
+    flex: 1,
+    paddingVertical: 13,
+    borderRadius: 12,
+    alignItems: "center",
+    backgroundColor: "#E11D48",
+  },
+  confirmText: { fontSize: 14, fontWeight: "700", color: "#fff" },
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// TradeScreen
+// ─────────────────────────────────────────────────────────────────────────────
+
 export default function TradeScreen() {
   const [activeTab, setActiveTab] = useState<"trades" | "offers">("trades");
+
+  // ── Your Trades ───────────────────────────────────────────────────────────
   const [search, setSearch] = useState("");
-  const [sortType, setSortType] = useState("none");
+  const [sortType, setSortType] = useState<TradeSortType>("none");
   const [filterCategory, setFilterCategory] = useState("All");
   const [isFilterOpen, setIsFilterOpen] = useState(false);
   const [userItems, setUserItems] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
 
-  // ── Your Offers tab ──────────────────────────────────────────────────────
+  // ── Select / delete mode ──────────────────────────────────────────────────
+  const [isSelectMode, setIsSelectMode] = useState(false);
+  const [selectedItemIds, setSelectedItemIds] = useState<Set<string>>(
+    new Set(),
+  );
+  const [deleting, setDeleting] = useState(false);
+
+  // ── Your Offers ───────────────────────────────────────────────────────────
   const [sentOffers, setSentOffers] = useState<TradeOffer[]>([]);
+  const [offerSearch, setOfferSearch] = useState("");
+  const [offerCategoryFilter, setOfferCategoryFilter] = useState("All");
+  const [offerSortRecent, setOfferSortRecent] = useState(false);
+  const [isOfferFilterOpen, setIsOfferFilterOpen] = useState(false);
 
   const { openTradeId } = useLocalSearchParams<{ openTradeId?: string }>();
-
   const router = useRouter();
   const fadeAnim = useRef(new Animated.Value(1)).current;
   const addButtonScale = useRef(new Animated.Value(1)).current;
 
+  // ─────────────────────────────────────────────────────────────────────────
+  // Data fetching
+  // ─────────────────────────────────────────────────────────────────────────
+
   useFocusEffect(
     useCallback(() => {
       fetchUserItems();
+      return () => {
+        setIsSelectMode(false);
+        setSelectedItemIds(new Set());
+      };
     }, []),
   );
 
   const fetchUserItems = async () => {
     try {
       setLoading(true);
-      const currentUserId = auth.currentUser?.uid;
-      if (!currentUserId) return;
-      const myItems = await getUserPostedItems(currentUserId);
-      setUserItems(myItems);
-    } catch (error) {
-      console.error("Error fetching items:", error);
+      const uid = auth.currentUser?.uid;
+      if (!uid) return;
+      const items = await getUserPostedItems(uid);
+      setUserItems(items);
+    } catch (err) {
+      console.error("Error fetching items:", err);
     } finally {
       setLoading(false);
     }
   };
 
-  // Subscribe to sent offers (Your Offers tab)
   useEffect(() => {
     const uid = auth.currentUser?.uid;
     if (!uid) return;
     return subscribeToSentOffers(uid, setSentOffers);
   }, []);
 
-  const handleSort = () =>
-    setSortType((prev) =>
-      prev === "none" ? "likes" : prev === "likes" ? "name" : "none",
-    );
-  const handleFilterToggle = () => setIsFilterOpen((prev) => !prev);
-  const handleCategorySelect = (category: string) => {
-    setFilterCategory(category);
-    setIsFilterOpen(false);
-  };
+  // ─────────────────────────────────────────────────────────────────────────
+  // Tab / animation helpers
+  // ─────────────────────────────────────────────────────────────────────────
 
   const switchTab = (tab: "trades" | "offers") => {
     Animated.sequence([
@@ -121,6 +390,8 @@ export default function TradeScreen() {
       }),
     ]).start();
     setActiveTab(tab);
+    setIsSelectMode(false);
+    setSelectedItemIds(new Set());
   };
 
   const handleAddItemPress = () => {
@@ -138,7 +409,26 @@ export default function TradeScreen() {
     ]).start(() => router.push("/add-item"));
   };
 
-  // ── Your Trades ───────────────────────────────────────────────────────────
+  // ─────────────────────────────────────────────────────────────────────────
+  // Your Trades — filtered + sorted
+  // ─────────────────────────────────────────────────────────────────────────
+
+  const SORT_LABEL: Record<TradeSortType, string> = {
+    none: "Default",
+    recent: "Recent",
+    likes: "Likes",
+    name: "A–Z",
+  };
+
+  const handleTradeSort = () =>
+    setSortType((prev) => {
+      const idx = TRADE_SORT_CYCLE.indexOf(prev);
+      return TRADE_SORT_CYCLE[(idx + 1) % TRADE_SORT_CYCLE.length];
+    });
+
+  // FIX 2: Removed the `item.isTraded` early-return so completed/traded items
+  // are no longer silently hidden. They still appear in "Your Trades" but
+  // render with a "Traded" badge so the user can see all their uploads.
   const filteredItems = userItems
     .filter((item) => {
       const matchSearch =
@@ -151,18 +441,108 @@ export default function TradeScreen() {
       );
     })
     .sort((a, b) => {
+      if (sortType === "recent") {
+        const aT =
+          a.createdAt?.toMillis?.() ??
+          (a.createdAt instanceof Date ? a.createdAt.getTime() : 0);
+        const bT =
+          b.createdAt?.toMillis?.() ??
+          (b.createdAt instanceof Date ? b.createdAt.getTime() : 0);
+        return bT - aT;
+      }
       if (sortType === "likes") return (b.likes || 0) - (a.likes || 0);
       if (sortType === "name")
         return (a.title || "").localeCompare(b.title || "");
       return 0;
     });
 
-  // ── Your Offers — group by offeredItemId ─────────────────────────────────
+  // ─────────────────────────────────────────────────────────────────────────
+  // Select / delete handlers
+  // ─────────────────────────────────────────────────────────────────────────
+
+  const handleLongPress = (itemId: string) => {
+    if (!isSelectMode) {
+      setIsSelectMode(true);
+      setSelectedItemIds(new Set([itemId]));
+    }
+  };
+
+  const handleSelectToggle = (itemId: string) => {
+    setSelectedItemIds((prev) => {
+      const next = new Set(prev);
+      next.has(itemId) ? next.delete(itemId) : next.add(itemId);
+      return next;
+    });
+  };
+
+  const handleSelectAll = () => {
+    if (selectedItemIds.size === filteredItems.length) {
+      setSelectedItemIds(new Set());
+    } else {
+      setSelectedItemIds(new Set(filteredItems.map((i) => i.id)));
+    }
+  };
+
+  const handleCancelSelect = () => {
+    setIsSelectMode(false);
+    setSelectedItemIds(new Set());
+  };
+
+  const handleDeleteSelected = () => {
+    if (selectedItemIds.size === 0) return;
+    const count = selectedItemIds.size;
+    Alert.alert(
+      "Delete Items",
+      `Delete ${count} item${count > 1 ? "s" : ""}? This also removes them from Home and Explore.`,
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Delete",
+          style: "destructive",
+          onPress: async () => {
+            // FIX 1: Snapshot IDs synchronously before any await so the
+            // functional updater below never reads a stale closure value.
+            const idsToDelete = new Set(selectedItemIds);
+            setDeleting(true);
+            try {
+              const uid = auth.currentUser?.uid ?? "";
+              await Promise.all(
+                [...idsToDelete].map((id) => deleteItem(id, uid)),
+              );
+              setUserItems((prev) =>
+                prev.filter((i) => !idsToDelete.has(i.id)),
+              );
+              setSelectedItemIds(new Set());
+              setIsSelectMode(false);
+            } catch (err) {
+              console.error("Delete failed:", err);
+              Alert.alert(
+                "Error",
+                "Failed to delete some items. Please try again.",
+              );
+            } finally {
+              setDeleting(false);
+            }
+          },
+        },
+      ],
+    );
+  };
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // Your Offers — grouped by offeredItemId, filtered + sorted
+  // ─────────────────────────────────────────────────────────────────────────
+
   const offeredItemGroups = (() => {
-    const map = new Map<
-      string,
-      { itemId: string; title: string; image: string; offers: TradeOffer[] }
-    >();
+    type Group = {
+      itemId: string;
+      title: string;
+      image: string;
+      category: string;
+      offers: TradeOffer[];
+      latestAt: number;
+    };
+    const map = new Map<string, Group>();
 
     sentOffers.forEach((offer) => {
       const key = offer.offeredItemId ?? offer.offeredItemTitle ?? "unknown";
@@ -171,53 +551,120 @@ export default function TradeScreen() {
           itemId: offer.offeredItemId ?? key,
           title: offer.offeredItemTitle ?? "Unknown Item",
           image: offer.offeredItemImage ?? "",
+          category: (offer as any).offeredItemCategory ?? "",
           offers: [],
+          latestAt: 0,
         });
       }
-      map.get(key)!.offers.push(offer);
+      const entry = map.get(key)!;
+      entry.offers.push(offer);
+      const t = offer.createdAt?.toMillis?.() ?? 0;
+      if (t > entry.latestAt) entry.latestAt = t;
     });
 
-    return Array.from(map.values()).filter((g) => {
-      if (search.length === 0) return true;
-      return g.title.toLowerCase().includes(search.toLowerCase());
-    });
+    return Array.from(map.values())
+      .filter((g) => {
+        const matchSearch =
+          offerSearch.length === 0 ||
+          g.title.toLowerCase().includes(offerSearch.toLowerCase());
+        const matchCat =
+          offerCategoryFilter === "All" || g.category === offerCategoryFilter;
+        return matchSearch && matchCat;
+      })
+      .sort((a, b) => (offerSortRecent ? b.latestAt - a.latestAt : 0));
   })();
 
   const pendingCount = sentOffers.filter((o) => o.status === "pending").length;
 
-  // ── Trade item card — taps navigate to /trade-offers/[itemId] ────────────
+  // ─────────────────────────────────────────────────────────────────────────
+  // Render helpers
+  // ─────────────────────────────────────────────────────────────────────────
+
   const renderTradeItem = ({ item }: any) => {
     const imageUrl =
       Array.isArray(item?.images) && item.images.length > 0
         ? item.images[0]
         : item?.image || "https://via.placeholder.com/200";
+    const isSelected = selectedItemIds.has(item.id);
+    // FIX 2: show a badge for traded items instead of hiding them
+    const isTraded = !!item.isTraded;
+    const isInTrade = !!item.inTrade && !isTraded;
 
     return (
       <TouchableOpacity
-        style={styles.tradeItemWrapper}
-        onPress={() => router.push(`/trade-offers/${item.id}`)}
+        style={[
+          styles.tradeItemWrapper,
+          isSelected && styles.tradeItemWrapperSelected,
+        ]}
+        onPress={() => {
+          if (isSelectMode) {
+            handleSelectToggle(item.id);
+          } else {
+            router.push(`/trade-offers/${item.id}`);
+          }
+        }}
+        onLongPress={() => handleLongPress(item.id)}
         activeOpacity={0.85}
       >
-        <View style={styles.card}>
-          <Image source={{ uri: imageUrl }} style={styles.image} />
-          <Text style={styles.itemName} numberOfLines={2}>
-            {item.title || item.name}
-          </Text>
-          <View style={styles.offerButton}>
-            <Text style={styles.offerText}>See Offers</Text>
-            <Ionicons
-              name="chevron-forward"
-              size={13}
-              color="#fff"
-              style={{ marginLeft: 3 }}
-            />
+        <View style={[styles.card, isSelected && styles.cardSelected]}>
+          {isSelectMode && (
+            <View style={styles.checkboxWrapper}>
+              <View
+                style={[styles.checkbox, isSelected && styles.checkboxChecked]}
+              >
+                {isSelected && (
+                  <Ionicons name="checkmark" size={12} color="#fff" />
+                )}
+              </View>
+            </View>
+          )}
+
+          <View style={styles.imageWrapper}>
+            <Image source={{ uri: imageUrl }} style={styles.image} />
+            {/* FIX 2: overlay badge for items that are in-trade or traded */}
+            {(isTraded || isInTrade) && (
+              <View
+                style={[
+                  styles.imageBadge,
+                  isTraded ? styles.imageBadgeTraded : styles.imageBadgeInTrade,
+                ]}
+              >
+                <Text style={styles.imageBadgeText}>
+                  {isTraded ? "Traded" : "In Trade"}
+                </Text>
+              </View>
+            )}
           </View>
+
+          <View style={{ flex: 1 }}>
+            <Text style={styles.itemName} numberOfLines={2}>
+              {item.title || item.name}
+            </Text>
+            {item.category ? (
+              <Text style={styles.itemCategory}>{item.category}</Text>
+            ) : null}
+          </View>
+
+          {!isSelectMode && (
+            <TouchableOpacity
+              style={styles.offerButton}
+              onPress={() => router.push(`/trade-offers/${item.id}`)}
+              activeOpacity={0.8}
+            >
+              <Text style={styles.offerText}>See Offers</Text>
+              <Ionicons
+                name="chevron-forward"
+                size={13}
+                color="#fff"
+                style={{ marginLeft: 3 }}
+              />
+            </TouchableOpacity>
+          )}
         </View>
       </TouchableOpacity>
     );
   };
 
-  // ── Offered-item card (Your Offers tab) ───────────────────────────────────
   const renderOfferedItem = ({
     item: group,
   }: {
@@ -255,11 +702,15 @@ export default function TradeScreen() {
             </View>
           )}
 
-          <Text style={styles.itemName} numberOfLines={2}>
-            {group.title}
-          </Text>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.itemName} numberOfLines={2}>
+              {group.title}
+            </Text>
+            {group.category ? (
+              <Text style={styles.itemCategory}>{group.category}</Text>
+            ) : null}
+          </View>
 
-          {/* Offer count + dominant status badge */}
           <View style={styles.offeredItemMeta}>
             {statusStyle && dominant && (
               <View
@@ -287,7 +738,6 @@ export default function TradeScreen() {
             )}
           </View>
 
-          {/* ── Changed: was offer count, now "See Status" ── */}
           <View style={styles.offerButton}>
             <Text style={styles.offerText}>See Status</Text>
             <Ionicons
@@ -302,9 +752,13 @@ export default function TradeScreen() {
     );
   };
 
+  // ─────────────────────────────────────────────────────────────────────────
+  // JSX
+  // ─────────────────────────────────────────────────────────────────────────
+
   return (
     <SafeAreaView style={styles.container}>
-      {/* ── Search ── */}
+      {/* ── Shared Search Bar ── */}
       <View style={styles.searchWrapper}>
         <View style={styles.searchContainer}>
           <Ionicons
@@ -314,15 +768,20 @@ export default function TradeScreen() {
             style={styles.searchIcon}
           />
           <TextInput
-            placeholder="Search for items..."
+            placeholder="Search for items…"
             placeholderTextColor="#888"
             style={styles.searchInput}
-            value={search}
-            onChangeText={setSearch}
+            value={activeTab === "trades" ? search : offerSearch}
+            onChangeText={activeTab === "trades" ? setSearch : setOfferSearch}
             returnKeyType="search"
           />
-          {search.length > 0 && (
-            <TouchableOpacity onPress={() => setSearch("")} activeOpacity={0.7}>
+          {(activeTab === "trades" ? search : offerSearch).length > 0 && (
+            <TouchableOpacity
+              onPress={() =>
+                activeTab === "trades" ? setSearch("") : setOfferSearch("")
+              }
+              activeOpacity={0.7}
+            >
               <Ionicons name="close-circle" size={18} color="#AAAAAA" />
             </TouchableOpacity>
           )}
@@ -343,6 +802,7 @@ export default function TradeScreen() {
             Your Trades
           </Text>
         </TouchableOpacity>
+
         <TouchableOpacity
           style={activeTab === "offers" ? styles.activeTab : styles.inactiveTab}
           onPress={() => switchTab("offers")}
@@ -362,37 +822,109 @@ export default function TradeScreen() {
         </TouchableOpacity>
       </View>
 
-      {/* Sort / Filter — only on Trades tab */}
+      {/* ── Trades toolbar ── */}
       {activeTab === "trades" && (
         <>
-          <View style={styles.row}>
-            <TouchableOpacity style={styles.smallButton} onPress={handleSort}>
-              <Ionicons name="swap-vertical" size={14} color="#333" />
-              <Text style={styles.smallText}>Sort ({sortType})</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={styles.smallButton}
-              onPress={handleFilterToggle}
-            >
-              <Ionicons name="funnel" size={14} color="#333" />
-              <Text style={styles.smallText}>Filter ({filterCategory})</Text>
-            </TouchableOpacity>
-          </View>
-          {isFilterOpen && (
-            <View style={styles.filterDropdown}>
-              {FILTER_CATEGORIES.map((category) => (
+          {isSelectMode ? (
+            <View style={styles.selectToolbar}>
+              <TouchableOpacity
+                style={styles.selectBtn}
+                onPress={handleSelectAll}
+              >
+                <Ionicons
+                  name={
+                    selectedItemIds.size > 0 &&
+                    selectedItemIds.size === filteredItems.length
+                      ? "checkbox"
+                      : "square-outline"
+                  }
+                  size={18}
+                  color={NAVY}
+                />
+                <Text style={styles.selectBtnText}>
+                  {selectedItemIds.size > 0 &&
+                  selectedItemIds.size === filteredItems.length
+                    ? "Deselect All"
+                    : "Select All"}
+                </Text>
+              </TouchableOpacity>
+
+              <View style={{ flexDirection: "row", gap: 8 }}>
                 <TouchableOpacity
-                  key={category}
-                  onPress={() => handleCategorySelect(category)}
+                  style={[
+                    styles.selectBtn,
+                    styles.deleteBtnWrapper,
+                    (selectedItemIds.size === 0 || deleting) &&
+                      styles.deleteBtnDisabled,
+                  ]}
+                  onPress={handleDeleteSelected}
+                  disabled={selectedItemIds.size === 0 || deleting}
+                >
+                  <Ionicons
+                    name="trash"
+                    size={16}
+                    color={selectedItemIds.size > 0 ? "#E11D48" : "#CCC"}
+                  />
+                  <Text
+                    style={[
+                      styles.deleteText,
+                      selectedItemIds.size === 0 && styles.deleteTextDisabled,
+                    ]}
+                  >
+                    {deleting
+                      ? "Deleting…"
+                      : `Delete (${selectedItemIds.size})`}
+                  </Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={styles.selectBtn}
+                  onPress={handleCancelSelect}
+                >
+                  <Ionicons name="close" size={18} color="#666" />
+                  <Text style={styles.selectBtnText}>Cancel</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          ) : (
+            <View style={styles.row}>
+              <TouchableOpacity
+                style={styles.smallButton}
+                onPress={handleTradeSort}
+              >
+                <Ionicons name="swap-vertical" size={14} color="#333" />
+                <Text style={styles.smallText}>
+                  Sort: {SORT_LABEL[sortType]}
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.smallButton}
+                onPress={() => setIsFilterOpen((p) => !p)}
+              >
+                <Ionicons name="funnel" size={14} color="#333" />
+                <Text style={styles.smallText}>Category: {filterCategory}</Text>
+              </TouchableOpacity>
+            </View>
+          )}
+
+          {isFilterOpen && !isSelectMode && (
+            <View style={styles.filterDropdown}>
+              {FILTER_CATEGORIES.map((cat) => (
+                <TouchableOpacity
+                  key={cat}
+                  onPress={() => {
+                    setFilterCategory(cat);
+                    setIsFilterOpen(false);
+                  }}
                   style={styles.dropdownItem}
                 >
                   <Text
                     style={[
                       styles.dropdownText,
-                      filterCategory === category && styles.dropdownTextActive,
+                      filterCategory === cat && styles.dropdownTextActive,
                     ]}
                   >
-                    {category}
+                    {cat}
                   </Text>
                 </TouchableOpacity>
               ))}
@@ -401,17 +933,74 @@ export default function TradeScreen() {
         </>
       )}
 
+      {/* ── Offers toolbar ── */}
+      {activeTab === "offers" && (
+        <>
+          <View style={styles.row}>
+            <TouchableOpacity
+              style={styles.smallButton}
+              onPress={() => setOfferSortRecent((p) => !p)}
+            >
+              <Ionicons name="time-outline" size={14} color="#333" />
+              <Text style={styles.smallText}>
+                Sort: {offerSortRecent ? "Recent" : "Default"}
+              </Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.smallButton}
+              onPress={() => setIsOfferFilterOpen((p) => !p)}
+            >
+              <Ionicons name="funnel" size={14} color="#333" />
+              <Text style={styles.smallText}>
+                Category: {offerCategoryFilter}
+              </Text>
+            </TouchableOpacity>
+          </View>
+
+          {isOfferFilterOpen && (
+            <View style={styles.filterDropdown}>
+              {FILTER_CATEGORIES.map((cat) => (
+                <TouchableOpacity
+                  key={cat}
+                  onPress={() => {
+                    setOfferCategoryFilter(cat);
+                    setIsOfferFilterOpen(false);
+                  }}
+                  style={styles.dropdownItem}
+                >
+                  <Text
+                    style={[
+                      styles.dropdownText,
+                      offerCategoryFilter === cat && styles.dropdownTextActive,
+                    ]}
+                  >
+                    {cat}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          )}
+        </>
+      )}
+
+      {/* ── List content ── */}
       <Animated.View style={{ flex: 1, opacity: fadeAnim }}>
         {activeTab === "trades" ? (
-          /* ── Your Trades grid ── */
           <FlatList
             data={filteredItems}
             renderItem={renderTradeItem}
             keyExtractor={(item) => item.id}
             showsVerticalScrollIndicator={false}
-            contentContainerStyle={{ paddingBottom: 100 }}
+            contentContainerStyle={{ paddingBottom: 120 }}
             onRefresh={fetchUserItems}
             refreshing={loading}
+            ListHeaderComponent={
+              !isSelectMode ? (
+                <Text style={styles.longPressHint}>
+                  Long-press an item to select and delete
+                </Text>
+              ) : null
+            }
             ListEmptyComponent={
               !loading ? (
                 <View style={styles.emptyContainer}>
@@ -422,13 +1011,12 @@ export default function TradeScreen() {
             }
           />
         ) : (
-          /* ── Your Offers grid ── */
           <FlatList
             data={offeredItemGroups}
             renderItem={renderOfferedItem}
             keyExtractor={(g) => g.itemId}
             showsVerticalScrollIndicator={false}
-            contentContainerStyle={{ paddingBottom: 100 }}
+            contentContainerStyle={{ paddingBottom: 120 }}
             ListEmptyComponent={
               <View style={styles.emptyContainer}>
                 <Ionicons
@@ -443,20 +1031,34 @@ export default function TradeScreen() {
         )}
       </Animated.View>
 
-      <Animated.View style={{ transform: [{ scale: addButtonScale }] }}>
-        <TouchableOpacity style={styles.addButton} onPress={handleAddItemPress}>
-          <Ionicons name="add" size={20} color="white" />
-          <Text style={styles.addText}>Add Item</Text>
-        </TouchableOpacity>
-      </Animated.View>
+      {/* ── FAB (hidden during select mode) ── */}
+      {!isSelectMode && (
+        <Animated.View
+          style={[
+            styles.fabWrapper,
+            { transform: [{ scale: addButtonScale }] },
+          ]}
+        >
+          <TouchableOpacity
+            style={styles.addButton}
+            onPress={handleAddItemPress}
+          >
+            <Ionicons name="add" size={20} color="white" />
+            <Text style={styles.addText}>Add Item</Text>
+          </TouchableOpacity>
+        </Animated.View>
+      )}
     </SafeAreaView>
   );
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Styles
+// ─────────────────────────────────────────────────────────────────────────────
+
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#FFFFFF" },
 
-  // ── Search ──────────────────────────────────────────────────────────────
   searchWrapper: { marginHorizontal: 16, paddingTop: 32, marginBottom: 16 },
   searchContainer: {
     flexDirection: "row",
@@ -471,7 +1073,6 @@ const styles = StyleSheet.create({
   searchIcon: { marginRight: 10 },
   searchInput: { flex: 1, color: "#242424", fontSize: 15, paddingVertical: 8 },
 
-  // ── Tabs ────────────────────────────────────────────────────────────────
   tabs: { flexDirection: "row", marginBottom: 12, marginHorizontal: 16 },
   activeTab: {
     backgroundColor: NAVY,
@@ -506,8 +1107,13 @@ const styles = StyleSheet.create({
   },
   tabBadgeText: { color: "#fff", fontSize: 11, fontWeight: "700" },
 
-  // ── Sort / Filter ────────────────────────────────────────────────────────
-  row: { flexDirection: "row", marginBottom: 12, marginHorizontal: 16 },
+  row: {
+    flexDirection: "row",
+    marginBottom: 10,
+    marginHorizontal: 16,
+    flexWrap: "wrap",
+    gap: 8,
+  },
   smallButton: {
     flexDirection: "row",
     alignItems: "center",
@@ -515,9 +1121,48 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     paddingVertical: 7,
     borderRadius: 8,
-    marginRight: 8,
   },
   smallText: { fontSize: 13, color: "#444", marginLeft: 6 },
+
+  // Select toolbar
+  selectToolbar: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginHorizontal: 16,
+    marginBottom: 10,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    backgroundColor: "#F0F2FF",
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: "#D0D4FF",
+  },
+  selectBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 8,
+    backgroundColor: "#fff",
+    borderWidth: 1,
+    borderColor: "#E0E0E0",
+  },
+  selectBtnText: { fontSize: 13, color: NAVY, fontWeight: "600" },
+  deleteBtnWrapper: { borderColor: "#FFD0D9" },
+  deleteBtnDisabled: { opacity: 0.5 },
+  deleteText: { fontSize: 13, color: "#E11D48", fontWeight: "600" },
+  deleteTextDisabled: { color: "#CCC" },
+  longPressHint: {
+    textAlign: "center",
+    fontSize: 11,
+    color: "#BBB",
+    marginTop: 4,
+    marginBottom: 6,
+    marginHorizontal: 16,
+  },
+
   filterDropdown: {
     marginHorizontal: 16,
     backgroundColor: "white",
@@ -529,10 +1174,17 @@ const styles = StyleSheet.create({
   },
   dropdownItem: { paddingVertical: 12, paddingHorizontal: 15 },
   dropdownText: { fontSize: 13, color: "#333" },
-  dropdownTextActive: { fontWeight: "700", color: "#5E3EA1" },
+  dropdownTextActive: { fontWeight: "700", color: NAVY },
 
-  // ── Trade / Offered item card ────────────────────────────────────────────
   tradeItemWrapper: { marginHorizontal: 16, marginBottom: 10 },
+  tradeItemWrapperSelected: {
+    borderRadius: 14,
+    shadowColor: NAVY,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.15,
+    shadowRadius: 4,
+    elevation: 4,
+  },
   card: {
     flexDirection: "row",
     alignItems: "center",
@@ -543,15 +1195,50 @@ const styles = StyleSheet.create({
     borderColor: "#E8EEF9",
     gap: 10,
   },
+  cardSelected: {
+    backgroundColor: "#EEF0FF",
+    borderColor: NAVY,
+    borderWidth: 2,
+  },
+
+  // FIX 2: wrap image so badge can overlay it
+  imageWrapper: { position: "relative" },
   image: { width: 55, height: 55, borderRadius: 8 },
   imageFallback: {
     backgroundColor: "#F3F4F6",
     justifyContent: "center",
     alignItems: "center",
   },
-  itemName: { flex: 1, fontWeight: "600", color: "#222", fontSize: 14 },
+  imageBadge: {
+    position: "absolute",
+    bottom: 0,
+    left: 0,
+    right: 0,
+    paddingVertical: 2,
+    borderBottomLeftRadius: 8,
+    borderBottomRightRadius: 8,
+    alignItems: "center",
+  },
+  imageBadgeTraded: { backgroundColor: "rgba(22,163,74,0.82)" },
+  imageBadgeInTrade: { backgroundColor: "rgba(46,45,124,0.82)" },
+  imageBadgeText: { fontSize: 9, fontWeight: "700", color: "#fff" },
 
-  // meta row inside offered-item card
+  itemName: { fontWeight: "600", color: "#222", fontSize: 14 },
+  itemCategory: { fontSize: 11, color: "#888", marginTop: 2 },
+
+  checkboxWrapper: { marginRight: 4 },
+  checkbox: {
+    width: 22,
+    height: 22,
+    borderRadius: 6,
+    borderWidth: 2,
+    borderColor: "#C0C0D0",
+    backgroundColor: "#fff",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  checkboxChecked: { backgroundColor: NAVY, borderColor: NAVY },
+
   offeredItemMeta: { flexDirection: "column", alignItems: "flex-end", gap: 4 },
   statusPill: {
     flexDirection: "row",
@@ -581,7 +1268,6 @@ const styles = StyleSheet.create({
   },
   offerText: { fontSize: 12, color: "#fff", fontWeight: "600" },
 
-  // ── Empty state ──────────────────────────────────────────────────────────
   emptyContainer: {
     flex: 1,
     justifyContent: "center",
@@ -591,17 +1277,19 @@ const styles = StyleSheet.create({
   },
   emptyText: { color: "#999", fontSize: 16 },
 
-  // ── Add button ───────────────────────────────────────────────────────────
+  fabWrapper: { position: "absolute", bottom: 20, right: 16 },
   addButton: {
-    position: "absolute",
-    bottom: 20,
-    right: 16,
     backgroundColor: NAVY,
     flexDirection: "row",
     alignItems: "center",
     paddingHorizontal: 18,
     paddingVertical: 12,
     borderRadius: 10,
+    shadowColor: NAVY,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 6,
+    elevation: 6,
   },
   addText: { color: "white", fontWeight: "700", marginLeft: 6 },
 });

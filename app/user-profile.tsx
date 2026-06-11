@@ -2,8 +2,7 @@
  * app/user-profile.tsx
  *
  * Public profile screen — view any other user's profile + listed items.
- * Navigate here from anywhere with:
- *   router.push({ pathname: "/user-profile", params: { userId: "abc123" } })
+ * Includes polished Follow/Unfollow with real-time sync via followService.
  */
 
 import { Ionicons } from "@expo/vector-icons";
@@ -14,6 +13,7 @@ import {
   getDoc,
   getDocs,
   limit,
+  onSnapshot,
   orderBy,
   query,
   where,
@@ -21,6 +21,7 @@ import {
 import React, { useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
+  Alert,
   Animated,
   Dimensions,
   Image,
@@ -33,6 +34,10 @@ import {
 } from "react-native";
 import { ProductDetailModal } from "../components/ProductDetailModal";
 import { auth, db } from "../firebaseConfig";
+import {
+  subscribeToFollowState,
+  toggleFollow,
+} from "../services/followService";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 const NAVY = "#2f2f6f";
@@ -67,17 +72,6 @@ const formatTime = (timestamp: any): string => {
   return date.toLocaleDateString("en-PH", { month: "short", day: "numeric" });
 };
 
-const useGoBack = () => {
-  const router = useRouter();
-  return () => {
-    if (router.canGoBack()) {
-      router.back();
-    } else {
-      router.replace("/(tabs)/explore" as any);
-    }
-  };
-};
-
 // ─── Types ────────────────────────────────────────────────────────────────────
 interface PublicUserData {
   username: string;
@@ -92,6 +86,8 @@ interface PublicUserData {
   isVerified?: boolean;
   createdAt?: any;
   location?: string;
+  followerCount: number;
+  followingCount: number;
 }
 
 interface Review {
@@ -126,7 +122,6 @@ function Avatar({
   const [failed, setFailed] = useState(false);
   const bg = letterAvatarColor(name);
   const style = { width: size, height: size, borderRadius: size / 2 };
-
   if (uri && !failed) {
     return (
       <Image source={{ uri }} style={style} onError={() => setFailed(true)} />
@@ -146,7 +141,7 @@ function Avatar({
   );
 }
 
-// ─── Star Row ─────────────────────────────────────────────────────────────────
+// ─── Stars ────────────────────────────────────────────────────────────────────
 function Stars({ rating, size = 16 }: { rating: number; size?: number }) {
   return (
     <View style={{ flexDirection: "row", gap: 2 }}>
@@ -176,31 +171,22 @@ function ItemCard({
   item: ListedItem;
   onPress: () => void;
 }) {
-  // Validate image URLs and filter out blob URLs
   const validateImageUrl = (url: string | undefined): boolean => {
-    if (!url) return false;
-    if (typeof url !== "string") return false;
+    if (!url || typeof url !== "string") return false;
     if (url.startsWith("blob:")) return false;
     return true;
   };
-
-  const imageUrl = (() => {
-    if (validateImageUrl(item.images?.[0])) return item.images![0];
-    if (validateImageUrl(item.image)) return item.image;
-    return null;
-  })();
+  const imageUrl = validateImageUrl(item.images?.[0])
+    ? item.images![0]
+    : validateImageUrl(item.image)
+      ? item.image
+      : null;
 
   return (
     <TouchableOpacity style={card.wrap} onPress={onPress} activeOpacity={0.88}>
       <View style={card.imgWrap}>
         {imageUrl ? (
-          <Image
-            source={{ uri: imageUrl }}
-            style={card.img}
-            onError={() =>
-              console.warn("Failed to load user profile item image:", imageUrl)
-            }
-          />
+          <Image source={{ uri: imageUrl }} style={card.img} />
         ) : (
           <View style={[card.img, card.imgPlaceholder]}>
             <Ionicons name="image-outline" size={32} color="#ccc" />
@@ -258,10 +244,9 @@ const card = StyleSheet.create({
 // ─── Main Screen ──────────────────────────────────────────────────────────────
 export default function UserProfileScreen() {
   const router = useRouter();
-  const goBack = useGoBack();
   const { userId } = useLocalSearchParams<{ userId: string }>();
-  const currentUserId = auth.currentUser?.uid;
-  const isOwnProfile = currentUserId === userId;
+  const currentUser = auth.currentUser;
+  const isOwnProfile = currentUser?.uid === userId;
 
   const [userData, setUserData] = useState<PublicUserData | null>(null);
   const [listings, setListings] = useState<ListedItem[]>([]);
@@ -273,10 +258,39 @@ export default function UserProfileScreen() {
   const [selectedItem, setSelectedItem] = useState<ListedItem | null>(null);
   const [modalVisible, setModalVisible] = useState(false);
 
+  // ── Follow state ────────────────────────────────────────────────────────────
+  const [isFollowing, setIsFollowing] = useState(false);
+  const [followLoading, setFollowLoading] = useState(false);
+  // Real-time follower / following counts from user doc
+  const [followerCount, setFollowerCount] = useState(0);
+  const [followingCount, setFollowingCount] = useState(0);
+
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const slideAnim = useRef(new Animated.Value(24)).current;
 
-  // ─── Load data ─────────────────────────────────────────────────────────────
+  // ── Real-time follow state ──────────────────────────────────────────────────
+  useEffect(() => {
+    if (!currentUser || !userId || isOwnProfile) return;
+    const unsub = subscribeToFollowState(
+      currentUser.uid,
+      userId,
+      setIsFollowing,
+    );
+    return unsub;
+  }, [currentUser, userId, isOwnProfile]);
+
+  // ── Real-time follow counts from user doc ───────────────────────────────────
+  useEffect(() => {
+    if (!userId) return;
+    const unsub = onSnapshot(doc(db, "users", userId), (snap) => {
+      const data = snap.data();
+      setFollowerCount(data?.followerCount ?? 0);
+      setFollowingCount(data?.followingCount ?? 0);
+    });
+    return unsub;
+  }, [userId]);
+
+  // ── Load profile data ───────────────────────────────────────────────────────
   useEffect(() => {
     if (!userId) return;
     loadAll();
@@ -321,6 +335,8 @@ export default function UserProfileScreen() {
         isVerified: d.isVerified ?? false,
         createdAt: d.createdAt,
         location: d.location || "",
+        followerCount: d.followerCount ?? 0,
+        followingCount: d.followingCount ?? 0,
       });
     }
   };
@@ -356,20 +372,39 @@ export default function UserProfileScreen() {
     }
   };
 
-  // ─── Message handler ────────────────────────────────────────────────────────
+  // ── Follow / Unfollow ───────────────────────────────────────────────────────
+  const handleFollowToggle = async () => {
+    if (!currentUser || !userData) return;
+    setFollowLoading(true);
+    try {
+      const currentUsername =
+        currentUser.displayName || currentUser.email?.split("@")[0] || "User";
+      const currentAvatar = currentUser.photoURL ?? undefined;
+      await toggleFollow(
+        currentUser.uid,
+        { username: currentUsername, avatarUrl: currentAvatar },
+        userId!,
+        { username: userData.username, avatarUrl: userData.avatarUrl },
+        isFollowing,
+      );
+    } catch {
+      Alert.alert("Error", "Could not update follow status. Try again.");
+    } finally {
+      setFollowLoading(false);
+    }
+  };
+
   const handleMessage = () => {
-    if (!currentUserId || isOwnProfile) return;
+    if (!currentUser || isOwnProfile) return;
     router.push({ pathname: "/chat", params: { ownerUserId: userId } });
   };
 
-  // ─── Open listing in modal instead of navigating away ─────────────────────
   const handleListingPress = (item: ListedItem) => {
     setSelectedItem(item);
     setModalVisible(true);
   };
-  // ──────────────────────────────────────────────────────────────────────────
 
-  // ─── Loading ───────────────────────────────────────────────────────────────
+  // ── Loading ─────────────────────────────────────────────────────────────────
   if (loading) {
     return (
       <SafeAreaView style={styles.container}>
@@ -411,9 +446,13 @@ export default function UserProfileScreen() {
     );
   }
 
+  const displayName =
+    userData.firstName && userData.lastName
+      ? `${userData.firstName} ${userData.lastName}`
+      : userData.username;
+
   const hasRatings = userData.ratingCount > 0;
 
-  // ─── UI ────────────────────────────────────────────────────────────────────
   return (
     <SafeAreaView style={styles.container}>
       {/* Header */}
@@ -422,9 +461,7 @@ export default function UserProfileScreen() {
           <Ionicons name="chevron-back" size={24} color="#fff" />
         </TouchableOpacity>
         <Text style={styles.headerTitle} numberOfLines={1}>
-          {userData.firstName && userData.lastName
-            ? `${userData.firstName} ${userData.lastName}`
-            : userData.username}
+          {displayName}
         </Text>
         {!isOwnProfile ? (
           <TouchableOpacity style={styles.msgBtn} onPress={handleMessage}>
@@ -462,11 +499,7 @@ export default function UserProfileScreen() {
           {/* ── Identity ── */}
           <View style={styles.identityWrap}>
             <View style={styles.nameRow}>
-              <Text style={styles.username}>
-                {userData.firstName && userData.lastName
-                  ? `${userData.firstName} ${userData.lastName}`
-                  : userData.username}
-              </Text>
+              <Text style={styles.username}>{displayName}</Text>
               {userData.isVerified && (
                 <View style={styles.verifiedBadge}>
                   <Ionicons name="checkmark" size={10} color="#fff" />
@@ -492,18 +525,48 @@ export default function UserProfileScreen() {
             )}
           </View>
 
-          {/* ── Stats ── */}
+          {/* ── Stats row (trades / exchanged / listings + followers / following) ── */}
           <View style={styles.statsRow}>
-            <View style={styles.statBox}>
-              <Text style={styles.statNum}>{userData.tradesCount}</Text>
-              <Text style={styles.statLabel}>Trades</Text>
-            </View>
+            <TouchableOpacity
+              style={styles.statBox}
+              onPress={() =>
+                router.push({
+                  pathname: "/followers-screen",
+                  params: {
+                    userId,
+                    tab: "followers",
+                    username: userData.username,
+                  },
+                } as any)
+              }
+              activeOpacity={0.7}
+            >
+              <Text style={styles.statNum}>{followerCount}</Text>
+              <Text style={styles.statLabel}>Followers</Text>
+            </TouchableOpacity>
+
             <View style={styles.statDivider} />
-            <View style={styles.statBox}>
-              <Text style={styles.statNum}>{userData.exchangedCount}</Text>
-              <Text style={styles.statLabel}>Exchanged</Text>
-            </View>
+
+            <TouchableOpacity
+              style={styles.statBox}
+              onPress={() =>
+                router.push({
+                  pathname: "/followers-screen",
+                  params: {
+                    userId,
+                    tab: "following",
+                    username: userData.username,
+                  },
+                } as any)
+              }
+              activeOpacity={0.7}
+            >
+              <Text style={styles.statNum}>{followingCount}</Text>
+              <Text style={styles.statLabel}>Following</Text>
+            </TouchableOpacity>
+
             <View style={styles.statDivider} />
+
             <View style={styles.statBox}>
               <Text style={styles.statNum}>{listings.length}</Text>
               <Text style={styles.statLabel}>Listed</Text>
@@ -526,23 +589,64 @@ export default function UserProfileScreen() {
             )}
           </View>
 
-          {/* ── Message / Trade buttons (other user only) ── */}
+          {/* ── Action buttons (other user only) ── */}
           {!isOwnProfile && (
             <View style={styles.actionRow}>
+              {/* Follow / Unfollow */}
               <TouchableOpacity
-                style={styles.primaryBtn}
+                style={[
+                  styles.followBtn,
+                  isFollowing && styles.followBtnActive,
+                ]}
+                onPress={handleFollowToggle}
+                disabled={followLoading}
+                activeOpacity={0.85}
+              >
+                {followLoading ? (
+                  <ActivityIndicator
+                    size="small"
+                    color={isFollowing ? NAVY : "#fff"}
+                  />
+                ) : (
+                  <>
+                    <Ionicons
+                      name={
+                        isFollowing
+                          ? "person-remove-outline"
+                          : "person-add-outline"
+                      }
+                      size={16}
+                      color={isFollowing ? NAVY : "#fff"}
+                    />
+                    <Text
+                      style={[
+                        styles.followBtnText,
+                        isFollowing && styles.followBtnTextActive,
+                      ]}
+                    >
+                      {isFollowing ? "Following" : "Follow"}
+                    </Text>
+                  </>
+                )}
+              </TouchableOpacity>
+
+              {/* Message */}
+              <TouchableOpacity
+                style={styles.msgActionBtn}
                 onPress={handleMessage}
                 activeOpacity={0.85}
               >
                 <Ionicons
                   name="chatbubble-ellipses-outline"
-                  size={18}
-                  color="#fff"
+                  size={16}
+                  color={NAVY}
                 />
-                <Text style={styles.primaryBtnText}>Message</Text>
+                <Text style={styles.msgActionBtnText}>Message</Text>
               </TouchableOpacity>
+
+              {/* Offer Trade */}
               <TouchableOpacity
-                style={styles.secondaryBtn}
+                style={styles.tradeBtn}
                 onPress={() =>
                   router.push({
                     pathname: "/trade",
@@ -553,10 +657,10 @@ export default function UserProfileScreen() {
               >
                 <Ionicons
                   name="swap-horizontal-outline"
-                  size={18}
-                  color={NAVY}
+                  size={16}
+                  color={GOLD}
                 />
-                <Text style={styles.secondaryBtnText}>Offer Trade</Text>
+                <Text style={styles.tradeBtnText}>Trade</Text>
               </TouchableOpacity>
             </View>
           )}
@@ -663,7 +767,6 @@ export default function UserProfileScreen() {
         </Animated.View>
       </ScrollView>
 
-      {/* ── Listing detail modal ── */}
       {selectedItem && (
         <ProductDetailModal
           visible={modalVisible}
@@ -686,7 +789,6 @@ const styles = StyleSheet.create({
   },
   emptyText: { fontSize: 15, color: "#bbb", fontWeight: "600" },
 
-  // Header
   header: {
     backgroundColor: NAVY,
     flexDirection: "row",
@@ -723,13 +825,11 @@ const styles = StyleSheet.create({
 
   scroll: { paddingBottom: 40 },
 
-  // Hero
   heroBanner: {
     height: 120,
     backgroundColor: NAVY,
     justifyContent: "flex-end",
     alignItems: "center",
-    paddingBottom: 0,
     position: "relative",
   },
   heroOverlay: {
@@ -751,7 +851,6 @@ const styles = StyleSheet.create({
     elevation: 8,
   },
 
-  // Identity
   identityWrap: {
     alignItems: "center",
     marginTop: 52,
@@ -790,7 +889,6 @@ const styles = StyleSheet.create({
   },
   joinedText: { fontSize: 12, color: "#bbb", marginTop: 2 },
 
-  // Stats
   statsRow: {
     flexDirection: "row",
     marginHorizontal: 20,
@@ -815,7 +913,6 @@ const styles = StyleSheet.create({
   },
   statDivider: { width: 1, backgroundColor: "#ececec", marginVertical: 4 },
 
-  // Rating pill
   ratingPill: {
     flexDirection: "row",
     alignItems: "center",
@@ -836,44 +933,66 @@ const styles = StyleSheet.create({
   ratingCountText: { fontSize: 12, fontWeight: "400", color: "#aaa" },
   noRatingText: { fontSize: 13, color: "#bbb", fontStyle: "italic" },
 
-  // Action buttons
+  // ── Action row (Follow + Message + Trade) ──
   actionRow: {
     flexDirection: "row",
     marginHorizontal: 20,
     marginTop: 16,
-    gap: 10,
+    gap: 8,
   },
-  primaryBtn: {
-    flex: 1,
+  followBtn: {
+    flex: 1.2,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
-    gap: 7,
+    gap: 6,
     backgroundColor: NAVY,
     borderRadius: 14,
-    paddingVertical: 13,
+    paddingVertical: 12,
     shadowColor: NAVY,
-    shadowOpacity: 0.3,
+    shadowOpacity: 0.25,
     shadowRadius: 6,
     shadowOffset: { width: 0, height: 3 },
-    elevation: 4,
+    elevation: 3,
   },
-  primaryBtnText: { color: "#fff", fontWeight: "800", fontSize: 15 },
-  secondaryBtn: {
+  followBtnActive: {
+    backgroundColor: "#ECEDF8",
+    borderWidth: 1.5,
+    borderColor: "#C8CAEE",
+    shadowOpacity: 0,
+    elevation: 0,
+  },
+  followBtnText: { color: "#fff", fontWeight: "800", fontSize: 14 },
+  followBtnTextActive: { color: NAVY },
+
+  msgActionBtn: {
     flex: 1,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
-    gap: 7,
+    gap: 5,
     backgroundColor: "#ECEDF8",
     borderRadius: 14,
-    paddingVertical: 13,
+    paddingVertical: 12,
     borderWidth: 1.5,
     borderColor: "#C8CAEE",
   },
-  secondaryBtnText: { color: NAVY, fontWeight: "800", fontSize: 15 },
+  msgActionBtnText: { color: NAVY, fontWeight: "700", fontSize: 13 },
 
-  // Tabs
+  tradeBtn: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 5,
+    backgroundColor: "#FEF9EC",
+    borderRadius: 14,
+    paddingVertical: 12,
+    borderWidth: 1.5,
+    borderColor: "#F0D98A",
+  },
+  tradeBtnText: { color: GOLD, fontWeight: "700", fontSize: 13 },
+
   tabBar: {
     flexDirection: "row",
     marginHorizontal: 20,
@@ -900,21 +1019,15 @@ const styles = StyleSheet.create({
   tabText: { fontSize: 13, fontWeight: "600", color: "#aaa" },
   tabTextActive: { color: NAVY, fontWeight: "800" },
 
-  // Grid
   gridWrap: { marginHorizontal: 16, marginTop: 16 },
   grid: {
     flexDirection: "row",
     flexWrap: "wrap",
     justifyContent: "space-between",
   },
-  emptyTab: {
-    alignItems: "center",
-    paddingVertical: 40,
-    gap: 10,
-  },
+  emptyTab: { alignItems: "center", paddingVertical: 40, gap: 10 },
   emptyTabText: { fontSize: 14, color: "#ccc", fontWeight: "600" },
 
-  // Reviews
   reviewsWrap: { marginHorizontal: 16, marginTop: 16, gap: 10 },
   reviewCard: {
     backgroundColor: "#fff",

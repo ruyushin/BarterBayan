@@ -3,10 +3,14 @@ import {
   arrayRemove,
   arrayUnion,
   collection,
+  deleteDoc,
   doc,
   getDoc,
+  getDocs,
   getDocsFromServer,
+  query,
   updateDoc,
+  where,
 } from "firebase/firestore";
 import { db } from "../firebaseConfig";
 
@@ -20,11 +24,8 @@ export const getItemsByCategory = async (category: string) => {
   }
 };
 
-// FETCH ALL: filters out items that have been successfully traded
+// FETCH ALL: filters out items that have been successfully traded or deleted
 export const getAllItems = async () => {
-  // getDocsFromServer bypasses Firestore's local cache so newly added
-  // items are always visible immediately after navigating back to the
-  // trade screen.
   const querySnapshot = await getDocsFromServer(collection(db, "items"));
 
   const allItems = querySnapshot.docs.map((doc) => ({
@@ -32,8 +33,8 @@ export const getAllItems = async () => {
     ...doc.data(),
   })) as any[];
 
-  // Filter traded items BEFORE user enrichment to avoid unnecessary reads
-  const items = allItems.filter((item) => !item.isTraded);
+  // PATCH: also filter soft-deleted items alongside traded ones
+  const items = allItems.filter((item) => !item.isTraded && !item.isDeleted);
 
   const ownerIds = [...new Set(items.map((i) => i.ownerId).filter(Boolean))];
 
@@ -64,7 +65,7 @@ export const getAllItems = async () => {
   }));
 };
 
-// SEARCH: also filters traded items
+// SEARCH: also filters traded and deleted items
 export const searchItems = async (searchQuery: string) => {
   if (!searchQuery.trim()) {
     return getAllItems();
@@ -80,7 +81,8 @@ export const searchItems = async (searchQuery: string) => {
     }))
     .filter(
       (item: any) =>
-        !item.isTraded && // exclude traded items from search too
+        !item.isTraded &&
+        !item.isDeleted && // PATCH: exclude deleted items from search
         ((item.title && item.title.toLowerCase().includes(searchLower)) ||
           (item.description &&
             item.description.toLowerCase().includes(searchLower))),
@@ -117,6 +119,65 @@ export const getItemDetails = async (itemId: string) => {
     console.error("Error getting item details:", error);
     throw error;
   }
+};
+
+/**
+ * PATCH: deleteItem
+ * Hard-deletes the item document so it disappears from home, explore, and
+ * every other listing screen immediately.
+ *
+ * Also cancels every pending trade that references this item so no one is
+ * left waiting on a ghost offer. We do the trade cancellation inline here
+ * (without importing tradeService) to avoid a circular module dependency.
+ *
+ * If you prefer a soft-delete instead of hard-delete, swap the `deleteDoc`
+ * call for `updateDoc(itemRef, { isDeleted: true })` — the getAllItems /
+ * searchItems filters above already exclude `isDeleted: true` items.
+ */
+export const deleteItem = async (
+  itemId: string,
+  requestingUserId: string,
+): Promise<void> => {
+  const itemRef = doc(db, "items", itemId);
+  const itemSnap = await getDoc(itemRef);
+
+  if (!itemSnap.exists()) throw new Error("Item not found.");
+  if (itemSnap.data()?.ownerId !== requestingUserId)
+    throw new Error("You can only delete your own items.");
+
+  // Cancel all pending trades that reference this item as requested or offered
+  const now = new Date();
+  const cancelFields = { status: "cancelled", updatedAt: now };
+
+  const [snapReq, snapOff] = await Promise.all([
+    getDocs(
+      query(
+        collection(db, "trades"),
+        where("requestedItemId", "==", itemId),
+        where("status", "==", "pending"),
+      ),
+    ),
+    getDocs(
+      query(
+        collection(db, "trades"),
+        where("offeredItemId", "==", itemId),
+        where("status", "==", "pending"),
+      ),
+    ),
+  ]);
+
+  await Promise.all([
+    ...snapReq.docs.map((d) => updateDoc(d.ref, cancelFields)),
+    ...snapOff.docs.map((d) => updateDoc(d.ref, cancelFields)),
+  ]).catch((e) =>
+    console.warn(
+      "Could not cancel pending trades for deleted item (non-fatal):",
+      e,
+    ),
+  );
+
+  // Hard-delete the item itself
+  await deleteDoc(itemRef);
 };
 
 export const updateItemLikes = async (
@@ -174,7 +235,8 @@ export const addItem = async (itemData: {
       ...itemData,
       likes: itemData.likes || 0,
       likedBy: itemData.likedBy || [],
-      isTraded: false, // explicit default so filter works correctly
+      isTraded: false,
+      isDeleted: false, // PATCH: explicit default so filter works correctly
       createdAt: itemData.createdAt || new Date(),
     });
     return { id: docRef.id, ...itemData };
@@ -351,10 +413,10 @@ export const getUserSavedItems = async (userId: string) => {
 export const getUserPostedItems = async (userId: string) => {
   try {
     const querySnapshot = await getDocsFromServer(collection(db, "items"));
-    // getUserPostedItems intentionally includes traded items so the user
-    // can still see their own history in their profile
+    // Intentionally includes traded items so the owner sees their full history.
+    // Excludes hard-deleted items — those are gone everywhere.
     const userItems = querySnapshot.docs
-      .filter((doc) => doc.data().ownerId === userId)
+      .filter((doc) => doc.data().ownerId === userId && !doc.data().isDeleted)
       .map((doc) => ({ id: doc.id, ...doc.data() }));
     return userItems;
   } catch (error) {

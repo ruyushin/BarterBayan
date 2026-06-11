@@ -24,6 +24,8 @@ export type TradeStatus =
   | "cancelled"
   | "completed";
 
+export type TradeSortOrder = "newest" | "oldest";
+
 export interface TradeReview {
   reviewerId: string;
   targetUserId: string;
@@ -34,9 +36,14 @@ export interface TradeReview {
 
 export interface TradeOffer {
   id: string;
+  // Primary offered item (backward-compat single-item field)
   offeredItemId: string;
   offeredItemTitle: string;
   offeredItemImage: string;
+  // PATCH: optional extra items for bundle / multi-select offers
+  offeredItemIds?: string[];
+  offeredItemTitles?: string[];
+  offeredItemImages?: string[];
   requestedItemId: string;
   requestedItemTitle: string;
   requestedItemImage: string;
@@ -45,13 +52,17 @@ export interface TradeOffer {
   offererAvatar: string;
   ownerId: string;
   status: TradeStatus;
+  // PATCH: stored when owner declines so offerer sees the reason
+  declineReason?: string;
   participants: string[];
+  // PATCH: categories persisted for filter UI
+  offeredItemCategory?: string;
+  requestedItemCategory?: string;
   createdAt: Timestamp;
   updatedAt?: Timestamp;
   completedAt?: Timestamp;
   completedBy?: string[];
   message?: string;
-  // Reviews keyed by REVIEWER'S uid
   reviews?: Record<string, TradeReview>;
 }
 
@@ -65,6 +76,60 @@ export interface TradeMessage {
   createdAt: Timestamp;
 }
 
+// ─── Client-side filter helpers ───────────────────────────────────────────────
+
+/**
+ * PATCH: filterAndSortOffers
+ * Pure utility used by screens for "Your Trades" / "Your Offers" filtering.
+ * Pass the full list from a listener and this returns the filtered + sorted view.
+ */
+export function filterAndSortOffers(
+  offers: TradeOffer[],
+  opts: {
+    category?: string | null; // null / undefined = all categories
+    sortOrder?: TradeSortOrder; // default "newest"
+    statusFilter?: TradeStatus | "all"; // default "all"
+  } = {},
+): TradeOffer[] {
+  const { category, sortOrder = "newest", statusFilter = "all" } = opts;
+
+  let result = [...offers];
+
+  if (statusFilter !== "all") {
+    result = result.filter((o) => o.status === statusFilter);
+  }
+
+  if (category) {
+    result = result.filter(
+      (o) =>
+        o.offeredItemCategory === category ||
+        o.requestedItemCategory === category,
+    );
+  }
+
+  result.sort((a, b) => {
+    const aMs = a.createdAt?.toMillis?.() ?? 0;
+    const bMs = b.createdAt?.toMillis?.() ?? 0;
+    return sortOrder === "newest" ? bMs - aMs : aMs - bMs;
+  });
+
+  return result;
+}
+
+/**
+ * PATCH: deriveCategories
+ * Extracts the unique category strings from a list of offers for building
+ * filter chip lists in the UI.
+ */
+export function deriveCategories(offers: TradeOffer[]): string[] {
+  const set = new Set<string>();
+  for (const o of offers) {
+    if (o.offeredItemCategory) set.add(o.offeredItemCategory);
+    if (o.requestedItemCategory) set.add(o.requestedItemCategory);
+  }
+  return Array.from(set).sort();
+}
+
 // ─── Create ───────────────────────────────────────────────────────────────────
 
 export const proposeTrade = async (
@@ -73,6 +138,7 @@ export const proposeTrade = async (
     title: string;
     images?: string[];
     image?: string;
+    category?: string;
   },
   requestedItem: {
     id: string;
@@ -80,6 +146,7 @@ export const proposeTrade = async (
     images?: string[];
     image?: string;
     ownerId: string;
+    category?: string;
   },
   offererUser: {
     uid: string;
@@ -120,6 +187,13 @@ export const proposeTrade = async (
     participants: [offererUser.uid, requestedItem.ownerId],
     createdAt: Timestamp.now(),
     completedBy: [],
+    // PATCH: persist categories so filter UI can use them without extra reads
+    ...(offeredItem.category
+      ? { offeredItemCategory: offeredItem.category }
+      : {}),
+    ...(requestedItem.category
+      ? { requestedItemCategory: requestedItem.category }
+      : {}),
     ...(message?.trim() ? { message: message.trim() } : {}),
   };
 
@@ -374,35 +448,111 @@ export const subscribeToTradeMessages = (
 
 // ─── Update ───────────────────────────────────────────────────────────────────
 
+/**
+ * PATCH: cancelPendingOffersForItems
+ * Cancels every pending trade that involves any of the supplied item IDs,
+ * skipping `excludeOfferId` (the accepted trade itself).
+ * Exported so itemService.deleteItem can call it to clean up on deletion.
+ */
+export const cancelPendingOffersForItems = async (
+  itemIds: string[],
+  excludeOfferId = "",
+): Promise<void> => {
+  const now = Timestamp.now();
+  const validIds = itemIds.filter(Boolean);
+  if (validIds.length === 0) return;
+
+  const cancelSnap = async (
+    snap: Awaited<ReturnType<typeof getDocs>>,
+  ): Promise<void> => {
+    await Promise.all(
+      snap.docs
+        .filter((d) => d.id !== excludeOfferId)
+        .map((d) => updateDoc(d.ref, { status: "cancelled", updatedAt: now })),
+    );
+  };
+
+  for (const itemId of validIds) {
+    const [snapReq, snapOff] = await Promise.all([
+      getDocs(
+        query(
+          collection(db, "trades"),
+          where("requestedItemId", "==", itemId),
+          where("status", "==", "pending"),
+        ),
+      ),
+      getDocs(
+        query(
+          collection(db, "trades"),
+          where("offeredItemId", "==", itemId),
+          where("status", "==", "pending"),
+        ),
+      ),
+    ]);
+    await Promise.all([cancelSnap(snapReq), cancelSnap(snapOff)]);
+  }
+};
+
+/**
+ * PATCH: updateTradeStatus
+ * - Accepts optional `declineReason` written to the trade doc so the offerer
+ *   can see exactly why their offer was declined.
+ * - On "accepted": marks both items as traded (hides them from home/explore)
+ *   then auto-cancels every other pending offer involving either item.
+ */
 export const updateTradeStatus = async (
   offerId: string,
   newStatus: "accepted" | "declined",
+  declineReason?: string,
 ): Promise<void> => {
   const docRef = doc(db, "trades", offerId);
   const snap = await getDoc(docRef);
   const data = snap.data();
 
-  await updateDoc(docRef, {
+  const updatePayload: Record<string, unknown> = {
     status: newStatus,
     updatedAt: Timestamp.now(),
-  });
+  };
+
+  // PATCH: persist the decline reason
+  if (newStatus === "declined" && declineReason?.trim()) {
+    updatePayload.declineReason = declineReason.trim();
+  }
+
+  await updateDoc(docRef, updatePayload);
 
   if (newStatus === "accepted" && data) {
-    const ops: Promise<void>[] = [];
-    if (data.offeredItemId)
-      ops.push(
+    // Mark both items as traded → filtered out on home/explore screens
+    const itemOps: Promise<void>[] = [];
+    if (data.offeredItemId) {
+      itemOps.push(
         updateDoc(doc(db, "items", data.offeredItemId), { isTraded: true }),
       );
-    if (data.requestedItemId)
-      ops.push(
+    }
+    if (data.requestedItemId) {
+      itemOps.push(
         updateDoc(doc(db, "items", data.requestedItemId), { isTraded: true }),
       );
-    await Promise.all(ops).catch((e) =>
+    }
+    await Promise.all(itemOps).catch((e) =>
       console.warn("Could not mark items as traded (non-fatal):", e),
+    );
+
+    // PATCH: auto-cancel every other pending offer for both items
+    await cancelPendingOffersForItems(
+      [data.offeredItemId, data.requestedItemId],
+      offerId,
+    ).catch((e) =>
+      console.warn("Could not auto-cancel sibling offers (non-fatal):", e),
     );
   }
 
   if (data) {
+    const reasonNote =
+      newStatus === "declined" && declineReason?.trim()
+        ? ` Reason: "${declineReason.trim()}"`
+        : "";
+
     await createNotification({
       userId: data.offererId,
       type:
@@ -411,7 +561,7 @@ export const updateTradeStatus = async (
       body:
         newStatus === "accepted"
           ? `Your offer for "${data.requestedItemTitle}" was accepted!`
-          : `Your offer for "${data.requestedItemTitle}" was declined.`,
+          : `Your offer for "${data.requestedItemTitle}" was declined.${reasonNote}`,
       avatar: data.ownerAvatar ?? undefined,
       tradeId: offerId,
       otherUserId: data.ownerId,
@@ -498,11 +648,6 @@ export const completeTrade = async (
   }
 };
 
-/**
- * FIX: submitTradeReview
- * - Throws on failure instead of silently returning false
- * - Correctly passes each review's own targetUserId when publishing
- */
 export const submitTradeReview = async (
   tradeId: string,
   reviewerId: string,
@@ -528,20 +673,15 @@ export const submitTradeReview = async (
   const keys = Object.keys(reviews);
 
   if (keys.length >= 2) {
-    // Publish each review to the correct recipient's profile
     await Promise.all(
       keys.map((k) =>
-        publishReviewToProfile(
-          reviews[k].targetUserId, // who receives the review
-          reviews[k].reviewerId, // who wrote the review
-          {
-            fromUserId: reviews[k].reviewerId,
-            rating: reviews[k].rating,
-            comment: reviews[k].comment,
-            tradeId,
-            createdAt: reviews[k].createdAt,
-          },
-        ),
+        publishReviewToProfile(reviews[k].targetUserId, reviews[k].reviewerId, {
+          fromUserId: reviews[k].reviewerId,
+          rating: reviews[k].rating,
+          comment: reviews[k].comment,
+          tradeId,
+          createdAt: reviews[k].createdAt,
+        }),
       ),
     );
     return true;
@@ -557,12 +697,6 @@ function resolveImage(item: { images?: string[]; image?: string }): string {
   return item.image ?? "";
 }
 
-/**
- * FIX: publishReviewToProfile
- * - Removed orderBy from subcollection write (it's just an addDoc, no query needed)
- * - Throws errors instead of swallowing them so callers can surface failures
- * - Sorts the subcollection query client-side to avoid needing a Firestore index
- */
 async function publishReviewToProfile(
   userId: string,
   reviewerUserId: string,
@@ -593,7 +727,6 @@ async function publishReviewToProfile(
   const reviewerAvatar: string | null =
     reviewerData?.avatarUrl ?? reviewerData?.photoURL ?? null;
 
-  // Deduplicate: skip if this trade's review is already published
   const existing: any[] = userData.userReviews ?? [];
   if (existing.some((r: any) => r.tradeId === review.tradeId)) {
     console.log(
@@ -602,7 +735,6 @@ async function publishReviewToProfile(
     return;
   }
 
-  // Recalculate rolling average using ratingCount
   const count: number = userData.ratingCount ?? 0;
   const oldRating: number =
     typeof userData.rating === "number"
@@ -612,15 +744,12 @@ async function publishReviewToProfile(
   const newRating = (oldRating * count + review.rating) / newCount;
   const roundedRating = Math.round(newRating * 10) / 10;
 
-  // 1. Update flat fields on the user document (ProfileScreen reads these live)
   await updateDoc(userRef, {
     userReviews: [...existing, review],
     rating: roundedRating,
     ratingCount: newCount,
   });
 
-  // 2. Write to the reviews subcollection (OverviewModal queries this)
-  //    No orderBy needed here — this is a write, not a read
   await addDoc(collection(db, "users", userId, "reviews"), {
     reviewerName,
     reviewerAvatar: reviewerAvatar ?? "",
