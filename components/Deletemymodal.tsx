@@ -1,8 +1,10 @@
 import { Ionicons } from "@expo/vector-icons";
+import { GoogleSignin } from "@react-native-google-signin/google-signin";
 import { useRouter } from "expo-router";
 import {
   deleteUser,
   EmailAuthProvider,
+  GoogleAuthProvider,
   onAuthStateChanged,
   reauthenticateWithCredential,
   User,
@@ -12,6 +14,8 @@ import React, { useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Animated,
+  KeyboardAvoidingView,
+  Platform,
   ScrollView,
   StyleSheet,
   Text,
@@ -19,15 +23,16 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
-import { auth, db } from "../firebaseConfig"; // adjust path as needed
+import { auth, db } from "../firebaseConfig";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 const DARK_BLUE = "#2f2f6f";
 const ACCENT_RED = "#C0392B";
 const ACCENT_RED_LIGHT = "#FEE2E2";
 const GOLD = "#C9A227";
-const BG = "#F4F5F9";
 const WHITE = "#FFFFFF";
+
+const CONFIRMATION_PHRASE = "delete my account permanently";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 function AppModal({
@@ -55,9 +60,11 @@ function AppModal({
   );
 }
 
-// Generates a random 6-word confirmation phrase
-function generateConfirmationPhrase(): string {
-  return "delete my account permanently";
+/** Returns true if the user signed in via Google (no password). */
+function isGoogleUser(user: User | null): boolean {
+  return (
+    user?.providerData?.some((p) => p.providerId === "google.com") ?? false
+  );
 }
 
 // ─── Step Indicator ───────────────────────────────────────────────────────────
@@ -83,7 +90,12 @@ function StepDots({ step, total }: { step: number; total: number }) {
 }
 
 const stepStyles = StyleSheet.create({
-  row: { flexDirection: "row", gap: 8, justifyContent: "center", marginBottom: 20 },
+  row: {
+    flexDirection: "row",
+    gap: 8,
+    justifyContent: "center",
+    marginBottom: 20,
+  },
   dot: {
     width: 28,
     height: 28,
@@ -94,14 +106,8 @@ const stepStyles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-  dotActive: {
-    backgroundColor: DARK_BLUE,
-    borderColor: DARK_BLUE,
-  },
-  dotDone: {
-    backgroundColor: "#4CAF50",
-    borderColor: "#4CAF50",
-  },
+  dotActive: { backgroundColor: DARK_BLUE, borderColor: DARK_BLUE },
+  dotDone: { backgroundColor: "#4CAF50", borderColor: "#4CAF50" },
 });
 
 // ─── Countdown Button ─────────────────────────────────────────────────────────
@@ -115,14 +121,13 @@ function CountdownButton({
   const WAIT = 15;
   const [seconds, setSeconds] = useState(WAIT);
   const ready = seconds === 0;
+  const progress = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
     if (ready) return;
     const t = setInterval(() => setSeconds((s) => Math.max(0, s - 1)), 1000);
     return () => clearInterval(t);
   }, [ready]);
-
-  const progress = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
     Animated.timing(progress, {
@@ -138,16 +143,14 @@ function CountdownButton({
   });
 
   return (
-    <View style={countdownStyles.wrapper}>
-      {/* Progress track */}
-      <View style={countdownStyles.track}>
-        <Animated.View style={[countdownStyles.fill, { width: barWidth }]} />
+    <View style={cdStyles.wrapper}>
+      <View style={cdStyles.track}>
+        <Animated.View style={[cdStyles.fill, { width: barWidth }]} />
       </View>
-
       <TouchableOpacity
         style={[
-          countdownStyles.btn,
-          ready && !loading ? countdownStyles.btnReady : countdownStyles.btnWaiting,
+          cdStyles.btn,
+          ready && !loading ? cdStyles.btnReady : cdStyles.btnWaiting,
         ]}
         onPress={onPress}
         disabled={!ready || loading}
@@ -156,16 +159,18 @@ function CountdownButton({
         {loading ? (
           <ActivityIndicator color={WHITE} size="small" />
         ) : ready ? (
-          <View style={countdownStyles.btnInner}>
+          <View style={cdStyles.inner}>
             <Ionicons name="trash-outline" size={18} color={WHITE} />
-            <Text style={countdownStyles.btnText}>Yes, Delete My Account</Text>
+            <Text style={cdStyles.btnText}>Yes, Delete My Account</Text>
           </View>
         ) : (
-          <View style={countdownStyles.btnInner}>
-            <Ionicons name="time-outline" size={16} color="rgba(255,255,255,0.7)" />
-            <Text style={countdownStyles.btnTextWaiting}>
-              Please wait {seconds}s…
-            </Text>
+          <View style={cdStyles.inner}>
+            <Ionicons
+              name="time-outline"
+              size={16}
+              color="rgba(255,255,255,0.7)"
+            />
+            <Text style={cdStyles.btnTextWaiting}>Please wait {seconds}s…</Text>
           </View>
         )}
       </TouchableOpacity>
@@ -173,7 +178,7 @@ function CountdownButton({
   );
 }
 
-const countdownStyles = StyleSheet.create({
+const cdStyles = StyleSheet.create({
   wrapper: { gap: 10 },
   track: {
     height: 3,
@@ -182,11 +187,7 @@ const countdownStyles = StyleSheet.create({
     overflow: "hidden",
     marginBottom: 2,
   },
-  fill: {
-    height: "100%",
-    backgroundColor: ACCENT_RED,
-    borderRadius: 2,
-  },
+  fill: { height: "100%", backgroundColor: ACCENT_RED, borderRadius: 2 },
   btn: {
     paddingVertical: 15,
     borderRadius: 14,
@@ -201,107 +202,272 @@ const countdownStyles = StyleSheet.create({
     shadowOpacity: 0.4,
     shadowRadius: 6,
   },
-  btnWaiting: {
-    backgroundColor: "#CCCCCC",
+  btnWaiting: { backgroundColor: "#CCCCCC" },
+  inner: { flexDirection: "row", alignItems: "center", gap: 8 },
+  btnText: {
+    color: WHITE,
+    fontWeight: "700",
+    fontSize: 15,
+    letterSpacing: 0.2,
   },
-  btnInner: { flexDirection: "row", alignItems: "center", gap: 8 },
-  btnText: { color: WHITE, fontWeight: "700", fontSize: 15, letterSpacing: 0.2 },
-  btnTextWaiting: { color: "rgba(255,255,255,0.8)", fontWeight: "600", fontSize: 14 },
+  btnTextWaiting: {
+    color: "rgba(255,255,255,0.8)",
+    fontWeight: "600",
+    fontSize: 14,
+  },
 });
 
-// ─── Main Delete Account Modal ────────────────────────────────────────────────
+// ─── Success Overlay ──────────────────────────────────────────────────────────
+function SuccessOverlay({ onDone }: { onDone: () => void }) {
+  const scale = useRef(new Animated.Value(0.6)).current;
+  const opacity = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    Animated.parallel([
+      Animated.spring(scale, {
+        toValue: 1,
+        useNativeDriver: true,
+        tension: 70,
+        friction: 7,
+      }),
+      Animated.timing(opacity, {
+        toValue: 1,
+        duration: 250,
+        useNativeDriver: true,
+      }),
+    ]).start();
+  }, []);
+
+  return (
+    <View style={successStyles.overlay}>
+      <Animated.View
+        style={[successStyles.card, { opacity, transform: [{ scale }] }]}
+      >
+        <View style={successStyles.iconRing}>
+          <Ionicons name="checkmark-circle" size={56} color="#22C55E" />
+        </View>
+        <Text style={successStyles.title}>Account Deleted</Text>
+        <Text style={successStyles.body}>
+          Your account and all associated data have been permanently erased. We
+          hope to see you again someday.
+        </Text>
+        <TouchableOpacity
+          style={successStyles.btn}
+          onPress={onDone}
+          activeOpacity={0.85}
+        >
+          <Text style={successStyles.btnText}>Back to Login</Text>
+        </TouchableOpacity>
+      </Animated.View>
+    </View>
+  );
+}
+
+const successStyles = StyleSheet.create({
+  overlay: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: "rgba(10,10,30,0.7)",
+    justifyContent: "center",
+    alignItems: "center",
+    zIndex: 99999,
+    elevation: 100,
+    padding: 24,
+  },
+  card: {
+    backgroundColor: WHITE,
+    borderRadius: 24,
+    padding: 32,
+    alignItems: "center",
+    width: "100%",
+    maxWidth: 360,
+  },
+  iconRing: { marginBottom: 16 },
+  title: {
+    fontSize: 22,
+    fontWeight: "800",
+    color: "#1A1A2E",
+    marginBottom: 10,
+    textAlign: "center",
+  },
+  body: {
+    fontSize: 14,
+    color: "#666",
+    lineHeight: 21,
+    textAlign: "center",
+    marginBottom: 24,
+  },
+  btn: {
+    backgroundColor: DARK_BLUE,
+    borderRadius: 14,
+    paddingVertical: 14,
+    paddingHorizontal: 40,
+  },
+  btnText: { color: WHITE, fontWeight: "700", fontSize: 15 },
+});
+
+// ─── Main Modal ───────────────────────────────────────────────────────────────
 interface DeleteAccountModalProps {
   visible: boolean;
   onClose: () => void;
 }
 
-export function DeleteAccountModal({ visible, onClose }: DeleteAccountModalProps) {
+export function DeleteAccountModal({
+  visible,
+  onClose,
+}: DeleteAccountModalProps) {
   const router = useRouter();
 
-  // step: 1 = warning, 2 = type phrase, 3 = enter password, 4 = final confirm
   const [step, setStep] = useState(1);
   const [typedPhrase, setTypedPhrase] = useState("");
-  const [password, setPassword] = useState("");
-  const [passwordVisible, setPasswordVisible] = useState(false);
-  const [passwordError, setPasswordError] = useState<string | null>(null);
-  const [verifyingPassword, setVerifyingPassword] = useState(false);
+  const [credential, setCredential] = useState("");
+  const [credentialVisible, setCredentialVisible] = useState(false);
+  const [credentialError, setCredentialError] = useState<string | null>(null);
+  const [verifying, setVerifying] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [showSuccess, setShowSuccess] = useState(false);
   const [currentUser, setCurrentUser] = useState<User | null>(null);
 
-  const PHRASE = generateConfirmationPhrase();
-  const phraseMatches = typedPhrase.trim().toLowerCase() === PHRASE.toLowerCase();
+  const googleUser = isGoogleUser(currentUser);
+  const phraseMatches =
+    typedPhrase.trim().toLowerCase() === CONFIRMATION_PHRASE.toLowerCase();
 
-  // Entrance animation
   const sheetAnim = useRef(new Animated.Value(60)).current;
   const fadeAnim = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
     if (visible) {
       Animated.parallel([
-        Animated.spring(sheetAnim, { toValue: 0, useNativeDriver: true, tension: 80 }),
-        Animated.timing(fadeAnim, { toValue: 1, duration: 250, useNativeDriver: true }),
+        Animated.spring(sheetAnim, {
+          toValue: 0,
+          useNativeDriver: true,
+          tension: 80,
+        }),
+        Animated.timing(fadeAnim, {
+          toValue: 1,
+          duration: 250,
+          useNativeDriver: true,
+        }),
       ]).start();
     }
   }, [visible, step]);
 
   useEffect(() => {
-    const unsub = onAuthStateChanged(auth, (user) => setCurrentUser(user));
+    const unsub = onAuthStateChanged(auth, (u) => setCurrentUser(u));
     return () => unsub();
   }, []);
 
   const reset = () => {
     setStep(1);
     setTypedPhrase("");
-    setPassword("");
-    setPasswordError(null);
-    setPasswordVisible(false);
+    setCredential("");
+    setCredentialError(null);
+    setCredentialVisible(false);
+    setShowSuccess(false);
     sheetAnim.setValue(60);
     fadeAnim.setValue(0);
   };
 
-  const handleClose = () => { reset(); onClose(); };
+  const handleClose = () => {
+    reset();
+    onClose();
+  };
 
   const goNext = () => {
     sheetAnim.setValue(30);
     fadeAnim.setValue(0);
     setStep((s) => s + 1);
     Animated.parallel([
-      Animated.spring(sheetAnim, { toValue: 0, useNativeDriver: true, tension: 80 }),
-      Animated.timing(fadeAnim, { toValue: 1, duration: 220, useNativeDriver: true }),
+      Animated.spring(sheetAnim, {
+        toValue: 0,
+        useNativeDriver: true,
+        tension: 80,
+      }),
+      Animated.timing(fadeAnim, {
+        toValue: 1,
+        duration: 220,
+        useNativeDriver: true,
+      }),
     ]).start();
   };
 
-  // Step 3: verify password before proceeding
-  const handleVerifyPassword = async () => {
-    if (!password.trim()) {
-      setPasswordError("Please enter your current password.");
-      return;
-    }
+  // ── Step 3: verify identity ──────────────────────────────────────────────
+  const handleVerify = async () => {
     if (!currentUser?.email) {
-      setPasswordError("Unable to identify your account. Please log out and try again.");
+      setCredentialError(
+        "Unable to identify your account. Please log out and try again."
+      );
       return;
     }
-    setVerifyingPassword(true);
-    setPasswordError(null);
+
+    // ── Google user: real reauthentication via GoogleSignin ──
+    if (googleUser) {
+      setVerifying(true);
+      setCredentialError(null);
+      try {
+        await GoogleSignin.hasPlayServices();
+        const signInResult = await GoogleSignin.signIn();
+        const idToken =
+          signInResult.data?.idToken ?? (signInResult as any).idToken;
+
+        if (!idToken) {
+          setCredentialError("Google sign-in failed. Please try again.");
+          return;
+        }
+
+        const googleCredential = GoogleAuthProvider.credential(idToken);
+        await reauthenticateWithCredential(currentUser, googleCredential);
+        goNext();
+      } catch (err: any) {
+        const code = err?.code ?? "";
+        if (code === "SIGN_IN_CANCELLED" || code === "-5") {
+          setCredentialError("Sign-in was cancelled. Please try again.");
+        } else {
+          setCredentialError("Google verification failed. Please try again.");
+        }
+      } finally {
+        setVerifying(false);
+      }
+      return;
+    }
+
+    // ── Email/password user ──
+    if (!credential.trim()) {
+      setCredentialError("Please enter your password.");
+      return;
+    }
+
+    setVerifying(true);
+    setCredentialError(null);
     try {
-      const credential = EmailAuthProvider.credential(currentUser.email, password);
-      await reauthenticateWithCredential(currentUser, credential);
+      const cred = EmailAuthProvider.credential(currentUser.email, credential);
+      await reauthenticateWithCredential(currentUser, cred);
       goNext();
     } catch (err: any) {
       const code = err?.code ?? "";
-      if (code === "auth/wrong-password" || code === "auth/invalid-credential") {
-        setPasswordError("Incorrect password. Please try again.");
+      if (
+        code === "auth/wrong-password" ||
+        code === "auth/invalid-credential"
+      ) {
+        setCredentialError("Incorrect password. Please try again.");
       } else if (code === "auth/too-many-requests") {
-        setPasswordError("Too many attempts. Please wait a moment and try again.");
+        setCredentialError(
+          "Too many attempts. Please wait a moment and try again."
+        );
       } else {
-        setPasswordError("Verification failed. Please check your password and try again.");
+        setCredentialError(
+          "Verification failed. Please check your credentials and try again."
+        );
       }
     } finally {
-      setVerifyingPassword(false);
+      setVerifying(false);
     }
   };
 
-  // Step 4: execute deletion
+  // ── Step 4: execute deletion ─────────────────────────────────────────────
   const handleDeleteAccount = async () => {
     if (!currentUser) return;
     setDeleting(true);
@@ -312,304 +478,496 @@ export function DeleteAccountModal({ visible, onClose }: DeleteAccountModalProps
         console.warn("[DeleteAccount] Firestore delete failed:", dbErr);
       }
       await deleteUser(currentUser);
-      reset();
-      onClose();
-      router.replace("/(auth)/login");
+      setDeleting(false);
+      setShowSuccess(true);
     } catch (err: any) {
       console.error("[DeleteAccount] Error:", err);
+      setDeleting(false);
       if (err?.code === "auth/requires-recent-login") {
         setStep(3);
-        setPasswordError("Session expired. Please re-enter your password.");
+        setCredential("");
+        setCredentialError("Session expired. Please re-verify your identity.");
       }
-    } finally {
-      setDeleting(false);
     }
+  };
+
+  const handleSuccessDone = () => {
+    reset();
+    onClose();
+    router.replace("/(auth)/login");
   };
 
   if (!visible) return null;
 
   return (
     <AppModal visible={visible}>
-      <Animated.View style={[modalStyles.overlay, { opacity: fadeAnim }]}>
-        <ScrollView
-          contentContainerStyle={modalStyles.scrollContainer}
-          keyboardShouldPersistTaps="handled"
-          showsVerticalScrollIndicator={false}
-        >
-          <Animated.View
-            style={[
-              modalStyles.sheet,
-              { transform: [{ translateY: sheetAnim }] },
-            ]}
+      {showSuccess && <SuccessOverlay onDone={handleSuccessDone} />}
+
+      {/* ── KeyboardAvoidingView must wrap the overlay so it can push content up ── */}
+      <KeyboardAvoidingView
+        style={{ flex: 1 }}
+        behavior={Platform.OS === "ios" ? "padding" : "padding"}
+        keyboardVerticalOffset={0}
+      >
+        <Animated.View style={[modalStyles.overlay, { opacity: fadeAnim }]}>
+          <ScrollView
+            contentContainerStyle={modalStyles.scrollContainer}
+            keyboardShouldPersistTaps="handled"
+            showsVerticalScrollIndicator={false}
+            bounces={false}
           >
-            {/* ── Close Button ── */}
-            <TouchableOpacity
-              style={modalStyles.closeBtn}
-              onPress={handleClose}
-              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-              activeOpacity={0.7}
+            <Animated.View
+              style={[
+                modalStyles.sheet,
+                { transform: [{ translateY: sheetAnim }] },
+              ]}
             >
-              <Ionicons name="close" size={20} color="#AAAAAA" />
-            </TouchableOpacity>
+              {/* Close */}
+              <TouchableOpacity
+                style={modalStyles.closeBtn}
+                onPress={handleClose}
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                activeOpacity={0.7}
+              >
+                <Ionicons name="close" size={20} color="#AAAAAA" />
+              </TouchableOpacity>
 
-            {/* ── Step Indicator ── */}
-            <StepDots step={step} total={4} />
+              <StepDots step={step} total={4} />
 
-            {/* ══════════════════════════════════════════ */}
-            {/* STEP 1 — Warning & Consequences            */}
-            {/* ══════════════════════════════════════════ */}
-            {step === 1 && (
-              <>
-                <View style={modalStyles.iconRing}>
-                  <View style={[modalStyles.iconBox, { backgroundColor: ACCENT_RED_LIGHT }]}>
-                    <Ionicons name="warning-outline" size={30} color={ACCENT_RED} />
-                  </View>
-                </View>
-
-                <Text style={modalStyles.title}>Delete Account</Text>
-                <Text style={modalStyles.subtitle}>
-                  This action is permanent and cannot be reversed. Please read the following carefully.
-                </Text>
-
-                <View style={step1Styles.consequenceList}>
-                  {[
-                    { icon: "person-remove-outline", text: "Your profile and personal information will be permanently erased." },
-                    { icon: "swap-horizontal-outline", text: "All active and past trade listings will be removed." },
-                    { icon: "chatbubbles-outline", text: "Your messages and trade history will be deleted." },
-                    { icon: "star-outline", text: "Your ratings, reviews, and reputation will be lost." },
-                    { icon: "shield-checkmark-outline", text: "You will be immediately signed out and cannot recover this account." },
-                  ].map((item, i) => (
-                    <View key={i} style={step1Styles.consequenceRow}>
-                      <View style={step1Styles.iconWrap}>
-                        <Ionicons name={item.icon as any} size={16} color={ACCENT_RED} />
-                      </View>
-                      <Text style={step1Styles.consequenceText}>{item.text}</Text>
+              {/* ══════════════════════════════════════
+                  STEP 1 — Warning & Consequences
+              ══════════════════════════════════════ */}
+              {step === 1 && (
+                <>
+                  <View style={modalStyles.iconRing}>
+                    <View
+                      style={[
+                        modalStyles.iconBox,
+                        { backgroundColor: ACCENT_RED_LIGHT },
+                      ]}
+                    >
+                      <Ionicons
+                        name="warning-outline"
+                        size={30}
+                        color={ACCENT_RED}
+                      />
                     </View>
-                  ))}
-                </View>
+                  </View>
 
-                <View style={step1Styles.warningBadge}>
-                  <Ionicons name="alert-circle" size={14} color="#92400E" />
-                  <Text style={step1Styles.warningText}>
-                    Once deleted, your data cannot be recovered by anyone, including our support team.
+                  <Text style={modalStyles.title}>Delete Account</Text>
+                  <Text style={modalStyles.subtitle}>
+                    This action is permanent and cannot be reversed. Please read
+                    the following carefully.
                   </Text>
-                </View>
 
-                <TouchableOpacity
-                  style={[modalStyles.primaryBtn, { backgroundColor: ACCENT_RED }]}
-                  onPress={goNext}
-                  activeOpacity={0.8}
-                >
-                  <View style={modalStyles.primaryBtnInner}>
-                    <Text style={modalStyles.primaryBtnText}>I Understand, Continue</Text>
-                    <Ionicons name="arrow-forward" size={16} color={WHITE} />
+                  <View style={s1.list}>
+                    {[
+                      {
+                        icon: "person-remove-outline",
+                        text: "Your profile and personal information will be permanently erased.",
+                      },
+                      {
+                        icon: "swap-horizontal-outline",
+                        text: "All active and past trade listings will be removed.",
+                      },
+                      {
+                        icon: "chatbubbles-outline",
+                        text: "Your messages and trade history will be deleted.",
+                      },
+                      {
+                        icon: "star-outline",
+                        text: "Your ratings, reviews, and reputation will be lost.",
+                      },
+                      {
+                        icon: "shield-checkmark-outline",
+                        text: "You will be immediately signed out and cannot recover this account.",
+                      },
+                    ].map((item, i) => (
+                      <View key={i} style={s1.row}>
+                        <View style={s1.iconWrap}>
+                          <Ionicons
+                            name={item.icon as any}
+                            size={16}
+                            color={ACCENT_RED}
+                          />
+                        </View>
+                        <Text style={s1.text}>{item.text}</Text>
+                      </View>
+                    ))}
                   </View>
-                </TouchableOpacity>
 
-                <TouchableOpacity style={modalStyles.cancelBtn} onPress={handleClose}>
-                  <Text style={modalStyles.cancelBtnText}>Cancel — Keep My Account</Text>
-                </TouchableOpacity>
-              </>
-            )}
-
-            {/* ══════════════════════════════════════════ */}
-            {/* STEP 2 — Type Confirmation Phrase          */}
-            {/* ══════════════════════════════════════════ */}
-            {step === 2 && (
-              <>
-                <View style={modalStyles.iconRing}>
-                  <View style={[modalStyles.iconBox, { backgroundColor: "#FFF7E0" }]}>
-                    <Ionicons name="create-outline" size={28} color={GOLD} />
-                  </View>
-                </View>
-
-                <Text style={modalStyles.title}>Confirm Your Intent</Text>
-                <Text style={modalStyles.subtitle}>
-                  To proceed, type the following phrase exactly as shown below.
-                </Text>
-
-                <View style={step2Styles.phraseBox}>
-                  <Text style={step2Styles.phraseLabel}>Type this phrase:</Text>
-                  <Text style={step2Styles.phrase}>{PHRASE}</Text>
-                </View>
-
-                <View style={[
-                  step2Styles.inputBox,
-                  typedPhrase.length > 0 && !phraseMatches && step2Styles.inputBoxError,
-                  phraseMatches && step2Styles.inputBoxMatch,
-                ]}>
-                  <TextInput
-                    style={step2Styles.input}
-                    value={typedPhrase}
-                    onChangeText={setTypedPhrase}
-                    placeholder="Type the phrase here…"
-                    placeholderTextColor="#CCCCCC"
-                    autoCapitalize="none"
-                    autoCorrect={false}
-                  />
-                  {phraseMatches && (
-                    <Ionicons name="checkmark-circle" size={20} color="#22C55E" style={{ marginRight: 2 }} />
-                  )}
-                </View>
-
-                {typedPhrase.length > 0 && !phraseMatches && (
-                  <View style={step2Styles.mismatchRow}>
-                    <Ionicons name="close-circle" size={14} color={ACCENT_RED} />
-                    <Text style={step2Styles.mismatchText}>Phrase does not match. Check for typos.</Text>
-                  </View>
-                )}
-
-                <TouchableOpacity
-                  style={[
-                    modalStyles.primaryBtn,
-                    { backgroundColor: phraseMatches ? ACCENT_RED : "#CCCCCC" },
-                    !phraseMatches && { elevation: 0, shadowOpacity: 0 },
-                  ]}
-                  onPress={goNext}
-                  disabled={!phraseMatches}
-                  activeOpacity={0.8}
-                >
-                  <View style={modalStyles.primaryBtnInner}>
-                    <Text style={modalStyles.primaryBtnText}>Continue</Text>
-                    <Ionicons name="arrow-forward" size={16} color={WHITE} />
-                  </View>
-                </TouchableOpacity>
-
-                <TouchableOpacity style={modalStyles.cancelBtn} onPress={handleClose}>
-                  <Text style={modalStyles.cancelBtnText}>Cancel</Text>
-                </TouchableOpacity>
-              </>
-            )}
-
-            {/* ══════════════════════════════════════════ */}
-            {/* STEP 3 — Password Verification             */}
-            {/* ══════════════════════════════════════════ */}
-            {step === 3 && (
-              <>
-                <View style={modalStyles.iconRing}>
-                  <View style={[modalStyles.iconBox, { backgroundColor: "#EEF0FB" }]}>
-                    <Ionicons name="lock-closed-outline" size={28} color={DARK_BLUE} />
-                  </View>
-                </View>
-
-                <Text style={modalStyles.title}>Verify Your Identity</Text>
-                <Text style={modalStyles.subtitle}>
-                  For your security, please enter your current password to authorize this request.
-                </Text>
-
-                <View style={[
-                  step3Styles.inputBox,
-                  passwordError != null && step3Styles.inputBoxError,
-                ]}>
-                  <Ionicons name="key-outline" size={18} color={passwordError ? ACCENT_RED : "#AAAAAA"} />
-                  <TextInput
-                    style={step3Styles.input}
-                    value={password}
-                    onChangeText={(t) => { setPassword(t); setPasswordError(null); }}
-                    placeholder="Enter your password"
-                    placeholderTextColor="#CCCCCC"
-                    secureTextEntry={!passwordVisible}
-                    autoCapitalize="none"
-                    autoCorrect={false}
-                  />
-                  <TouchableOpacity
-                    onPress={() => setPasswordVisible((v) => !v)}
-                    hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                  >
-                    <Ionicons
-                      name={passwordVisible ? "eye-off-outline" : "eye-outline"}
-                      size={18}
-                      color="#AAAAAA"
-                    />
-                  </TouchableOpacity>
-                </View>
-
-                {passwordError && (
-                  <View style={step3Styles.errorRow}>
-                    <Ionicons name="alert-circle" size={14} color={ACCENT_RED} />
-                    <Text style={step3Styles.errorText}>{passwordError}</Text>
-                  </View>
-                )}
-
-                {/* FIX: replaced <> fragment with <View> to prevent web text node error */}
-                <TouchableOpacity
-                  style={[
-                    modalStyles.primaryBtn,
-                    { backgroundColor: DARK_BLUE },
-                    verifyingPassword && { opacity: 0.7 },
-                  ]}
-                  onPress={handleVerifyPassword}
-                  disabled={verifyingPassword}
-                  activeOpacity={0.8}
-                >
-                  {verifyingPassword ? (
-                    <ActivityIndicator color={WHITE} size="small" />
-                  ) : (
-                    <View style={modalStyles.primaryBtnInner}>
-                      <Text style={modalStyles.primaryBtnText}>Verify & Continue</Text>
-                      <Ionicons name="arrow-forward" size={16} color={WHITE} />
-                    </View>
-                  )}
-                </TouchableOpacity>
-
-                <TouchableOpacity style={modalStyles.cancelBtn} onPress={handleClose}>
-                  <Text style={modalStyles.cancelBtnText}>Cancel</Text>
-                </TouchableOpacity>
-              </>
-            )}
-
-            {/* ══════════════════════════════════════════ */}
-            {/* STEP 4 — Final Confirmation + 15s Cooldown */}
-            {/* ══════════════════════════════════════════ */}
-            {step === 4 && (
-              <>
-                <View style={modalStyles.iconRing}>
-                  <View style={[modalStyles.iconBox, { backgroundColor: ACCENT_RED_LIGHT }]}>
-                    <Ionicons name="trash-outline" size={30} color={ACCENT_RED} />
-                  </View>
-                </View>
-
-                <Text style={modalStyles.title}>Final Confirmation</Text>
-                <Text style={modalStyles.subtitle}>
-                  You are about to permanently delete your account. This step cannot be undone.
-                </Text>
-
-                <View style={step4Styles.summaryBox}>
-                  <View style={step4Styles.summaryRow}>
-                    <Ionicons name="checkmark-circle" size={16} color="#22C55E" />
-                    <Text style={step4Styles.summaryText}>Confirmation phrase verified</Text>
-                  </View>
-                  <View style={step4Styles.summaryRow}>
-                    <Ionicons name="checkmark-circle" size={16} color="#22C55E" />
-                    <Text style={step4Styles.summaryText}>Identity verified</Text>
-                  </View>
-                  <View style={step4Styles.summaryRow}>
-                    <Ionicons name="alert-circle" size={16} color={ACCENT_RED} />
-                    <Text style={[step4Styles.summaryText, { color: ACCENT_RED, fontWeight: "700" }]}>
-                      Deletion is irreversible
+                  <View style={s1.badge}>
+                    <Ionicons name="alert-circle" size={14} color="#92400E" />
+                    <Text style={s1.badgeText}>
+                      Once deleted, your data cannot be recovered by anyone,
+                      including our support team.
                     </Text>
                   </View>
-                </View>
 
-                <Text style={step4Styles.cooldownNote}>
-                  The delete button will be enabled after the countdown completes. This delay is to prevent accidental deletion.
-                </Text>
+                  <TouchableOpacity
+                    style={[
+                      modalStyles.primaryBtn,
+                      { backgroundColor: ACCENT_RED },
+                    ]}
+                    onPress={goNext}
+                    activeOpacity={0.8}
+                  >
+                    <View style={modalStyles.primaryBtnInner}>
+                      <Text style={modalStyles.primaryBtnText}>
+                        I Understand, Continue
+                      </Text>
+                      <Ionicons name="arrow-forward" size={16} color={WHITE} />
+                    </View>
+                  </TouchableOpacity>
 
-                {/* Countdown button renders fresh each time step 4 mounts */}
-                <CountdownButton
-                  key={`countdown-${step}`}
-                  onPress={handleDeleteAccount}
-                  loading={deleting}
-                />
+                  <TouchableOpacity
+                    style={modalStyles.cancelBtn}
+                    onPress={handleClose}
+                  >
+                    <Text style={modalStyles.cancelBtnText}>
+                      Cancel — Keep My Account
+                    </Text>
+                  </TouchableOpacity>
+                </>
+              )}
 
-                <TouchableOpacity style={modalStyles.cancelBtn} onPress={handleClose}>
-                  <Text style={modalStyles.cancelBtnText}>Cancel — Keep My Account</Text>
-                </TouchableOpacity>
-              </>
-            )}
-          </Animated.View>
-        </ScrollView>
-      </Animated.View>
+              {/* ══════════════════════════════════════
+                  STEP 2 — Type Confirmation Phrase
+              ══════════════════════════════════════ */}
+              {step === 2 && (
+                <>
+                  <View style={modalStyles.iconRing}>
+                    <View
+                      style={[
+                        modalStyles.iconBox,
+                        { backgroundColor: "#FFF7E0" },
+                      ]}
+                    >
+                      <Ionicons
+                        name="create-outline"
+                        size={28}
+                        color={GOLD}
+                      />
+                    </View>
+                  </View>
+
+                  <Text style={modalStyles.title}>Confirm Your Intent</Text>
+                  <Text style={modalStyles.subtitle}>
+                    To proceed, type the following phrase exactly as shown below.
+                  </Text>
+
+                  <View style={s2.phraseBox}>
+                    <Text style={s2.phraseLabel}>Type this phrase:</Text>
+                    <Text style={s2.phrase}>{CONFIRMATION_PHRASE}</Text>
+                  </View>
+
+                  <View
+                    style={[
+                      s2.inputBox,
+                      typedPhrase.length > 0 &&
+                        !phraseMatches &&
+                        s2.inputBoxError,
+                      phraseMatches && s2.inputBoxMatch,
+                    ]}
+                  >
+                    <TextInput
+                      style={s2.input}
+                      value={typedPhrase}
+                      onChangeText={setTypedPhrase}
+                      placeholder="Type the phrase here…"
+                      placeholderTextColor="#CCCCCC"
+                      autoCapitalize="none"
+                      autoCorrect={false}
+                      returnKeyType="done"
+                    />
+                    {phraseMatches && (
+                      <Ionicons
+                        name="checkmark-circle"
+                        size={20}
+                        color="#22C55E"
+                        style={{ marginRight: 2 }}
+                      />
+                    )}
+                  </View>
+
+                  {typedPhrase.length > 0 && !phraseMatches && (
+                    <View style={s2.mismatchRow}>
+                      <Ionicons
+                        name="close-circle"
+                        size={14}
+                        color={ACCENT_RED}
+                      />
+                      <Text style={s2.mismatchText}>
+                        Phrase does not match. Check for typos.
+                      </Text>
+                    </View>
+                  )}
+
+                  <TouchableOpacity
+                    style={[
+                      modalStyles.primaryBtn,
+                      {
+                        backgroundColor: phraseMatches ? ACCENT_RED : "#CCCCCC",
+                      },
+                      !phraseMatches && { elevation: 0, shadowOpacity: 0 },
+                    ]}
+                    onPress={goNext}
+                    disabled={!phraseMatches}
+                    activeOpacity={0.8}
+                  >
+                    <View style={modalStyles.primaryBtnInner}>
+                      <Text style={modalStyles.primaryBtnText}>Continue</Text>
+                      <Ionicons name="arrow-forward" size={16} color={WHITE} />
+                    </View>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
+                    style={modalStyles.cancelBtn}
+                    onPress={handleClose}
+                  >
+                    <Text style={modalStyles.cancelBtnText}>Cancel</Text>
+                  </TouchableOpacity>
+                </>
+              )}
+
+              {/* ══════════════════════════════════════
+                  STEP 3 — Verify Identity
+              ══════════════════════════════════════ */}
+              {step === 3 && (
+                <>
+                  <View style={modalStyles.iconRing}>
+                    <View
+                      style={[
+                        modalStyles.iconBox,
+                        {
+                          backgroundColor: googleUser ? "#E8F0FE" : "#EEF0FB",
+                        },
+                      ]}
+                    >
+                      <Ionicons
+                        name={googleUser ? "logo-google" : "lock-closed-outline"}
+                        size={28}
+                        color={googleUser ? "#4285F4" : DARK_BLUE}
+                      />
+                    </View>
+                  </View>
+
+                  <Text style={modalStyles.title}>Verify Your Identity</Text>
+                  <Text style={modalStyles.subtitle}>
+                    {googleUser
+                      ? "Tap the button below to verify your Google account before proceeding."
+                      : "For your security, please enter your current password to authorize this request."}
+                  </Text>
+
+                  {credentialError && (
+                    <View style={s3.errorRow}>
+                      <Ionicons
+                        name="alert-circle"
+                        size={14}
+                        color={ACCENT_RED}
+                      />
+                      <Text style={s3.errorText}>{credentialError}</Text>
+                    </View>
+                  )}
+
+                  {/* Google: one-tap button — no text input needed */}
+                  {googleUser ? (
+                    <TouchableOpacity
+                      style={[
+                        modalStyles.primaryBtn,
+                        { backgroundColor: "#4285F4" },
+                        verifying && { opacity: 0.7 },
+                      ]}
+                      onPress={handleVerify}
+                      disabled={verifying}
+                      activeOpacity={0.8}
+                    >
+                      {verifying ? (
+                        <ActivityIndicator color={WHITE} size="small" />
+                      ) : (
+                        <View style={modalStyles.primaryBtnInner}>
+                          <Ionicons name="logo-google" size={18} color={WHITE} />
+                          <Text style={modalStyles.primaryBtnText}>
+                            Verify with Google
+                          </Text>
+                        </View>
+                      )}
+                    </TouchableOpacity>
+                  ) : (
+                    /* Email/password: show password input */
+                    <>
+                      <View
+                        style={[
+                          s3.inputBox,
+                          credentialError != null && s3.inputBoxError,
+                        ]}
+                      >
+                        <Ionicons
+                          name="key-outline"
+                          size={18}
+                          color={credentialError ? ACCENT_RED : "#AAAAAA"}
+                        />
+                        <TextInput
+                          style={s3.input}
+                          value={credential}
+                          onChangeText={(t) => {
+                            setCredential(t);
+                            setCredentialError(null);
+                          }}
+                          placeholder="Enter your password"
+                          placeholderTextColor="#CCCCCC"
+                          secureTextEntry={!credentialVisible}
+                          autoCapitalize="none"
+                          autoCorrect={false}
+                          returnKeyType="done"
+                          onSubmitEditing={handleVerify}
+                        />
+                        <TouchableOpacity
+                          onPress={() => setCredentialVisible((v) => !v)}
+                          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                        >
+                          <Ionicons
+                            name={
+                              credentialVisible
+                                ? "eye-off-outline"
+                                : "eye-outline"
+                            }
+                            size={18}
+                            color="#AAAAAA"
+                          />
+                        </TouchableOpacity>
+                      </View>
+
+                      <TouchableOpacity
+                        style={[
+                          modalStyles.primaryBtn,
+                          { backgroundColor: DARK_BLUE },
+                          verifying && { opacity: 0.7 },
+                        ]}
+                        onPress={handleVerify}
+                        disabled={verifying}
+                        activeOpacity={0.8}
+                      >
+                        {verifying ? (
+                          <ActivityIndicator color={WHITE} size="small" />
+                        ) : (
+                          <View style={modalStyles.primaryBtnInner}>
+                            <Text style={modalStyles.primaryBtnText}>
+                              Verify & Continue
+                            </Text>
+                            <Ionicons
+                              name="arrow-forward"
+                              size={16}
+                              color={WHITE}
+                            />
+                          </View>
+                        )}
+                      </TouchableOpacity>
+                    </>
+                  )}
+
+                  <TouchableOpacity
+                    style={modalStyles.cancelBtn}
+                    onPress={handleClose}
+                  >
+                    <Text style={modalStyles.cancelBtnText}>Cancel</Text>
+                  </TouchableOpacity>
+                </>
+              )}
+
+              {/* ══════════════════════════════════════
+                  STEP 4 — Final Confirm + 15s Cooldown
+              ══════════════════════════════════════ */}
+              {step === 4 && (
+                <>
+                  <View style={modalStyles.iconRing}>
+                    <View
+                      style={[
+                        modalStyles.iconBox,
+                        { backgroundColor: ACCENT_RED_LIGHT },
+                      ]}
+                    >
+                      <Ionicons
+                        name="trash-outline"
+                        size={30}
+                        color={ACCENT_RED}
+                      />
+                    </View>
+                  </View>
+
+                  <Text style={modalStyles.title}>Final Confirmation</Text>
+                  <Text style={modalStyles.subtitle}>
+                    You are about to permanently delete your account. This step
+                    cannot be undone.
+                  </Text>
+
+                  <View style={s4.summaryBox}>
+                    {[
+                      {
+                        icon: "checkmark-circle",
+                        color: "#22C55E",
+                        label: "Confirmation phrase verified",
+                        bold: false,
+                      },
+                      {
+                        icon: "checkmark-circle",
+                        color: "#22C55E",
+                        label: "Identity verified",
+                        bold: false,
+                      },
+                      {
+                        icon: "alert-circle",
+                        color: ACCENT_RED,
+                        label: "Deletion is irreversible",
+                        bold: true,
+                      },
+                    ].map((item, i) => (
+                      <View key={i} style={s4.summaryRow}>
+                        <Ionicons
+                          name={item.icon as any}
+                          size={16}
+                          color={item.color}
+                        />
+                        <Text
+                          style={[
+                            s4.summaryText,
+                            item.bold && {
+                              color: ACCENT_RED,
+                              fontWeight: "700",
+                            },
+                          ]}
+                        >
+                          {item.label}
+                        </Text>
+                      </View>
+                    ))}
+                  </View>
+
+                  <Text style={s4.cooldownNote}>
+                    The delete button will activate after the countdown. This
+                    delay is to prevent accidental deletion.
+                  </Text>
+
+                  <CountdownButton
+                    key={`countdown-${step}`}
+                    onPress={handleDeleteAccount}
+                    loading={deleting}
+                  />
+
+                  <TouchableOpacity
+                    style={modalStyles.cancelBtn}
+                    onPress={handleClose}
+                  >
+                    <Text style={modalStyles.cancelBtnText}>
+                      Cancel — Keep My Account
+                    </Text>
+                  </TouchableOpacity>
+                </>
+              )}
+            </Animated.View>
+          </ScrollView>
+        </Animated.View>
+      </KeyboardAvoidingView>
     </AppModal>
   );
 }
@@ -624,6 +982,7 @@ const modalStyles = StyleSheet.create({
   scrollContainer: {
     justifyContent: "flex-end",
     flexGrow: 1,
+    paddingBottom: Platform.OS === "android" ? 24 : 0,
   },
   sheet: {
     backgroundColor: WHITE,
@@ -631,7 +990,7 @@ const modalStyles = StyleSheet.create({
     borderTopRightRadius: 28,
     paddingTop: 28,
     paddingHorizontal: 24,
-    paddingBottom: 44,
+    paddingBottom: Platform.OS === "ios" ? 44 : 24,
   },
   closeBtn: {
     position: "absolute",
@@ -644,10 +1003,7 @@ const modalStyles = StyleSheet.create({
     justifyContent: "center",
     alignItems: "center",
   },
-  iconRing: {
-    alignItems: "center",
-    marginBottom: 16,
-  },
+  iconRing: { alignItems: "center", marginBottom: 16 },
   iconBox: {
     width: 68,
     height: 68,
@@ -683,8 +1039,6 @@ const modalStyles = StyleSheet.create({
     shadowRadius: 6,
     marginBottom: 12,
   },
-  // FIX: extracted row layout into a dedicated inner View style
-  // instead of relying on flexDirection on the button itself with a fragment child
   primaryBtnInner: {
     flexDirection: "row",
     alignItems: "center",
@@ -696,19 +1050,12 @@ const modalStyles = StyleSheet.create({
     fontWeight: "700",
     letterSpacing: 0.2,
   },
-  cancelBtn: {
-    paddingVertical: 12,
-    alignItems: "center",
-  },
-  cancelBtnText: {
-    color: "#888",
-    fontSize: 14,
-    fontWeight: "600",
-  },
+  cancelBtn: { paddingVertical: 12, alignItems: "center" },
+  cancelBtnText: { color: "#888", fontSize: 14, fontWeight: "600" },
 });
 
-const step1Styles = StyleSheet.create({
-  consequenceList: {
+const s1 = StyleSheet.create({
+  list: {
     backgroundColor: "#FEF9F9",
     borderRadius: 14,
     borderWidth: 1,
@@ -717,11 +1064,7 @@ const step1Styles = StyleSheet.create({
     gap: 12,
     marginBottom: 16,
   },
-  consequenceRow: {
-    flexDirection: "row",
-    alignItems: "flex-start",
-    gap: 12,
-  },
+  row: { flexDirection: "row", alignItems: "flex-start", gap: 12 },
   iconWrap: {
     width: 28,
     height: 28,
@@ -731,14 +1074,14 @@ const step1Styles = StyleSheet.create({
     alignItems: "center",
     marginTop: 1,
   },
-  consequenceText: {
+  text: {
     flex: 1,
     fontSize: 13.5,
     color: "#444",
     lineHeight: 19,
     fontWeight: "500",
   },
-  warningBadge: {
+  badge: {
     flexDirection: "row",
     alignItems: "flex-start",
     backgroundColor: "#FFFBEB",
@@ -749,7 +1092,7 @@ const step1Styles = StyleSheet.create({
     gap: 8,
     marginBottom: 20,
   },
-  warningText: {
+  badgeText: {
     flex: 1,
     fontSize: 12.5,
     color: "#92400E",
@@ -758,7 +1101,7 @@ const step1Styles = StyleSheet.create({
   },
 });
 
-const step2Styles = StyleSheet.create({
+const s2 = StyleSheet.create({
   phraseBox: {
     backgroundColor: "#F4F5F9",
     borderRadius: 12,
@@ -798,12 +1141,7 @@ const step2Styles = StyleSheet.create({
   },
   inputBoxError: { borderColor: ACCENT_RED },
   inputBoxMatch: { borderColor: "#22C55E", backgroundColor: "#F0FDF4" },
-  input: {
-    flex: 1,
-    fontSize: 14,
-    color: "#1A1A2E",
-    fontWeight: "500",
-  },
+  input: { flex: 1, fontSize: 14, color: "#1A1A2E", fontWeight: "500" },
   mismatchRow: {
     flexDirection: "row",
     alignItems: "center",
@@ -811,14 +1149,10 @@ const step2Styles = StyleSheet.create({
     marginBottom: 16,
     marginLeft: 2,
   },
-  mismatchText: {
-    fontSize: 12,
-    color: ACCENT_RED,
-    fontWeight: "500",
-  },
+  mismatchText: { fontSize: 12, color: ACCENT_RED, fontWeight: "500" },
 });
 
-const step3Styles = StyleSheet.create({
+const s3 = StyleSheet.create({
   inputBox: {
     flexDirection: "row",
     alignItems: "center",
@@ -829,15 +1163,10 @@ const step3Styles = StyleSheet.create({
     paddingVertical: 14,
     backgroundColor: "#FAFAFA",
     gap: 10,
-    marginBottom: 6,
+    marginBottom: 12,
   },
   inputBoxError: { borderColor: ACCENT_RED },
-  input: {
-    flex: 1,
-    fontSize: 15,
-    color: "#1A1A2E",
-    fontWeight: "500",
-  },
+  input: { flex: 1, fontSize: 15, color: "#1A1A2E", fontWeight: "500" },
   errorRow: {
     flexDirection: "row",
     alignItems: "center",
@@ -845,15 +1174,10 @@ const step3Styles = StyleSheet.create({
     marginBottom: 16,
     marginLeft: 2,
   },
-  errorText: {
-    fontSize: 12,
-    color: ACCENT_RED,
-    fontWeight: "500",
-    flex: 1,
-  },
+  errorText: { fontSize: 12, color: ACCENT_RED, fontWeight: "500", flex: 1 },
 });
 
-const step4Styles = StyleSheet.create({
+const s4 = StyleSheet.create({
   summaryBox: {
     backgroundColor: "#F9FAFB",
     borderRadius: 12,
@@ -863,16 +1187,8 @@ const step4Styles = StyleSheet.create({
     gap: 10,
     marginBottom: 14,
   },
-  summaryRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 10,
-  },
-  summaryText: {
-    fontSize: 13.5,
-    color: "#444",
-    fontWeight: "500",
-  },
+  summaryRow: { flexDirection: "row", alignItems: "center", gap: 10 },
+  summaryText: { fontSize: 13.5, color: "#444", fontWeight: "500" },
   cooldownNote: {
     fontSize: 12,
     color: "#AAAAAA",

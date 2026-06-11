@@ -68,6 +68,17 @@ const formatTime = (timestamp: any): string => {
   return date.toLocaleDateString("en-PH", { month: "short", day: "numeric" });
 };
 
+const useGoBack = () => {
+  const router = useRouter();
+  return () => {
+    if (router.canGoBack()) {
+      router.back();
+    } else {
+      router.replace("/(tabs)/explore" as any);
+    }
+  };
+};
+
 // ─── Types ────────────────────────────────────────────────────────────────────
 interface PublicUserData {
   username: string;
@@ -246,6 +257,7 @@ const card = StyleSheet.create({
 // ─── Main Screen ──────────────────────────────────────────────────────────────
 export default function UserProfileScreen() {
   const router = useRouter();
+  const goBack = useGoBack();
   const { userId } = useLocalSearchParams<{ userId: string }>();
   const currentUserId = auth.currentUser?.uid;
   const isOwnProfile = currentUserId === userId;

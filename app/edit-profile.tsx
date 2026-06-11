@@ -19,7 +19,7 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
-import { DeleteAccountModal } from "../components/DeleteAccountModal";
+import { DeleteAccountModal } from "../components/Deletemymodal";
 import { auth, db } from "../firebaseConfig";
 
 // ─── Cloudinary Config ────────────────────────────────────────────────────────

@@ -3,119 +3,295 @@ import { useRouter } from "expo-router";
 import { onAuthStateChanged } from "firebase/auth";
 import React, { useEffect, useState } from "react";
 import {
-    ActivityIndicator,
-    FlatList,
-    Image,
-    Pressable,
-    SafeAreaView,
-    StyleSheet,
-    Text,
-    TouchableOpacity,
-    View,
+  ActivityIndicator,
+  Dimensions,
+  FlatList,
+  Image,
+  SafeAreaView,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
 } from "react-native";
 import { auth } from "../firebaseConfig";
 import { getUserSavedItems } from "../services/itemService";
 
+// ─── Constants ────────────────────────────────────────────────────────────────
+const NAVY = "#2f2f6f";
+const ACCENT_RED = "#C0392B";
+const SCREEN_WIDTH = Dimensions.get("window").width;
+const CARD_WIDTH = (SCREEN_WIDTH - 48) / 2;
+
+// ─── Types ────────────────────────────────────────────────────────────────────
 interface SavedItem {
   id: string;
   title: string;
   description?: string;
   image?: string;
   images?: string[];
-  category: string;
+  category?: string;
   ownerId: string;
-  owner?: any;
+  owner?: {
+    username?: string;
+    avatarUrl?: string;
+  };
   likes?: number;
+  createdAt?: any;
 }
 
-const DARK_BLUE = "#2f2f6f";
-const ACCENT_RED = "#C0392B";
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+const safeUri = (url: string | undefined): string | null => {
+  if (!url || typeof url !== "string") return null;
+  if (url.startsWith("blob:")) return null;
+  if (!url.startsWith("http")) return null;
+  return url;
+};
 
+const formatTime = (timestamp: any): string => {
+  if (!timestamp) return "";
+  const date = timestamp.toDate ? timestamp.toDate() : new Date(timestamp);
+  const now = new Date();
+  const diffDays = Math.floor((now.getTime() - date.getTime()) / 86400000);
+  if (diffDays === 0) return "Today";
+  if (diffDays === 1) return "Yesterday";
+  if (diffDays < 7) return `${diffDays}d ago`;
+  return date.toLocaleDateString("en-PH", { month: "short", day: "numeric" });
+};
+
+// ─── Item Card ────────────────────────────────────────────────────────────────
+function SavedItemCard({
+  item,
+  onPress,
+}: {
+  item: SavedItem;
+  onPress: () => void;
+}) {
+  const imageUrl =
+    safeUri(item.images?.[0]) ?? safeUri(item.image) ?? null;
+
+  return (
+    <TouchableOpacity style={card.wrap} onPress={onPress} activeOpacity={0.88}>
+      <View style={card.imgWrap}>
+        {imageUrl ? (
+          <Image
+            source={{ uri: imageUrl }}
+            style={card.img}
+            resizeMode="cover"
+          />
+        ) : (
+          <View style={[card.img, card.imgPlaceholder]}>
+            <Ionicons name="image-outline" size={32} color="#ccc" />
+          </View>
+        )}
+        {item.category ? (
+          <View style={card.badge}>
+            <Text style={card.badgeText}>{item.category}</Text>
+          </View>
+        ) : null}
+        {/* Saved bookmark indicator */}
+        <View style={card.savedBadge}>
+          <Ionicons name="bookmark" size={12} color="#fff" />
+        </View>
+      </View>
+      <View style={card.info}>
+        <Text style={card.title} numberOfLines={2}>
+          {item.title}
+        </Text>
+        <View style={card.footer}>
+          {item.createdAt ? (
+            <Text style={card.time}>{formatTime(item.createdAt)}</Text>
+          ) : null}
+          {item.likes !== undefined && item.likes > 0 ? (
+            <View style={card.likesRow}>
+              <Ionicons name="heart" size={11} color={ACCENT_RED} />
+              <Text style={card.likesText}>{item.likes}</Text>
+            </View>
+          ) : null}
+        </View>
+        {item.owner?.username ? (
+          <View style={card.ownerRow}>
+            {item.owner.avatarUrl ? (
+              <Image
+                source={{ uri: item.owner.avatarUrl }}
+                style={card.ownerAvatar}
+              />
+            ) : (
+              <View style={card.ownerAvatarFallback}>
+                <Text style={card.ownerInitial}>
+                  {(item.owner.username[0] ?? "?").toUpperCase()}
+                </Text>
+              </View>
+            )}
+            <Text style={card.ownerName} numberOfLines={1}>
+              {item.owner.username}
+            </Text>
+          </View>
+        ) : null}
+      </View>
+    </TouchableOpacity>
+  );
+}
+
+const card = StyleSheet.create({
+  wrap: {
+    width: CARD_WIDTH,
+    backgroundColor: "#fff",
+    borderRadius: 14,
+    overflow: "hidden",
+    marginBottom: 12,
+    shadowColor: "#000",
+    shadowOpacity: 0.07,
+    shadowRadius: 6,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 2,
+  },
+  imgWrap: { position: "relative" },
+  img: { width: "100%", height: 130, backgroundColor: "#f0f0f5" },
+  imgPlaceholder: { justifyContent: "center", alignItems: "center" },
+  badge: {
+    position: "absolute",
+    bottom: 8,
+    left: 8,
+    backgroundColor: "rgba(47,47,111,0.85)",
+    borderRadius: 6,
+    paddingHorizontal: 7,
+    paddingVertical: 3,
+  },
+  badgeText: { color: "#fff", fontSize: 10, fontWeight: "700" },
+  savedBadge: {
+    position: "absolute",
+    top: 8,
+    right: 8,
+    backgroundColor: "rgba(47,47,111,0.85)",
+    borderRadius: 6,
+    padding: 4,
+  },
+  info: { padding: 10 },
+  title: { fontSize: 13, fontWeight: "700", color: "#1a1a2e", lineHeight: 18, marginBottom: 4 },
+  footer: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 6 },
+  time: { fontSize: 11, color: "#aaa" },
+  likesRow: { flexDirection: "row", alignItems: "center", gap: 3 },
+  likesText: { fontSize: 11, color: ACCENT_RED, fontWeight: "600" },
+  ownerRow: { flexDirection: "row", alignItems: "center", gap: 5, borderTopWidth: 1, borderTopColor: "#f0f0f0", paddingTop: 7 },
+  ownerAvatar: { width: 18, height: 18, borderRadius: 9 },
+  ownerAvatarFallback: { width: 18, height: 18, borderRadius: 9, backgroundColor: NAVY, justifyContent: "center", alignItems: "center" },
+  ownerInitial: { color: "#fff", fontSize: 9, fontWeight: "700" },
+  ownerName: { fontSize: 11, fontWeight: "600", color: "#555", flex: 1 },
+});
+
+// ─── Main Screen ──────────────────────────────────────────────────────────────
 export default function SavedPostsScreen() {
+  const router = useRouter();
   const [savedItems, setSavedItems] = useState<SavedItem[]>([]);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [userId, setUserId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const router = useRouter();
 
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
-      if (!currentUser) {
-        router.replace("/login");
+    const unsubscribe = onAuthStateChanged(auth, (user) => {
+      if (!user) {
+        router.replace("/(auth)/login" as any);
         return;
       }
-      setUserId(currentUser.uid);
-      fetchSavedItems(currentUser.uid);
+      setUserId(user.uid);
+      fetchSavedItems(user.uid, false);
     });
-
     return () => unsubscribe();
-  }, [router]);
+  }, []);
 
-  const fetchSavedItems = async (uid: string) => {
-    setLoading(true);
+  const fetchSavedItems = async (uid: string, isRefresh = false) => {
+    if (isRefresh) setRefreshing(true);
+    else setLoading(true);
     setError(null);
     try {
       const items = await getUserSavedItems(uid);
       setSavedItems(items);
     } catch (err) {
       console.error("Error fetching saved items:", err);
-      setError("Failed to load saved items");
+      setError("Failed to load saved items.");
     } finally {
       setLoading(false);
+      setRefreshing(false);
     }
-  };
-
-  const handleItemPress = (itemId: string) => {
-    router.push(`/item/${itemId}` as any);
   };
 
   const handleBack = () => {
-    if (router.canGoBack()) {
-      router.back();
-    } else {
-      router.replace("/(tabs)/profile" as any);
-    }
+    if (router.canGoBack()) router.back();
+    else router.replace("/(tabs)/profile" as any);
   };
 
   const handleRefresh = () => {
-    if (userId) {
-      fetchSavedItems(userId);
-    }
+    if (userId) fetchSavedItems(userId, true);
   };
 
+  const navigateToItem = (savedItem: SavedItem) => {
+    router.push({
+      pathname: "/product-details",
+      params: { itemId: savedItem.id, item: JSON.stringify(savedItem) },
+    } as any);
+  };
+
+  // Render pairs of items as rows for the grid
+  const renderRow = ({ item }: { item: [SavedItem, SavedItem | null] }) => (
+    <View style={styles.row}>
+      <SavedItemCard
+        item={item[0]}
+        onPress={() => navigateToItem(item[0])}
+      />
+      {item[1] ? (
+        <SavedItemCard
+          item={item[1]}
+          onPress={() => navigateToItem(item[1]!)}
+        />
+      ) : (
+        <View style={{ width: CARD_WIDTH }} />
+      )}
+    </View>
+  );
+
+  // Pair items into rows
+  const rows: [SavedItem, SavedItem | null][] = [];
+  for (let i = 0; i < savedItems.length; i += 2) {
+    rows.push([savedItems[i], savedItems[i + 1] ?? null]);
+  }
+
+  // ── Loading ──
   if (loading) {
     return (
       <SafeAreaView style={styles.container}>
         <View style={styles.header}>
-          <TouchableOpacity onPress={handleBack}>
-            <Ionicons name="chevron-back" size={28} color="#fff" />
+          <TouchableOpacity onPress={handleBack} style={styles.backBtn}>
+            <Ionicons name="chevron-back" size={24} color="#fff" />
           </TouchableOpacity>
           <Text style={styles.headerTitle}>Saved Listings</Text>
-          <View style={{ width: 28 }} />
+          <View style={{ width: 38 }} />
         </View>
-        <View style={styles.centerContent}>
-          <ActivityIndicator size="large" color={DARK_BLUE} />
+        <View style={styles.centered}>
+          <ActivityIndicator size="large" color={NAVY} />
           <Text style={styles.loadingText}>Loading saved items…</Text>
         </View>
       </SafeAreaView>
     );
   }
 
+  // ── Error ──
   if (error) {
     return (
       <SafeAreaView style={styles.container}>
         <View style={styles.header}>
-          <TouchableOpacity onPress={handleBack}>
-            <Ionicons name="chevron-back" size={28} color="#fff" />
+          <TouchableOpacity onPress={handleBack} style={styles.backBtn}>
+            <Ionicons name="chevron-back" size={24} color="#fff" />
           </TouchableOpacity>
           <Text style={styles.headerTitle}>Saved Listings</Text>
-          <View style={{ width: 28 }} />
+          <View style={{ width: 38 }} />
         </View>
-        <View style={styles.centerContent}>
-          <Text style={styles.errorIcon}>⚠️</Text>
+        <View style={styles.centered}>
+          <Ionicons name="cloud-offline-outline" size={52} color="#ddd" />
           <Text style={styles.errorTitle}>Something went wrong</Text>
           <Text style={styles.errorMessage}>{error}</Text>
-          <TouchableOpacity style={styles.retryButton} onPress={handleRefresh}>
+          <TouchableOpacity style={styles.retryBtn} onPress={handleRefresh}>
+            <Ionicons name="refresh" size={16} color="#fff" />
             <Text style={styles.retryText}>Try Again</Text>
           </TouchableOpacity>
         </View>
@@ -123,314 +299,153 @@ export default function SavedPostsScreen() {
     );
   }
 
+  // ── Empty ──
+  if (savedItems.length === 0) {
+    return (
+      <SafeAreaView style={styles.container}>
+        <View style={styles.header}>
+          <TouchableOpacity onPress={handleBack} style={styles.backBtn}>
+            <Ionicons name="chevron-back" size={24} color="#fff" />
+          </TouchableOpacity>
+          <Text style={styles.headerTitle}>Saved Listings</Text>
+          <View style={{ width: 38 }} />
+        </View>
+        <View style={styles.centered}>
+          <View style={styles.emptyIconWrap}>
+            <Ionicons name="bookmark-outline" size={40} color={NAVY} />
+          </View>
+          <Text style={styles.emptyTitle}>No saved items yet</Text>
+          <Text style={styles.emptyMessage}>
+            Explore listings and tap the bookmark icon to save them here.
+          </Text>
+          <TouchableOpacity
+            style={styles.primaryBtn}
+            onPress={() => router.replace("/(tabs)/explore" as any)}
+            activeOpacity={0.85}
+          >
+            <Ionicons name="search-outline" size={16} color="#fff" />
+            <Text style={styles.primaryBtnText}>Browse Listings</Text>
+          </TouchableOpacity>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  // ── List ──
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.header}>
-        <TouchableOpacity onPress={handleBack}>
-          <Ionicons name="chevron-back" size={28} color="#fff" />
+        <TouchableOpacity onPress={handleBack} style={styles.backBtn}>
+          <Ionicons name="chevron-back" size={24} color="#fff" />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Saved Listings</Text>
-        <View style={{ width: 28 }} />
+        <View style={{ width: 38 }} />
       </View>
 
-      {savedItems.length === 0 ? (
-        <View style={styles.emptyContainer}>
-          <Text style={styles.emptyIcon}>🔖</Text>
-          <Text style={styles.emptyTitle}>No saved items yet</Text>
-          <Text style={styles.emptyMessage}>
-            Explore listings and save your favorites to view them here.
+      <FlatList
+        data={rows}
+        keyExtractor={(_, i) => `row-${i}`}
+        renderItem={renderRow}
+        contentContainerStyle={styles.listContent}
+        showsVerticalScrollIndicator={false}
+        refreshing={refreshing}
+        onRefresh={handleRefresh}
+        ListHeaderComponent={
+          <Text style={styles.countLabel}>
+            {savedItems.length} saved {savedItems.length === 1 ? "item" : "items"}
           </Text>
-          <TouchableOpacity
-            style={styles.exploreButton}
-            onPress={() => router.replace("/(tabs)/explore" as any)}
-          >
-            <Text style={styles.exploreText}>Browse Listings</Text>
-          </TouchableOpacity>
-        </View>
-      ) : (
-        <FlatList
-          data={savedItems}
-          keyExtractor={(item) => item.id}
-          renderItem={({ item }) => (
-            <SavedItemCard item={item} onPress={handleItemPress} />
-          )}
-          contentContainerStyle={styles.listContent}
-          showsVerticalScrollIndicator={false}
-          refreshing={loading}
-          onRefresh={handleRefresh}
-        />
-      )}
+        }
+      />
     </SafeAreaView>
   );
 }
 
-interface SavedItemCardProps {
-  item: SavedItem;
-  onPress: (itemId: string) => void;
-}
-
-function SavedItemCard({ item, onPress }: SavedItemCardProps) {
-  // Validate image URLs and filter out blob URLs
-  const validateImageUrl = (url: string | undefined): boolean => {
-    if (!url) return false;
-    if (typeof url !== "string") return false;
-    if (url.startsWith("blob:")) return false;
-    return true;
-  };
-
-  const displayImage = (() => {
-    if (validateImageUrl(item.image)) return item.image;
-    if (validateImageUrl(item.images?.[0])) return item.images![0];
-    return "https://via.placeholder.com/200";
-  })();
-
-  return (
-    <Pressable
-      style={styles.cardContainer}
-      onPress={() => onPress(item.id)}
-      android_ripple={{ color: "rgba(0,0,0,0.1)" }}
-    >
-      <Image 
-        source={{ uri: displayImage }} 
-        style={styles.cardImage}
-        onError={() => console.warn("Failed to load saved item image:", displayImage)}
-      />
-
-      <View style={styles.cardContent}>
-        <View style={styles.titleRow}>
-          <Text style={styles.cardTitle} numberOfLines={2}>
-            {item.title}
-          </Text>
-        </View>
-
-        {item.description && (
-          <Text style={styles.cardDescription} numberOfLines={2}>
-            {item.description}
-          </Text>
-        )}
-
-        <View style={styles.cardFooter}>
-          <View style={styles.categoryBadge}>
-            <Text style={styles.categoryText}>{item.category}</Text>
-          </View>
-
-          <View style={styles.statsRow}>
-            <Ionicons name="heart" size={14} color={ACCENT_RED} />
-            <Text style={styles.likesText}>{item.likes || 0}</Text>
-          </View>
-        </View>
-
-        {item.owner && (
-          <View style={styles.ownerRow}>
-            {item.owner.avatarUrl ? (
-              <Image
-                source={{ uri: item.owner.avatarUrl }}
-                style={styles.ownerAvatar}
-              />
-            ) : (
-              <View style={styles.ownerAvatarPlaceholder}>
-                <Text style={styles.ownerInitial}>
-                  {(item.owner.username?.[0] || "?").toUpperCase()}
-                </Text>
-              </View>
-            )}
-            <View style={{ flex: 1 }}>
-              <Text style={styles.ownerName}>
-                {item.owner.username || "Unknown"}
-              </Text>
-            </View>
-          </View>
-        )}
-      </View>
-    </Pressable>
-  );
-}
-
+// ─── Styles ───────────────────────────────────────────────────────────────────
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: "#F4F5F9",
-  },
+  container: { flex: 1, backgroundColor: "#F4F5F9" },
+
   header: {
-    backgroundColor: DARK_BLUE,
+    backgroundColor: NAVY,
     flexDirection: "row",
-    justifyContent: "space-between",
     alignItems: "center",
+    justifyContent: "space-between",
     paddingHorizontal: 16,
     paddingTop: 32,
     paddingBottom: 14,
   },
-  headerTitle: {
-    color: "#fff",
-    fontSize: 18,
-    fontWeight: "700",
-  },
-  centerContent: {
-    flex: 1,
+  backBtn: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: "rgba(255,255,255,0.15)",
     justifyContent: "center",
     alignItems: "center",
   },
-  loadingText: {
-    color: "#888",
-    fontSize: 14,
-    marginTop: 12,
+  headerTitle: { color: "#fff", fontSize: 18, fontWeight: "800" },
+
+  centered: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+    paddingHorizontal: 32,
+    gap: 10,
   },
-  errorIcon: {
-    fontSize: 48,
-    marginBottom: 12,
-  },
-  errorTitle: {
-    fontSize: 18,
-    fontWeight: "700",
-    color: "#1A1A2E",
-    marginBottom: 8,
-  },
-  errorMessage: {
-    fontSize: 14,
-    color: "#888",
-    textAlign: "center",
-    marginBottom: 24,
-  },
-  retryButton: {
-    backgroundColor: DARK_BLUE,
+  loadingText: { color: "#888", fontSize: 14, marginTop: 4 },
+
+  errorTitle: { fontSize: 17, fontWeight: "700", color: "#1A1A2E", marginTop: 4 },
+  errorMessage: { fontSize: 13, color: "#888", textAlign: "center", lineHeight: 19 },
+  retryBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    backgroundColor: NAVY,
     paddingVertical: 12,
-    paddingHorizontal: 32,
+    paddingHorizontal: 28,
     borderRadius: 10,
+    marginTop: 8,
   },
-  retryText: {
-    color: "#fff",
-    fontWeight: "600",
-    fontSize: 14,
-  },
-  emptyContainer: {
-    flex: 1,
+  retryText: { color: "#fff", fontWeight: "600", fontSize: 14 },
+
+  emptyIconWrap: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    backgroundColor: "#ECEDF8",
     justifyContent: "center",
     alignItems: "center",
-    paddingHorizontal: 32,
+    marginBottom: 4,
   },
-  emptyIcon: {
-    fontSize: 64,
-    marginBottom: 16,
-  },
-  emptyTitle: {
-    fontSize: 18,
-    fontWeight: "700",
-    color: "#1A1A2E",
-    marginBottom: 8,
-    textAlign: "center",
-  },
-  emptyMessage: {
-    fontSize: 14,
-    color: "#888",
-    textAlign: "center",
-    marginBottom: 24,
-    lineHeight: 20,
-  },
-  exploreButton: {
-    backgroundColor: DARK_BLUE,
-    paddingVertical: 14,
-    paddingHorizontal: 32,
-    borderRadius: 10,
-  },
-  exploreText: {
-    color: "#fff",
-    fontWeight: "600",
-    fontSize: 14,
-  },
-  listContent: {
-    padding: 12,
-    paddingBottom: 100,
-  },
-  cardContainer: {
-    backgroundColor: "#fff",
+  emptyTitle: { fontSize: 18, fontWeight: "800", color: "#1A1A2E", textAlign: "center" },
+  emptyMessage: { fontSize: 14, color: "#888", textAlign: "center", lineHeight: 21 },
+  primaryBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 7,
+    backgroundColor: NAVY,
+    paddingVertical: 13,
+    paddingHorizontal: 28,
     borderRadius: 12,
+    marginTop: 6,
+    shadowColor: NAVY,
+    shadowOpacity: 0.25,
+    shadowRadius: 6,
+    shadowOffset: { width: 0, height: 3 },
+    elevation: 3,
+  },
+  primaryBtnText: { color: "#fff", fontWeight: "700", fontSize: 14 },
+
+  listContent: { padding: 16, paddingBottom: 100 },
+  countLabel: {
+    fontSize: 12,
+    fontWeight: "600",
+    color: "#aaa",
+    textTransform: "uppercase",
+    letterSpacing: 0.5,
     marginBottom: 12,
-    overflow: "hidden",
-    elevation: 2,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.08,
-    shadowRadius: 4,
   },
-  cardImage: {
-    width: "100%",
-    height: 160,
-    backgroundColor: "#E5E7EB",
-  },
-  cardContent: {
-    padding: 12,
-  },
-  titleRow: {
-    marginBottom: 8,
-  },
-  cardTitle: {
-    fontSize: 15,
-    fontWeight: "700",
-    color: "#1A1A2E",
-  },
-  cardDescription: {
-    fontSize: 13,
-    color: "#666",
-    marginBottom: 10,
-    lineHeight: 18,
-  },
-  cardFooter: {
+  row: {
     flexDirection: "row",
     justifyContent: "space-between",
-    alignItems: "center",
-    marginBottom: 10,
-  },
-  categoryBadge: {
-    backgroundColor: "#F0F0F0",
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 6,
-  },
-  categoryText: {
-    fontSize: 12,
-    color: "#666",
-    fontWeight: "500",
-  },
-  statsRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 4,
-  },
-  likesText: {
-    fontSize: 12,
-    color: ACCENT_RED,
-    fontWeight: "600",
-  },
-  ownerRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    paddingTop: 10,
-    borderTopWidth: 1,
-    borderTopColor: "#F0F0F0",
-  },
-  ownerAvatar: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    marginRight: 10,
-  },
-  ownerAvatarPlaceholder: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: DARK_BLUE,
-    justifyContent: "center",
-    alignItems: "center",
-    marginRight: 10,
-  },
-  ownerInitial: {
-    color: "#fff",
-    fontSize: 14,
-    fontWeight: "700",
-  },
-  ownerName: {
-    fontSize: 13,
-    fontWeight: "600",
-    color: "#1A1A2E",
+    marginBottom: 0,
   },
 });

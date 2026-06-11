@@ -1,22 +1,25 @@
 import { Ionicons } from "@expo/vector-icons";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import {
-    confirmPasswordReset,
-    verifyPasswordResetCode,
+  confirmPasswordReset,
+  signOut,
+  verifyPasswordResetCode,
 } from "firebase/auth";
 import React, { useEffect, useState } from "react";
 import {
-    ActivityIndicator,
-    Alert,
-    KeyboardAvoidingView,
-    Platform,
-    SafeAreaView,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TextInput,
-    TouchableOpacity,
-    View,
+  ActivityIndicator,
+  Alert,
+  KeyboardAvoidingView,
+  Modal,
+  Platform,
+  Pressable,
+  SafeAreaView,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
 } from "react-native";
 import { auth } from "../firebaseConfig";
 
@@ -27,6 +30,132 @@ const LIGHT_BG = "#F4F5F9";
 const ACCENT_RED = "#C0392B";
 const SUCCESS_GREEN = "#065F46";
 const SUCCESS_BG = "#D1FAE5";
+
+// ─── Sign-Out Confirmation Modal ──────────────────────────────────────────────
+function SignOutConfirmModal({
+  visible,
+  onCancel,
+  onConfirm,
+  loading,
+}: {
+  visible: boolean;
+  onCancel: () => void;
+  onConfirm: () => void;
+  loading: boolean;
+}) {
+  return (
+    <Modal
+      visible={visible}
+      transparent
+      animationType="fade"
+      onRequestClose={onCancel}
+    >
+      <Pressable
+        style={confirmModal.overlay}
+        onPress={loading ? undefined : onCancel}
+      >
+        <Pressable style={confirmModal.panel}>
+          <View style={confirmModal.iconWrap}>
+            <Ionicons name="log-out-outline" size={34} color={DARK_BLUE} />
+          </View>
+          <Text style={confirmModal.title}>Sign Out Required</Text>
+          <Text style={confirmModal.body}>
+            To reset your password, you will be signed out of your current
+            session. You can sign back in after completing the reset.
+          </Text>
+          <View style={confirmModal.actions}>
+            <TouchableOpacity
+              style={confirmModal.cancelBtn}
+              onPress={onCancel}
+              disabled={loading}
+              activeOpacity={0.8}
+            >
+              <Text style={confirmModal.cancelText}>Cancel</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[
+                confirmModal.confirmBtn,
+                loading && confirmModal.btnDisabled,
+              ]}
+              onPress={onConfirm}
+              disabled={loading}
+              activeOpacity={0.8}
+            >
+              {loading ? (
+                <ActivityIndicator size="small" color="#fff" />
+              ) : (
+                <Text style={confirmModal.confirmText}>Sign Out & Continue</Text>
+              )}
+            </TouchableOpacity>
+          </View>
+        </Pressable>
+      </Pressable>
+    </Modal>
+  );
+}
+
+const confirmModal = StyleSheet.create({
+  overlay: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.5)",
+    justifyContent: "center",
+    alignItems: "center",
+    paddingHorizontal: 28,
+  },
+  panel: {
+    backgroundColor: "#fff",
+    borderRadius: 20,
+    padding: 26,
+    width: "100%",
+    alignItems: "center",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.18,
+    shadowRadius: 24,
+    elevation: 16,
+  },
+  iconWrap: {
+    width: 68,
+    height: 68,
+    borderRadius: 34,
+    backgroundColor: "#ECEDF8",
+    justifyContent: "center",
+    alignItems: "center",
+    marginBottom: 16,
+  },
+  title: {
+    fontSize: 18,
+    fontWeight: "800",
+    color: "#1A1A2E",
+    marginBottom: 10,
+    textAlign: "center",
+  },
+  body: {
+    fontSize: 14,
+    color: "#666",
+    textAlign: "center",
+    lineHeight: 21,
+    marginBottom: 24,
+  },
+  actions: { flexDirection: "row", gap: 10, width: "100%" },
+  cancelBtn: {
+    flex: 1,
+    paddingVertical: 13,
+    borderRadius: 12,
+    backgroundColor: "#F2F2F7",
+    alignItems: "center",
+  },
+  cancelText: { fontWeight: "700", color: "#333", fontSize: 14 },
+  confirmBtn: {
+    flex: 1,
+    paddingVertical: 13,
+    borderRadius: 12,
+    backgroundColor: DARK_BLUE,
+    alignItems: "center",
+  },
+  confirmText: { fontWeight: "700", color: "#fff", fontSize: 14 },
+  btnDisabled: { opacity: 0.5 },
+});
 
 // ─── Password Strength ────────────────────────────────────────────────────────
 function getPasswordStrength(password: string) {
@@ -102,7 +231,7 @@ function FloatingInput({
             inputStyles.label,
             (focused || value) && inputStyles.labelActive,
             focused && inputStyles.labelFocused,
-            error && inputStyles.labelError,
+            error ? inputStyles.labelError : null,
           ]}
         >
           {label}
@@ -151,22 +280,20 @@ export default function ResetPasswordScreen() {
   const [email, setEmail] = useState<string>("");
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
-  const [errors, setErrors] = useState<{
-    new?: string;
-    confirm?: string;
-  }>({});
+  const [errors, setErrors] = useState<{ new?: string; confirm?: string }>({});
   const [submitting, setSubmitting] = useState(false);
   const [success, setSuccess] = useState(false);
   const [verifying, setVerifying] = useState(true);
   const [invalidCode, setInvalidCode] = useState(false);
 
-  const strength = getPasswordStrength(newPassword);
+  // ── Sign-out confirmation state ──
+  const [signOutModalVisible, setSignOutModalVisible] = useState(false);
+  const [signingOut, setSigningOut] = useState(false);
 
   // ── Verify code on mount ──
   useEffect(() => {
     const verifyCode = async () => {
       try {
-        // Extract oob code from query params
         const code = Array.isArray(params.oobCode)
           ? params.oobCode[0]
           : params.oobCode;
@@ -177,7 +304,6 @@ export default function ResetPasswordScreen() {
           return;
         }
 
-        // Verify the code is valid
         const recoveryEmail = await verifyPasswordResetCode(auth, code);
         setOobCode(code);
         setEmail(recoveryEmail);
@@ -192,6 +318,25 @@ export default function ResetPasswordScreen() {
     verifyCode();
   }, [params.oobCode]);
 
+  // ── Forgot password flow ──
+  const handleForgotPasswordPress = () => {
+    setSignOutModalVisible(true);
+  };
+
+  const handleSignOutAndContinue = async () => {
+    setSigningOut(true);
+    try {
+      await signOut(auth);
+      setSignOutModalVisible(false);
+      router.replace("/(auth)/forgot-password" as any);
+    } catch (err) {
+      console.error("Sign-out error:", err);
+      Alert.alert("Error", "Failed to sign out. Please try again.");
+    } finally {
+      setSigningOut(false);
+    }
+  };
+
   const handleResetPassword = async () => {
     const newErrors: typeof errors = {};
     if (!newPassword) {
@@ -199,7 +344,8 @@ export default function ResetPasswordScreen() {
     } else if (newPassword.length < 8) {
       newErrors.new = "Password must be at least 8 characters.";
     } else if (getPasswordStrength(newPassword).score < 2) {
-      newErrors.new = "Password is too weak. Add uppercase, numbers, or symbols.";
+      newErrors.new =
+        "Password is too weak. Add uppercase, numbers, or symbols.";
     }
     if (!confirmPassword) {
       newErrors.confirm = "Please confirm your new password.";
@@ -265,7 +411,7 @@ export default function ResetPasswordScreen() {
           </Text>
           <TouchableOpacity
             style={styles.primaryBtn}
-            onPress={() => router.replace("/(auth)/forgot-password")}
+            onPress={() => router.replace("/(auth)/forgot-password" as any)}
           >
             <Text style={styles.primaryBtnText}>Request New Link</Text>
           </TouchableOpacity>
@@ -303,6 +449,14 @@ export default function ResetPasswordScreen() {
       style={styles.container}
       behavior={Platform.OS === "ios" ? "padding" : undefined}
     >
+      {/* Sign-out confirmation modal */}
+      <SignOutConfirmModal
+        visible={signOutModalVisible}
+        onCancel={() => setSignOutModalVisible(false)}
+        onConfirm={handleSignOutAndContinue}
+        loading={signingOut}
+      />
+
       <View style={styles.header}>
         <TouchableOpacity
           style={styles.backButton}
@@ -327,11 +481,12 @@ export default function ResetPasswordScreen() {
           <Text style={styles.heroSub}>
             Enter a strong, unique password for your account.
           </Text>
-          {email && (
+          {email ? (
             <Text style={styles.emailDisplay}>
-              Reset link sent to: <Text style={{ fontWeight: "700" }}>{email}</Text>
+              Reset link sent to:{" "}
+              <Text style={{ fontWeight: "700" }}>{email}</Text>
             </Text>
-          )}
+          ) : null}
         </View>
 
         <View style={styles.card}>
@@ -362,7 +517,10 @@ export default function ResetPasswordScreen() {
           <View style={styles.requirementsList}>
             {[
               { test: newPassword.length >= 8, label: "At least 8 characters" },
-              { test: /[A-Z]/.test(newPassword), label: "One uppercase letter" },
+              {
+                test: /[A-Z]/.test(newPassword),
+                label: "One uppercase letter",
+              },
               { test: /[0-9]/.test(newPassword), label: "One number" },
               {
                 test: /[^A-Za-z0-9]/.test(newPassword),
@@ -403,11 +561,12 @@ export default function ResetPasswordScreen() {
             )}
           </TouchableOpacity>
 
+          {/* Forgot password link — triggers sign-out confirmation */}
           <TouchableOpacity
             style={styles.backLink}
-            onPress={() => router.replace("/(auth)/login")}
+            onPress={handleForgotPasswordPress}
           >
-            <Text style={styles.backLinkText}>Back to Login</Text>
+            <Text style={styles.backLinkText}>Forgot password? Tap here to reset</Text>
           </TouchableOpacity>
         </View>
       </ScrollView>
@@ -438,7 +597,12 @@ const styles = StyleSheet.create({
   headerTitle: { color: "#fff", fontSize: 22, fontWeight: "800" },
   headerSpacer: { width: 40 },
 
-  centerContainer: { flex: 1, justifyContent: "center", alignItems: "center", paddingHorizontal: 24 },
+  centerContainer: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+    paddingHorizontal: 24,
+  },
   loadingText: { fontSize: 14, color: "#666", marginTop: 12 },
 
   errorIconWrap: {
@@ -450,8 +614,19 @@ const styles = StyleSheet.create({
     alignItems: "center",
     marginBottom: 20,
   },
-  errorTitle: { fontSize: 18, fontWeight: "700", color: "#1A1A2E", marginBottom: 8 },
-  errorText: { fontSize: 14, color: "#666", textAlign: "center", lineHeight: 21, marginBottom: 24 },
+  errorTitle: {
+    fontSize: 18,
+    fontWeight: "700",
+    color: "#1A1A2E",
+    marginBottom: 8,
+  },
+  errorText: {
+    fontSize: 14,
+    color: "#666",
+    textAlign: "center",
+    lineHeight: 21,
+    marginBottom: 24,
+  },
 
   successIconWrap: {
     width: 88,
@@ -462,7 +637,12 @@ const styles = StyleSheet.create({
     alignItems: "center",
     marginBottom: 20,
   },
-  successTitle: { fontSize: 20, fontWeight: "800", color: "#1A1A2E", marginBottom: 8 },
+  successTitle: {
+    fontSize: 20,
+    fontWeight: "800",
+    color: "#1A1A2E",
+    marginBottom: 8,
+  },
   successText: { fontSize: 14, color: "#666", textAlign: "center", lineHeight: 21 },
 
   scrollContent: { paddingBottom: 40 },
@@ -543,7 +723,12 @@ const styles = StyleSheet.create({
   primaryBtnText: { color: "#fff", fontSize: 15, fontWeight: "700" },
 
   backLink: { alignItems: "center", marginTop: 16, paddingVertical: 4 },
-  backLinkText: { fontSize: 13, color: DARK_BLUE, fontWeight: "600", textDecorationLine: "underline" },
+  backLinkText: {
+    fontSize: 13,
+    color: DARK_BLUE,
+    fontWeight: "600",
+    textDecorationLine: "underline",
+  },
 });
 
 // ─── Input Styles ─────────────────────────────────────────────────────────────
@@ -586,7 +771,13 @@ const inputStyles = StyleSheet.create({
     paddingBottom: 0,
     minHeight: 28,
   },
-  errorContainer: { flexDirection: "row", alignItems: "center", marginTop: 6, marginLeft: 4, gap: 4 },
+  errorContainer: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginTop: 6,
+    marginLeft: 4,
+    gap: 4,
+  },
   errorText: { fontSize: 12, color: ACCENT_RED, fontWeight: "500" },
 });
 
