@@ -1,10 +1,12 @@
 ﻿// index.tsx - patched: replace swap-horizontal icon with BBicon.png in logo mark
+// + added pull-to-refresh (same pattern as Explore tab)
 
-import React, { useState } from "react";
+import React, { useCallback, useState } from "react";
 import {
   ActivityIndicator,
   FlatList,
   Image,
+  RefreshControl,
   ScrollView,
   StyleSheet,
   Text,
@@ -37,33 +39,48 @@ const BB_ICON = require("../../assets/images/BBicon.png");
 const NAVY = "#2f2f6f";
 
 export default function HomeScreen() {
-  const { items, loading } = useItems("trending");
+  const { items, loading, refetch } = useItems("trending") as any;
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedItem, setSelectedItem] = useState(null);
   const [modalVisible, setModalVisible] = useState(false);
   const [userPostedItems, setUserPostedItems] = useState<any[]>([]);
   const [loadingUserItems, setLoadingUserItems] = useState(true);
+  const [isRefreshing, setIsRefreshing] = useState(false);
   const router = useRouter();
+
+  const fetchUserItems = useCallback(async () => {
+    try {
+      const currentUser = auth.currentUser;
+      if (currentUser) {
+        const postedItems = await getUserPostedItems(currentUser.uid);
+        setUserPostedItems(postedItems);
+      }
+    } catch (error) {
+      console.error("Error fetching user items:", error);
+    } finally {
+      setLoadingUserItems(false);
+    }
+  }, []);
 
   useFocusEffect(
     React.useCallback(() => {
-      const fetchUserItems = async () => {
-        try {
-          const currentUser = auth.currentUser;
-          if (currentUser) {
-            const postedItems = await getUserPostedItems(currentUser.uid);
-            setUserPostedItems(postedItems);
-          }
-        } catch (error) {
-          console.error("Error fetching user items:", error);
-        } finally {
-          setLoadingUserItems(false);
-        }
-      };
-
       fetchUserItems();
-    }, []),
+    }, [fetchUserItems]),
   );
+
+  const handleRefresh = useCallback(async () => {
+    setIsRefreshing(true);
+    try {
+      await Promise.all([
+        fetchUserItems(),
+        typeof refetch === "function" ? refetch() : Promise.resolve(),
+      ]);
+    } catch (error) {
+      console.error("Error refreshing home:", error);
+    } finally {
+      setIsRefreshing(false);
+    }
+  }, [fetchUserItems, refetch]);
 
   const query = searchQuery.toLowerCase().trim();
   const filteredResults = query
@@ -120,6 +137,14 @@ export default function HomeScreen() {
       style={styles.scrollView}
       contentContainerStyle={styles.scrollContent}
       showsVerticalScrollIndicator={false}
+      refreshControl={
+        <RefreshControl
+          refreshing={isRefreshing}
+          onRefresh={handleRefresh}
+          colors={[NAVY]}
+          tintColor={NAVY}
+        />
+      }
     >
       <ThemedView style={styles.container}>
         {/* ── Header ── */}
@@ -307,8 +332,7 @@ export default function HomeScreen() {
             contentContainerStyle={styles.horizontalList}
             ListEmptyComponent={
               <Text style={styles.emptyText}>
-                No items found. Check your Firestore collection or try another
-                search.
+               No trending items available right now.
               </Text>
             }
           />

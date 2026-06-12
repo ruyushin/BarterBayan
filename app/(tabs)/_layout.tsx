@@ -22,21 +22,22 @@ const TAB_PB = Platform.OS === "ios" ? 6 : 8;
 const styles = StyleSheet.create({
   // ── Regular tab icon ────────────────────────────────────────────────────────
   tabIconContainer: {
-    // Fixed size so the pill, icon, and label always fit in one line
-    width: 64,
+    // Flexible: fills the flex item given to it by tabBarItemStyle, so it
+    // automatically shrinks/grows with screen width — no fixed px width
+    // that can overflow on narrow devices.
+    width: "100%",
     alignItems: "center",
     justifyContent: "center",
     paddingTop: 2,
-    marginTop: 20,
   },
   tabLabel: {
-    fontSize: 10,
+    fontSize: 8,
     fontWeight: "600",
-    marginTop: 2,
-    letterSpacing: 0,          // reset — even 0.2 can cause wrapping on small screens
+    marginTop: 1,
+    letterSpacing: -0.2,
     textAlign: "center",
-    // Prevent wrapping on very narrow devices
     includeFontPadding: false,
+    width: "100%",
   },
   tabLabelActive: {
     color: NAVY,
@@ -59,16 +60,17 @@ const styles = StyleSheet.create({
   // ── Center Trade FAB ─────────────────────────────────────────────────────────
   tradeBtnWrap: {
     // Wrapper gives the FAB a fixed hit-area aligned with the bar
-    width: 64,
+    width: "100%",
     alignItems: "center",
     justifyContent: "center",
     // Pull the circle up; overflow:visible on the tab bar lets it show
-    marginTop: -50,
+    marginTop: -34,
+    paddingBottom: 2,
   },
   tradeBtn: {
-    width: 65,
-    height: 65,
-    borderRadius: 27,
+    width: 60,
+    height: 60,
+    borderRadius: 30,
     backgroundColor: NAVY_LIGHT,
     justifyContent: "center",
     alignItems: "center",
@@ -119,7 +121,7 @@ export default function TabLayout() {
       {focused && <View style={styles.activePill} />}
       <Ionicons
         name={iconName as any}
-        size={26}
+        size={24}
         color={focused ? NAVY : INACTIVE}
       />
       <Text
@@ -128,6 +130,8 @@ export default function TabLayout() {
           focused ? styles.tabLabelActive : styles.tabLabelInactive,
         ]}
         numberOfLines={1}
+        adjustsFontSizeToFit
+        minimumFontScale={0.65}
         allowFontScaling={false}
       >
         {label}
@@ -150,6 +154,7 @@ export default function TabLayout() {
           height: TAB_BAR_HEIGHT,
           paddingTop: TAB_PT,
           paddingBottom: TAB_PB,
+          flexDirection: "row",
           // Must be visible so the FAB circle overflows above the bar
           overflow: "visible",
           shadowColor: "#000",
@@ -162,12 +167,19 @@ export default function TabLayout() {
             default: {},
           }),
         },
-        // Let each tab item stretch evenly
+        // Each tab item gets equal flexible width — total always = screen width,
+        // so nothing can ever overflow off-screen regardless of device size.
         tabBarItemStyle: {
           flex: 1,
+          width: 0, // forces equal flex-basis instead of intrinsic content width
+          minWidth: 0,
+          maxWidth: undefined,
+          height: "100%",
           alignItems: "center",
           justifyContent: "center",
           overflow: "visible",
+          paddingHorizontal: 0,
+          marginHorizontal: 0,
         },
       }}
     >
@@ -207,6 +219,18 @@ export default function TabLayout() {
               <View style={[styles.tradeBtn, focused && styles.tradeBtnActive]}>
                 <Ionicons name="swap-horizontal" size={22} color="#fff" />
               </View>
+              <Text
+                style={[
+                  styles.tabLabel,
+                  focused ? styles.tabLabelActive : styles.tabLabelInactive,
+                ]}
+                numberOfLines={1}
+                adjustsFontSizeToFit
+                minimumFontScale={0.65}
+                allowFontScaling={false}
+              >
+                Trade
+              </Text>
             </View>
           ),
         }}
