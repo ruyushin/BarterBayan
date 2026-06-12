@@ -65,7 +65,10 @@ export default function HomeScreen() {
   useFocusEffect(
     React.useCallback(() => {
       fetchUserItems();
-    }, [fetchUserItems]),
+      if (typeof refetch === "function") {
+        refetch();
+      }
+    }, [fetchUserItems, refetch]),
   );
 
   const handleRefresh = useCallback(async () => {
