@@ -9,7 +9,7 @@ import {
   reauthenticateWithCredential,
   User,
 } from "firebase/auth";
-import { deleteDoc, doc } from "firebase/firestore";
+import { deleteDoc, doc, serverTimestamp, setDoc } from "firebase/firestore";
 import React, { useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
@@ -33,6 +33,7 @@ const GOLD = "#C9A227";
 const WHITE = "#FFFFFF";
 
 const CONFIRMATION_PHRASE = "delete my account permanently";
+const REASON_MAX_LENGTH = 300;
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 function AppModal({
@@ -323,6 +324,8 @@ export function DeleteAccountModal({
 
   const [step, setStep] = useState(1);
   const [typedPhrase, setTypedPhrase] = useState("");
+  const [deleteReason, setDeleteReason] = useState("");
+  const [reasonError, setReasonError] = useState<string | null>(null);
   const [credential, setCredential] = useState("");
   const [credentialVisible, setCredentialVisible] = useState(false);
   const [credentialError, setCredentialError] = useState<string | null>(null);
@@ -363,6 +366,8 @@ export function DeleteAccountModal({
   const reset = () => {
     setStep(1);
     setTypedPhrase("");
+    setDeleteReason("");
+    setReasonError(null);
     setCredential("");
     setCredentialError(null);
     setCredentialVisible(false);
@@ -394,7 +399,42 @@ export function DeleteAccountModal({
     ]).start();
   };
 
-  // ── Step 3: verify identity ──────────────────────────────────────────────
+  // ── Step 3: submit reason for deletion ───────────────────────────────────
+  const handleReasonContinue = async () => {
+    const trimmed = deleteReason.trim();
+    if (!trimmed) {
+      setReasonError("Please tell us why you're leaving.");
+      return;
+    }
+    if (trimmed.length > REASON_MAX_LENGTH) {
+      setReasonError(`Please limit your reason to ${REASON_MAX_LENGTH} characters.`);
+      return;
+    }
+
+    // Save the reason to Firestore (best-effort, doesn't block account deletion)
+    if (currentUser) {
+      try {
+        await setDoc(
+          doc(db, "accountDeletionFeedback", currentUser.uid),
+          {
+            uid: currentUser.uid,
+            email: currentUser.email ?? null,
+            reason: trimmed,
+            createdAt: serverTimestamp(),
+          },
+          { merge: true }
+        );
+      } catch (err) {
+        console.warn("[DeleteAccount] Failed to save deletion reason:", err);
+        // Non-blocking: continue even if this write fails
+      }
+    }
+
+    setReasonError(null);
+    goNext();
+  };
+
+  // ── Step 4: verify identity ──────────────────────────────────────────────
   const handleVerify = async () => {
     if (!currentUser?.email) {
       setCredentialError(
@@ -467,7 +507,7 @@ export function DeleteAccountModal({
     }
   };
 
-  // ── Step 4: execute deletion ─────────────────────────────────────────────
+  // ── Step 5: execute deletion ─────────────────────────────────────────────
   const handleDeleteAccount = async () => {
     if (!currentUser) return;
     setDeleting(true);
@@ -484,7 +524,7 @@ export function DeleteAccountModal({
       console.error("[DeleteAccount] Error:", err);
       setDeleting(false);
       if (err?.code === "auth/requires-recent-login") {
-        setStep(3);
+        setStep(4);
         setCredential("");
         setCredentialError("Session expired. Please re-verify your identity.");
       }
@@ -532,7 +572,7 @@ export function DeleteAccountModal({
                 <Ionicons name="close" size={20} color="#AAAAAA" />
               </TouchableOpacity>
 
-              <StepDots step={step} total={4} />
+              <StepDots step={step} total={5} />
 
               {/* ══════════════════════════════════════
                   STEP 1 — Warning & Consequences
@@ -731,9 +771,106 @@ export function DeleteAccountModal({
               )}
 
               {/* ══════════════════════════════════════
-                  STEP 3 — Verify Identity
+                  STEP 3 — Reason for Deletion (NEW)
               ══════════════════════════════════════ */}
               {step === 3 && (
+                <>
+                  <View style={modalStyles.iconRing}>
+                    <View
+                      style={[
+                        modalStyles.iconBox,
+                        { backgroundColor: "#EEF0FB" },
+                      ]}
+                    >
+                      <Ionicons
+                        name="chatbox-ellipses-outline"
+                        size={28}
+                        color={DARK_BLUE}
+                      />
+                    </View>
+                  </View>
+
+                  <Text style={modalStyles.title}>Help Us Improve</Text>
+                  <Text style={modalStyles.subtitle}>
+                    Before you go, please share why you're deleting your
+                    account. This is required and helps us improve the app.
+                  </Text>
+
+                  <View
+                    style={[
+                      s5.textAreaBox,
+                      reasonError != null && s5.textAreaBoxError,
+                    ]}
+                  >
+                    <TextInput
+                      style={s5.textArea}
+                      value={deleteReason}
+                      onChangeText={(t) => {
+                        if (t.length <= REASON_MAX_LENGTH) {
+                          setDeleteReason(t);
+                          setReasonError(null);
+                        }
+                      }}
+                      placeholder="Tell us why you're leaving…"
+                      placeholderTextColor="#CCCCCC"
+                      multiline
+                      numberOfLines={5}
+                      maxLength={REASON_MAX_LENGTH}
+                      textAlignVertical="top"
+                    />
+                  </View>
+
+                  <View style={s5.counterRow}>
+                    {reasonError ? (
+                      <View style={s5.errorRow}>
+                        <Ionicons
+                          name="alert-circle"
+                          size={14}
+                          color={ACCENT_RED}
+                        />
+                        <Text style={s5.errorText}>{reasonError}</Text>
+                      </View>
+                    ) : (
+                      <View />
+                    )}
+                    <Text
+                      style={[
+                        s5.counterText,
+                        deleteReason.length >= REASON_MAX_LENGTH &&
+                          s5.counterTextLimit,
+                      ]}
+                    >
+                      {deleteReason.length}/{REASON_MAX_LENGTH}
+                    </Text>
+                  </View>
+
+                  <TouchableOpacity
+                    style={[
+                      modalStyles.primaryBtn,
+                      { backgroundColor: DARK_BLUE },
+                    ]}
+                    onPress={handleReasonContinue}
+                    activeOpacity={0.8}
+                  >
+                    <View style={modalStyles.primaryBtnInner}>
+                      <Text style={modalStyles.primaryBtnText}>Continue</Text>
+                      <Ionicons name="arrow-forward" size={16} color={WHITE} />
+                    </View>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
+                    style={modalStyles.cancelBtn}
+                    onPress={handleClose}
+                  >
+                    <Text style={modalStyles.cancelBtnText}>Cancel</Text>
+                  </TouchableOpacity>
+                </>
+              )}
+
+              {/* ══════════════════════════════════════
+                  STEP 4 — Verify Identity
+              ══════════════════════════════════════ */}
+              {step === 4 && (
                 <>
                   <View style={modalStyles.iconRing}>
                     <View
@@ -876,9 +1013,9 @@ export function DeleteAccountModal({
               )}
 
               {/* ══════════════════════════════════════
-                  STEP 4 — Final Confirm + 15s Cooldown
+                  STEP 5 — Final Confirm + 15s Cooldown
               ══════════════════════════════════════ */}
-              {step === 4 && (
+              {step === 5 && (
                 <>
                   <View style={modalStyles.iconRing}>
                     <View
@@ -1198,4 +1335,42 @@ const s4 = StyleSheet.create({
     fontStyle: "italic",
     paddingHorizontal: 4,
   },
+});
+
+const s5 = StyleSheet.create({
+  textAreaBox: {
+    borderWidth: 1.5,
+    borderColor: "#E0E0E0",
+    borderRadius: 12,
+    backgroundColor: "#FAFAFA",
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    marginBottom: 6,
+    minHeight: 120,
+  },
+  textAreaBoxError: { borderColor: ACCENT_RED },
+  textArea: {
+    fontSize: 14,
+    color: "#1A1A2E",
+    fontWeight: "500",
+    minHeight: 96,
+    textAlignVertical: "top",
+  },
+  counterRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: 16,
+    marginLeft: 2,
+    marginRight: 2,
+  },
+  errorRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    flex: 1,
+  },
+  errorText: { fontSize: 12, color: ACCENT_RED, fontWeight: "500" },
+  counterText: { fontSize: 12, color: "#AAAAAA", fontWeight: "500" },
+  counterTextLimit: { color: ACCENT_RED, fontWeight: "700" },
 });

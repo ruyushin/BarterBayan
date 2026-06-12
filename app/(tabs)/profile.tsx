@@ -6,6 +6,7 @@ import * as ImagePicker from "expo-image-picker";
 import { useRouter } from "expo-router";
 import { onAuthStateChanged, signOut, User } from "firebase/auth";
 import {
+  addDoc,
   collection,
   doc,
   getDocs,
@@ -13,6 +14,7 @@ import {
   onSnapshot,
   orderBy,
   query,
+  serverTimestamp,
 } from "firebase/firestore";
 import React, {
   useCallback,
@@ -26,8 +28,10 @@ import {
   Alert,
   Animated,
   Image,
+  KeyboardAvoidingView,
   Linking,
   Modal,
+  Platform,
   ScrollView,
   StyleSheet,
   Text,
@@ -44,6 +48,9 @@ const GOLD = "#C9A227";
 const STAR_FILLED = "#F5A623";
 const STAR_EMPTY = "#D8D8D8";
 const MAX_RATING = 5;
+
+const CLOUDINARY_CLOUD_NAME = "dh97c25iz";
+const CLOUDINARY_UPLOAD_PRESET = "reports";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 interface UserData {
@@ -601,21 +608,57 @@ function FeedbackModal({
 }) {
   const [feedback, setFeedback] = useState("");
   const [submitted, setSubmitted] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
 
-  const handleSubmit = () => {
+  const MAX_FEEDBACK_CHARS = 300;
+
+  const reset = () => {
+    setFeedback("");
+    setSubmitted(false);
+    setSubmitting(false);
+  };
+
+  const handleClose = () => {
+    reset();
+    onClose();
+  };
+
+  const handleSubmit = async () => {
     if (!feedback.trim()) {
-      Alert.alert(
-        "Empty feedback",
-        "Please write something before submitting.",
-      );
+      Alert.alert("Empty feedback", "Please write something before submitting.");
       return;
     }
-    setSubmitted(true);
-    setTimeout(() => {
-      setSubmitted(false);
-      setFeedback("");
-      onClose();
-    }, 1500);
+    setSubmitting(true);
+    try {
+      const currentUser = auth.currentUser;
+      const now = new Date();
+      await addDoc(collection(db, "feedback"), {
+        userId: currentUser?.uid ?? null,
+        userEmail: currentUser?.email ?? null,
+        username: currentUser?.displayName ?? null,
+        message: feedback.trim(),
+        createdAt: serverTimestamp(),
+        createdAtReadable: `${now.toLocaleDateString("en-PH", {
+          month: "long",
+          day: "numeric",
+          year: "numeric",
+        })} · ${now.toLocaleTimeString("en-PH", {
+          hour: "numeric",
+          minute: "2-digit",
+          hour12: true,
+        })}`,
+      });
+      setSubmitted(true);
+      setTimeout(() => {
+        reset();
+        onClose();
+      }, 1500);
+    } catch (err) {
+      console.error("Feedback submission error:", err);
+      Alert.alert("Error", "Failed to submit feedback. Please try again.");
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   return (
@@ -623,45 +666,75 @@ function FeedbackModal({
       visible={visible}
       transparent
       animationType="slide"
-      onRequestClose={onClose}
+      onRequestClose={handleClose}
     >
-      <View style={modalStyles.overlay}>
-        <View style={modalStyles.sheet}>
-          <Text style={modalStyles.title}>Send Feedback</Text>
-          <Text style={modalStyles.subtitle}>
-            Your thoughts help us improve the app for everyone.
-          </Text>
-          {submitted ? (
-            <View style={modalStyles.successBox}>
-              <Text style={modalStyles.successText}>
-                Thanks for your feedback!
+      <KeyboardAvoidingView
+        style={{ flex: 1 }}
+        behavior={Platform.OS === "ios" ? "padding" : "height"}
+        keyboardVerticalOffset={Platform.OS === "ios" ? 0 : 24}
+      >
+        <View style={modalStyles.overlay}>
+          <View style={modalStyles.sheet}>
+            <Text style={modalStyles.title}>Send Feedback</Text>
+            <Text style={modalStyles.subtitle}>
+              Your thoughts help us improve the app for everyone.
+            </Text>
+            {submitted ? (
+              <View style={modalStyles.successBox}>
+                <Ionicons name="checkmark-circle" size={48} color="#27AE60" style={{ marginBottom: 8 }} />
+                <Text style={modalStyles.successText}>Thanks for your feedback!</Text>
+              </View>
+            ) : (
+              <>
+                <TextInput
+                  style={modalStyles.input}
+                  placeholder="Tell us what you think..."
+                  placeholderTextColor="#AAAAAA"
+                  multiline
+                  numberOfLines={5}
+                  value={feedback}
+                  onChangeText={(text) => {
+                    if (text.length <= MAX_FEEDBACK_CHARS) setFeedback(text);
+                  }}
+                  textAlignVertical="top"
+                  maxLength={MAX_FEEDBACK_CHARS}
+                />
+                <Text
+                  style={[
+                    reportStyles.charCount,
+                    feedback.length >= MAX_FEEDBACK_CHARS && reportStyles.charCountLimit,
+                  ]}
+                >
+                  {feedback.length}/{MAX_FEEDBACK_CHARS}
+                </Text>
+                <TouchableOpacity
+                  style={[modalStyles.submitBtn, submitting && { opacity: 0.6 }]}
+                  onPress={handleSubmit}
+                  disabled={submitting}
+                >
+                  {submitting ? (
+                    <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+                      <ActivityIndicator color="#fff" size="small" />
+                      <Text style={modalStyles.submitText}>Submitting…</Text>
+                    </View>
+                  ) : (
+                    <Text style={modalStyles.submitText}>Submit</Text>
+                  )}
+                </TouchableOpacity>
+              </>
+            )}
+            <TouchableOpacity
+              style={modalStyles.cancelBtn}
+              onPress={handleClose}
+              disabled={submitting}
+            >
+              <Text style={[modalStyles.cancelText, submitting && { opacity: 0.4 }]}>
+                Cancel
               </Text>
-            </View>
-          ) : (
-            <>
-              <TextInput
-                style={modalStyles.input}
-                placeholder="Tell us what you think..."
-                placeholderTextColor="#AAAAAA"
-                multiline
-                numberOfLines={5}
-                value={feedback}
-                onChangeText={setFeedback}
-                textAlignVertical="top"
-              />
-              <TouchableOpacity
-                style={modalStyles.submitBtn}
-                onPress={handleSubmit}
-              >
-                <Text style={modalStyles.submitText}>Submit</Text>
-              </TouchableOpacity>
-            </>
-          )}
-          <TouchableOpacity style={modalStyles.cancelBtn} onPress={onClose}>
-            <Text style={modalStyles.cancelText}>Cancel</Text>
-          </TouchableOpacity>
+            </TouchableOpacity>
+          </View>
         </View>
-      </View>
+      </KeyboardAvoidingView>
     </Modal>
   );
 }
@@ -678,21 +751,33 @@ function ReportModal({
   const [details, setDetails] = useState("");
   const [photos, setPhotos] = useState<string[]>([]);
   const [submitted, setSubmitted] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const [showValidation, setShowValidation] = useState(false);
+
+  // Stores size-type fingerprints for duplicate detection (works on web + native)
+  const photoFingerprints = useRef<string[]>([]);
+
+  const MAX_CHARS = 300;
+  const MAX_PHOTOS = 5;
 
   const reset = () => {
     setSelectedCategory(null);
     setDetails("");
     setPhotos([]);
     setSubmitted(false);
+    setUploading(false);
+    setShowValidation(false);
+    photoFingerprints.current = [];
   };
+
   const handleClose = () => {
     reset();
     onClose();
   };
 
   const handlePickPhoto = async () => {
-    if (photos.length >= 3) {
-      Alert.alert("Limit reached", "You can attach up to 3 photos.");
+    if (photos.length >= MAX_PHOTOS) {
+      Alert.alert("Limit reached", `You can attach up to ${MAX_PHOTOS} photos.`);
       return;
     }
     const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
@@ -712,23 +797,109 @@ function ReportModal({
       allowsMultipleSelection: false,
       quality: 0.7,
     });
-    if (!result.canceled && result.assets.length > 0)
-      setPhotos((prev) => [...prev, result.assets[0].uri]);
+    if (!result.canceled && result.assets.length > 0) {
+      const newUri = result.assets[0].uri;
+      try {
+        // Fetch as blob and fingerprint by size+type — works on both web and native
+        const blob = await fetch(newUri).then((r) => r.blob());
+        const fingerprint = `${blob.size}-${blob.type}`;
+        if (photoFingerprints.current.includes(fingerprint)) {
+          Alert.alert("Duplicate photo", "This photo has already been added.");
+          return;
+        }
+        photoFingerprints.current.push(fingerprint);
+        setPhotos((prev) => [...prev, newUri]);
+      } catch {
+        // Fallback: add without duplicate check if blob fetch fails
+        setPhotos((prev) => [...prev, newUri]);
+      }
+    }
   };
 
-  const handleSubmit = () => {
+  const uploadToCloudinary = async (uri: string): Promise<string> => {
+    const formData = new FormData();
+
+    // Web needs a real Blob; native uses the { uri, type, name } object
+    if (typeof document !== "undefined") {
+      const blob = await fetch(uri).then((r) => r.blob());
+      formData.append("file", blob, "photo.jpg");
+    } else {
+      formData.append("file", {
+        uri,
+        type: "image/jpeg",
+        name: uri.split("/").pop() ?? "photo.jpg",
+      } as any);
+    }
+
+    formData.append("upload_preset", CLOUDINARY_UPLOAD_PRESET);
+    // Folder is configured inside the Cloudinary preset, not sent here
+
+    const res = await fetch(
+      `https://api.cloudinary.com/v1_1/${CLOUDINARY_CLOUD_NAME}/image/upload`,
+      { method: "POST", body: formData },
+    );
+    const data = await res.json();
+    console.log("Cloudinary response:", JSON.stringify(data, null, 2));
+    if (!data.secure_url) {
+      throw new Error(data?.error?.message ?? "Cloudinary upload failed");
+    }
+    return data.secure_url;
+  };
+
+  const handleSubmit = async () => {
     if (!selectedCategory) {
-      Alert.alert(
-        "No category selected",
-        "Please select a category before submitting.",
-      );
+      setShowValidation(true);
       return;
     }
-    setSubmitted(true);
-    setTimeout(() => {
-      reset();
-      onClose();
-    }, 1500);
+    setShowValidation(false);
+    setUploading(true);
+    try {
+      // Upload all photos to Cloudinary
+      const uploadedUrls: string[] = [];
+      for (const uri of photos) {
+        const url = await uploadToCloudinary(uri);
+        uploadedUrls.push(url);
+      }
+
+      // Build a human-readable timestamp: "June 12, 2026 · 3:45 PM"
+      const now = new Date();
+      const readableDate = now.toLocaleDateString("en-PH", {
+        month: "long",
+        day: "numeric",
+        year: "numeric",
+      });
+      const readableTime = now.toLocaleTimeString("en-PH", {
+        hour: "numeric",
+        minute: "2-digit",
+        hour12: true,
+      });
+      const readableCreatedAt = `${readableDate} · ${readableTime}`;
+
+      // Save report to Firestore
+      const currentUser = auth.currentUser;
+      await addDoc(collection(db, "reports"), {
+        userId: currentUser?.uid ?? null,
+        userEmail: currentUser?.email ?? null,
+        username: currentUser?.displayName ?? null,
+        category: selectedCategory,
+        details: details.trim(),
+        photoUrls: uploadedUrls,
+        createdAt: serverTimestamp(),       // Firestore Timestamp for queries/ordering
+        createdAtReadable: readableCreatedAt, // Human-readable string e.g. "June 12, 2026 · 3:45 PM"
+        status: "open",
+      });
+
+      setSubmitted(true);
+      setTimeout(() => {
+        reset();
+        onClose();
+      }, 1500);
+    } catch (err) {
+      console.error("Report submission error:", err);
+      Alert.alert("Error", "Failed to submit report. Please try again.");
+    } finally {
+      setUploading(false);
+    }
   };
 
   return (
@@ -749,14 +920,27 @@ function ReportModal({
             <Text style={modalStyles.subtitle}>
               Select a category and optionally add details or photos.
             </Text>
+
             {submitted ? (
               <View style={modalStyles.successBox}>
+                <Ionicons name="checkmark-circle" size={48} color="#27AE60" style={{ marginBottom: 8 }} />
                 <Text style={modalStyles.successText}>
                   Report submitted. Thank you!
                 </Text>
               </View>
             ) : (
               <>
+                {/* Category section label */}
+                <Text
+                  style={[
+                    reportStyles.sectionLabel,
+                    showValidation && !selectedCategory && reportStyles.sectionLabelError,
+                  ]}
+                >
+                  Reason <Text style={{ color: ACCENT_RED }}>*</Text>
+                </Text>
+
+                {/* Category Pills */}
                 <View style={reportStyles.categoryGrid}>
                   {REPORT_CATEGORIES.map((label) => {
                     const isSelected = selectedCategory === label;
@@ -767,7 +951,10 @@ function ReportModal({
                           reportStyles.categoryPill,
                           isSelected && reportStyles.categoryPillSelected,
                         ]}
-                        onPress={() => setSelectedCategory(label)}
+                        onPress={() => {
+                          setSelectedCategory(label);
+                          setShowValidation(false);
+                        }}
                         activeOpacity={0.75}
                       >
                         <Text
@@ -782,6 +969,18 @@ function ReportModal({
                     );
                   })}
                 </View>
+
+                {/* Inline validation message */}
+                {showValidation && !selectedCategory && (
+                  <View style={reportStyles.validationRow}>
+                    <Ionicons name="alert-circle" size={14} color={ACCENT_RED} />
+                    <Text style={reportStyles.validationText}>
+                      Please select a reason before submitting.
+                    </Text>
+                  </View>
+                )}
+
+                {/* Details input with 300 char limit */}
                 <TextInput
                   style={modalStyles.input}
                   placeholder="Add more details (optional)..."
@@ -789,25 +988,36 @@ function ReportModal({
                   multiline
                   numberOfLines={4}
                   value={details}
-                  onChangeText={setDetails}
+                  onChangeText={(text) => {
+                    if (text.length <= MAX_CHARS) setDetails(text);
+                  }}
                   textAlignVertical="top"
+                  maxLength={MAX_CHARS}
                 />
+                <Text
+                  style={[
+                    reportStyles.charCount,
+                    details.length >= MAX_CHARS && reportStyles.charCountLimit,
+                  ]}
+                >
+                  {details.length}/{MAX_CHARS}
+                </Text>
+
+                {/* Photo attachment */}
                 <Text style={reportStyles.photoLabel}>
                   Attach Photos{" "}
                   <Text style={reportStyles.photoLabelHint}>
-                    ({photos.length}/3)
+                    ({photos.length}/{MAX_PHOTOS})
                   </Text>
                 </Text>
                 <View style={reportStyles.photoRow}>
                   {photos.map((uri, index) => (
-                    <View key={uri} style={reportStyles.photoThumbWrapper}>
+                    <View key={`${uri}-${index}`} style={reportStyles.photoThumbWrapper}>
                       <Image source={{ uri }} style={reportStyles.photoThumb} />
                       <TouchableOpacity
                         style={reportStyles.photoRemoveBtn}
                         onPress={() =>
-                          setPhotos((prev) =>
-                            prev.filter((_, i) => i !== index),
-                          )
+                          setPhotos((prev) => prev.filter((_, i) => i !== index))
                         }
                         hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
                       >
@@ -815,7 +1025,7 @@ function ReportModal({
                       </TouchableOpacity>
                     </View>
                   ))}
-                  {photos.length < 3 && (
+                  {photos.length < MAX_PHOTOS && (
                     <TouchableOpacity
                       style={reportStyles.photoAddBtn}
                       onPress={handlePickPhoto}
@@ -826,19 +1036,35 @@ function ReportModal({
                     </TouchableOpacity>
                   )}
                 </View>
+
+                {/* Submit button */}
                 <TouchableOpacity
-                  style={modalStyles.submitBtnR}
+                  style={[modalStyles.submitBtnR, uploading && { opacity: 0.6 }]}
                   onPress={handleSubmit}
+                  disabled={uploading}
                 >
-                  <Text style={modalStyles.submitText}>Submit Report</Text>
+                  {uploading ? (
+                    <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+                      <ActivityIndicator color="#fff" size="small" />
+                      <Text style={modalStyles.submitText}>
+                        {photos.length > 0 ? "Uploading photos…" : "Submitting…"}
+                      </Text>
+                    </View>
+                  ) : (
+                    <Text style={modalStyles.submitText}>Submit Report</Text>
+                  )}
                 </TouchableOpacity>
               </>
             )}
+
             <TouchableOpacity
               style={modalStyles.cancelBtn}
               onPress={handleClose}
+              disabled={uploading}
             >
-              <Text style={modalStyles.cancelText}>Cancel</Text>
+              <Text style={[modalStyles.cancelText, uploading && { opacity: 0.4 }]}>
+                Cancel
+              </Text>
             </TouchableOpacity>
           </View>
         </ScrollView>
@@ -992,6 +1218,8 @@ export default function ProfileScreen() {
   const [reviewDistribution, setReviewDistribution] = useState<number[]>([
     0, 0, 0, 0, 0,
   ]);
+  const [showLogoutModal, setShowLogoutModal] = useState(false);
+  const [loggingOut, setLoggingOut] = useState(false);
   const router = useRouter();
 
   const fadeAnim = useRef(new Animated.Value(0)).current;
@@ -1118,11 +1346,16 @@ export default function ProfileScreen() {
   }, [userId]);
 
   const handleLogout = async () => {
+    setLoggingOut(true);
     try {
       await signOut(auth);
       router.replace("/login");
     } catch (err) {
       console.error("Logout error:", err);
+      Alert.alert("Error", "Failed to log out. Please try again.");
+    } finally {
+      setLoggingOut(false);
+      setShowLogoutModal(false);
     }
   };
 
@@ -1178,6 +1411,52 @@ export default function ProfileScreen() {
         userData={userData}
         onClose={() => setOverviewVisible(false)}
       />
+
+      {/* ── Logout Confirmation Modal ── */}
+      <Modal
+        visible={showLogoutModal}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowLogoutModal(false)}
+      >
+        <View style={logoutModalStyles.overlay}>
+          <View style={logoutModalStyles.content}>
+            <View style={logoutModalStyles.iconBox}>
+              <Ionicons name="log-out-outline" size={22} color="#C0392B" />
+            </View>
+            <Text style={logoutModalStyles.title}>Log Out?</Text>
+            <Text style={logoutModalStyles.message}>
+              You will be signed out of your account.
+            </Text>
+            <View style={logoutModalStyles.buttonsRow}>
+              <TouchableOpacity
+                style={[logoutModalStyles.btn, logoutModalStyles.btnCancel]}
+                onPress={() => setShowLogoutModal(false)}
+                activeOpacity={0.7}
+                disabled={loggingOut}
+              >
+                <Text style={logoutModalStyles.btnCancelText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[
+                  logoutModalStyles.btn,
+                  logoutModalStyles.btnLogout,
+                  loggingOut && { opacity: 0.6 },
+                ]}
+                onPress={handleLogout}
+                activeOpacity={0.7}
+                disabled={loggingOut}
+              >
+                {loggingOut ? (
+                  <ActivityIndicator color="#fff" size="small" />
+                ) : (
+                  <Text style={logoutModalStyles.btnLogoutText}>Log Out</Text>
+                )}
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
 
       {/* Header */}
       <View style={styles.header}>
@@ -1349,13 +1628,14 @@ export default function ProfileScreen() {
               subtitle="View all past trades"
               onPress={() => router.push("/trade-history" as any)}
             />
-            <SettingsRow label="Log Out" danger onPress={handleLogout} />
+            <SettingsRow
+              label="Log Out"
+              danger
+              onPress={() => setShowLogoutModal(true)}
+            />
           </View>
 
-          <View style={styles.footerCard}>
-            <Text style={styles.footerLabel}>Account Email</Text>
-            <Text style={styles.footerValue}>{userData?.email ?? "—"}</Text>
-          </View>
+
         </Animated.View>
       </ScrollView>
     </View>
@@ -1724,7 +2004,7 @@ const modalStyles = StyleSheet.create({
     color: "#1A1A2E",
     height: 100,
     backgroundColor: "#FAFAFA",
-    marginBottom: 16,
+    marginBottom: 4,
   },
   submitBtn: {
     backgroundColor: DARK_BLUE,
@@ -1738,16 +2018,38 @@ const modalStyles = StyleSheet.create({
     paddingVertical: 14,
     borderRadius: 12,
     alignItems: "center",
+    justifyContent: "center",
     marginBottom: 10,
   },
   submitText: { color: "#fff", fontWeight: "700", fontSize: 15 },
   cancelBtn: { paddingVertical: 12, alignItems: "center" },
   cancelText: { color: "#888", fontWeight: "600", fontSize: 14 },
-  successBox: { paddingVertical: 32, alignItems: "center" },
+  successBox: { paddingVertical: 32, alignItems: "center", gap: 4 },
   successText: { fontSize: 18, fontWeight: "700", color: "#1A1A2E" },
 });
 
 const reportStyles = StyleSheet.create({
+  sectionLabel: {
+    fontSize: 13,
+    fontWeight: "700",
+    color: "#1A1A2E",
+    marginBottom: 10,
+  },
+  sectionLabelError: {
+    color: ACCENT_RED,
+  },
+  validationRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+    marginTop: -10,
+    marginBottom: 12,
+  },
+  validationText: {
+    fontSize: 12,
+    color: ACCENT_RED,
+    fontWeight: "600",
+  },
   categoryGrid: {
     flexDirection: "row",
     flexWrap: "wrap",
@@ -1765,6 +2067,17 @@ const reportStyles = StyleSheet.create({
   categoryPillSelected: { borderColor: DARK_BLUE, backgroundColor: "#ECEDF8" },
   categoryLabel: { fontSize: 13, fontWeight: "600", color: "#555" },
   categoryLabelSelected: { color: DARK_BLUE },
+  charCount: {
+    fontSize: 11,
+    color: "#AAAAAA",
+    textAlign: "right",
+    marginBottom: 16,
+    marginTop: 2,
+  },
+  charCountLimit: {
+    color: ACCENT_RED,
+    fontWeight: "700",
+  },
   photoLabel: {
     fontSize: 13,
     fontWeight: "700",
@@ -2081,4 +2394,62 @@ const reviewSectionStyles = StyleSheet.create({
     borderTopColor: "#ECECEC",
   },
   seeAllText: { fontSize: 13, fontWeight: "700", color: DARK_BLUE },
+});
+
+const logoutModalStyles = StyleSheet.create({
+  overlay: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.5)",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  content: {
+    backgroundColor: "#fff",
+    borderRadius: 20,
+    padding: 24,
+    width: "82%",
+    maxWidth: 340,
+    elevation: 8,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.2,
+    shadowRadius: 12,
+    alignItems: "center",
+  },
+  iconBox: {
+    width: 52,
+    height: 52,
+    borderRadius: 26,
+    backgroundColor: "#FEF3C7",
+    justifyContent: "center",
+    alignItems: "center",
+    marginBottom: 14,
+  },
+  title: {
+    fontSize: 18,
+    fontWeight: "800",
+    color: "#1A1A2E",
+    marginBottom: 8,
+    textAlign: "center",
+  },
+  message: {
+    fontSize: 14,
+    color: "#666",
+    marginBottom: 24,
+    lineHeight: 20,
+    textAlign: "center",
+  },
+  buttonsRow: { flexDirection: "row", gap: 10, width: "100%" },
+  btn: {
+    flex: 1,
+    paddingVertical: 12,
+    borderRadius: 10,
+    justifyContent: "center",
+    alignItems: "center",
+    minHeight: 44,
+  },
+  btnCancel: { backgroundColor: "#F0F0F0", borderWidth: 1, borderColor: "#E0E0E0" },
+  btnCancelText: { fontSize: 14, fontWeight: "600", color: "#555" },
+  btnLogout: { backgroundColor: "#C0392B" },
+  btnLogoutText: { fontSize: 14, fontWeight: "700", color: "#fff" },
 });

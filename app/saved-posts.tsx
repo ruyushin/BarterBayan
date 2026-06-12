@@ -22,6 +22,16 @@ const ACCENT_RED = "#C0392B";
 const SCREEN_WIDTH = Dimensions.get("window").width;
 const CARD_WIDTH = (SCREEN_WIDTH - 48) / 2;
 
+const SORT_OPTIONS = ["None", "Newest", "Oldest", "Most Liked"];
+const FILTER_CATEGORIES = [
+  "All",
+  "Electronics",
+  "Fashion",
+  "Living",
+  "School/Office",
+  "Household",
+];
+
 // ─── Types ────────────────────────────────────────────────────────────────────
 interface SavedItem {
   id: string;
@@ -58,6 +68,12 @@ const formatTime = (timestamp: any): string => {
   return date.toLocaleDateString("en-PH", { month: "short", day: "numeric" });
 };
 
+const toDate = (ts: any): Date => {
+  if (!ts) return new Date(0);
+  if (ts.toDate) return ts.toDate();
+  return new Date(ts);
+};
+
 // ─── Item Card ────────────────────────────────────────────────────────────────
 function SavedItemCard({
   item,
@@ -88,7 +104,6 @@ function SavedItemCard({
             <Text style={card.badgeText}>{item.category}</Text>
           </View>
         ) : null}
-        {/* Saved bookmark indicator */}
         <View style={card.savedBadge}>
           <Ionicons name="bookmark" size={12} color="#fff" />
         </View>
@@ -188,6 +203,12 @@ export default function SavedPostsScreen() {
   const [userId, setUserId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  // ── Filter / Sort state ──
+  const [sortType, setSortType] = useState("None");
+  const [filterCategory, setFilterCategory] = useState("All");
+  const [isSortOpen, setIsSortOpen] = useState(false);
+  const [isFilterOpen, setIsFilterOpen] = useState(false);
+
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (user) => {
       if (!user) {
@@ -232,41 +253,22 @@ export default function SavedPostsScreen() {
     } as any);
   };
 
-  // Render pairs of items as rows for the grid
-  const renderRow = ({ item }: { item: [SavedItem, SavedItem | null] }) => (
-    <View style={styles.row}>
-      <SavedItemCard
-        item={item[0]}
-        onPress={() => navigateToItem(item[0])}
-      />
-      {item[1] ? (
-        <SavedItemCard
-          item={item[1]}
-          onPress={() => navigateToItem(item[1]!)}
-        />
-      ) : (
-        <View style={{ width: CARD_WIDTH }} />
-      )}
+  // ── Shared header ──
+  const Header = () => (
+    <View style={styles.header}>
+      <TouchableOpacity onPress={handleBack} style={styles.backBtn}>
+        <Ionicons name="chevron-back" size={24} color="#fff" />
+      </TouchableOpacity>
+      <Text style={styles.headerTitle}>Saved Listings</Text>
+      <View style={{ width: 38 }} />
     </View>
   );
-
-  // Pair items into rows
-  const rows: [SavedItem, SavedItem | null][] = [];
-  for (let i = 0; i < savedItems.length; i += 2) {
-    rows.push([savedItems[i], savedItems[i + 1] ?? null]);
-  }
 
   // ── Loading ──
   if (loading) {
     return (
       <SafeAreaView style={styles.container}>
-        <View style={styles.header}>
-          <TouchableOpacity onPress={handleBack} style={styles.backBtn}>
-            <Ionicons name="chevron-back" size={24} color="#fff" />
-          </TouchableOpacity>
-          <Text style={styles.headerTitle}>Saved Listings</Text>
-          <View style={{ width: 38 }} />
-        </View>
+        <Header />
         <View style={styles.centered}>
           <ActivityIndicator size="large" color={NAVY} />
           <Text style={styles.loadingText}>Loading saved items…</Text>
@@ -279,13 +281,7 @@ export default function SavedPostsScreen() {
   if (error) {
     return (
       <SafeAreaView style={styles.container}>
-        <View style={styles.header}>
-          <TouchableOpacity onPress={handleBack} style={styles.backBtn}>
-            <Ionicons name="chevron-back" size={24} color="#fff" />
-          </TouchableOpacity>
-          <Text style={styles.headerTitle}>Saved Listings</Text>
-          <View style={{ width: 38 }} />
-        </View>
+        <Header />
         <View style={styles.centered}>
           <Ionicons name="cloud-offline-outline" size={52} color="#ddd" />
           <Text style={styles.errorTitle}>Something went wrong</Text>
@@ -303,13 +299,7 @@ export default function SavedPostsScreen() {
   if (savedItems.length === 0) {
     return (
       <SafeAreaView style={styles.container}>
-        <View style={styles.header}>
-          <TouchableOpacity onPress={handleBack} style={styles.backBtn}>
-            <Ionicons name="chevron-back" size={24} color="#fff" />
-          </TouchableOpacity>
-          <Text style={styles.headerTitle}>Saved Listings</Text>
-          <View style={{ width: 38 }} />
-        </View>
+        <Header />
         <View style={styles.centered}>
           <View style={styles.emptyIconWrap}>
             <Ionicons name="bookmark-outline" size={40} color={NAVY} />
@@ -331,15 +321,132 @@ export default function SavedPostsScreen() {
     );
   }
 
+  // ── Filter + Sort (only computed when items exist) ──
+  const filteredItems = savedItems
+    .filter((item) =>
+      filterCategory === "All" || item.category === filterCategory
+    )
+    .sort((a, b) => {
+      if (sortType === "Newest")
+        return toDate(b.createdAt).getTime() - toDate(a.createdAt).getTime();
+      if (sortType === "Oldest")
+        return toDate(a.createdAt).getTime() - toDate(b.createdAt).getTime();
+      if (sortType === "Most Liked") return (b.likes ?? 0) - (a.likes ?? 0);
+      return 0;
+    });
+
+  const rows: [SavedItem, SavedItem | null][] = [];
+  for (let i = 0; i < filteredItems.length; i += 2) {
+    rows.push([filteredItems[i], filteredItems[i + 1] ?? null]);
+  }
+
+  const renderRow = ({ item }: { item: [SavedItem, SavedItem | null] }) => (
+    <View style={styles.row}>
+      <SavedItemCard item={item[0]} onPress={() => navigateToItem(item[0])} />
+      {item[1] ? (
+        <SavedItemCard item={item[1]} onPress={() => navigateToItem(item[1]!)} />
+      ) : (
+        <View style={{ width: CARD_WIDTH }} />
+      )}
+    </View>
+  );
+
   // ── List ──
   return (
     <SafeAreaView style={styles.container}>
-      <View style={styles.header}>
-        <TouchableOpacity onPress={handleBack} style={styles.backBtn}>
-          <Ionicons name="chevron-back" size={24} color="#fff" />
-        </TouchableOpacity>
-        <Text style={styles.headerTitle}>Saved Listings</Text>
-        <View style={{ width: 38 }} />
+      <Header />
+
+      {/* ── Sort / Filter bar ── */}
+      <View style={styles.controlRow}>
+        {/* Sort dropdown */}
+        <View style={styles.dropdownWrapper}>
+          <TouchableOpacity
+            style={styles.smallButton}
+            onPress={() => {
+              setIsSortOpen((p) => !p);
+              setIsFilterOpen(false);
+            }}
+          >
+            <Ionicons name="swap-vertical" size={14} color="#333" />
+            <Text style={styles.smallText}>Sort ({sortType})</Text>
+            <Ionicons
+              name={isSortOpen ? "chevron-up" : "chevron-down"}
+              size={12}
+              color="#555"
+            />
+          </TouchableOpacity>
+          {isSortOpen && (
+            <View style={styles.dropdown}>
+              {SORT_OPTIONS.map((opt) => (
+                <TouchableOpacity
+                  key={opt}
+                  style={styles.dropdownItem}
+                  onPress={() => {
+                    setSortType(opt);
+                    setIsSortOpen(false);
+                  }}
+                >
+                  <Text
+                    style={[
+                      styles.dropdownText,
+                      sortType === opt && styles.dropdownTextActive,
+                    ]}
+                  >
+                    {opt}
+                  </Text>
+                  {sortType === opt && (
+                    <Ionicons name="checkmark" size={13} color="#5E3EA1" />
+                  )}
+                </TouchableOpacity>
+              ))}
+            </View>
+          )}
+        </View>
+
+        {/* Filter dropdown */}
+        <View style={styles.dropdownWrapper}>
+          <TouchableOpacity
+            style={styles.smallButton}
+            onPress={() => {
+              setIsFilterOpen((p) => !p);
+              setIsSortOpen(false);
+            }}
+          >
+            <Ionicons name="funnel" size={14} color="#333" />
+            <Text style={styles.smallText}>Filter ({filterCategory})</Text>
+            <Ionicons
+              name={isFilterOpen ? "chevron-up" : "chevron-down"}
+              size={12}
+              color="#555"
+            />
+          </TouchableOpacity>
+          {isFilterOpen && (
+            <View style={styles.dropdown}>
+              {FILTER_CATEGORIES.map((cat) => (
+                <TouchableOpacity
+                  key={cat}
+                  style={styles.dropdownItem}
+                  onPress={() => {
+                    setFilterCategory(cat);
+                    setIsFilterOpen(false);
+                  }}
+                >
+                  <Text
+                    style={[
+                      styles.dropdownText,
+                      filterCategory === cat && styles.dropdownTextActive,
+                    ]}
+                  >
+                    {cat}
+                  </Text>
+                  {filterCategory === cat && (
+                    <Ionicons name="checkmark" size={13} color="#5E3EA1" />
+                  )}
+                </TouchableOpacity>
+              ))}
+            </View>
+          )}
+        </View>
       </View>
 
       <FlatList
@@ -352,8 +459,18 @@ export default function SavedPostsScreen() {
         onRefresh={handleRefresh}
         ListHeaderComponent={
           <Text style={styles.countLabel}>
-            {savedItems.length} saved {savedItems.length === 1 ? "item" : "items"}
+            {filteredItems.length} saved{" "}
+            {filteredItems.length === 1 ? "item" : "items"}
           </Text>
+        }
+        ListEmptyComponent={
+          <View style={styles.centered}>
+            <Ionicons name="search-outline" size={40} color="#ccc" />
+            <Text style={styles.emptyTitle}>No matches</Text>
+            <Text style={styles.emptyMessage}>
+              Try a different filter or sort option.
+            </Text>
+          </View>
         }
       />
     </SafeAreaView>
@@ -372,6 +489,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingTop: 32,
     paddingBottom: 14,
+    marginTop: 16,
   },
   backBtn: {
     width: 38,
@@ -433,6 +551,58 @@ const styles = StyleSheet.create({
     elevation: 3,
   },
   primaryBtnText: { color: "#fff", fontWeight: "700", fontSize: 14 },
+
+  // ── Sort / Filter bar ──
+  controlRow: {
+    flexDirection: "row",
+    paddingHorizontal: 16,
+    paddingTop: 12,
+    paddingBottom: 4,
+    gap: 8,
+    zIndex: 20,
+  },
+  dropdownWrapper: {
+    position: "relative",
+    zIndex: 20,
+  },
+  smallButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#d0d0d0",
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: 8,
+    gap: 5,
+  },
+  smallText: { fontSize: 13, color: "#444" },
+  dropdown: {
+    position: "absolute",
+    top: 38,
+    left: 0,
+    backgroundColor: "#fff",
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: "#DDD",
+    overflow: "hidden",
+    minWidth: 160,
+    shadowColor: "#000",
+    shadowOpacity: 0.1,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 3 },
+    elevation: 10,
+    zIndex: 999,
+  },
+  dropdownItem: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    paddingVertical: 12,
+    paddingHorizontal: 15,
+    borderBottomWidth: 1,
+    borderBottomColor: "#F0F0F0",
+  },
+  dropdownText: { fontSize: 13, color: "#333" },
+  dropdownTextActive: { fontWeight: "700", color: "#2f2f6f" },
 
   listContent: { padding: 16, paddingBottom: 100 },
   countLabel: {

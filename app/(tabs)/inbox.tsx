@@ -39,6 +39,12 @@ import {
 // ── NEW: needed to fetch the trade and open TradeChatModal ──
 import { TradeChatModal } from "../../components/TradeChatModal";
 import { TradeOffer, getTradeOffer } from "../../services/tradeService";
+// ── NEW: push notifications ──
+import * as Notifications from "expo-notifications";
+import {
+  addNotificationListeners,
+  registerForPushNotificationsAsync,
+} from "../../services/pushNotificationService";
 // ─── Constants
 const NAVY = "#2e2d7c";
 const ACCENT = "#f5c518";
@@ -347,6 +353,8 @@ export default function InboxScreen() {
   const router = useRouter();
   const currentUserId = auth.currentUser?.uid;
   const conversationUnsubscribeRef = useRef<(() => void) | null>(null);
+  // ── NEW: cleanup ref for push notification listeners
+  const notificationListenerCleanup = useRef<(() => void) | null>(null);
   const openSheet = (title: string | undefined, options: SheetOption[]) => {
     setSheetTitle(title);
     setSheetOptions(options);
@@ -718,8 +726,50 @@ export default function InboxScreen() {
   ).length;
   // Keep tab bar badge in sync
   useEffect(() => {
-    badgeStore.setCount(unreadConversationsCount + unreadCount);
+    const total = unreadConversationsCount + unreadCount;
+    badgeStore.setCount(total);
+    // NEW: keep the OS app icon badge in sync too
+    Notifications.setBadgeCountAsync(total).catch(() => {});
   }, [unreadConversationsCount, unreadCount]);
+
+  // ── NEW: register for push notifications and listen for incoming/tapped notifications
+  useEffect(() => {
+    if (!currentUserId) return;
+
+    registerForPushNotificationsAsync(currentUserId).catch((err) =>
+      console.error("Push registration failed:", err),
+    );
+
+    notificationListenerCleanup.current = addNotificationListeners(
+      () => {
+        // App in foreground received a push — refresh the in-app list
+        loadNotifications();
+      },
+      (response) => {
+        // User tapped a system notification
+        const data: any = response?.notification?.request?.content?.data ?? {};
+        if (data.tradeId) {
+          openTradeChat(data.tradeId);
+        } else if (data.type === "message" && data.otherUserId) {
+          router.push({
+            pathname: "/chat",
+            params: { ownerUserId: data.otherUserId },
+          });
+        } else if (
+          data.type === "trade_offer" ||
+          data.type === "trade_accepted"
+        ) {
+          router.push({ pathname: "/trade", params: {} });
+        }
+      },
+    );
+
+    return () => {
+      notificationListenerCleanup.current?.();
+      notificationListenerCleanup.current = null;
+    };
+  }, [currentUserId]);
+
   const totalUnreadBadge =
     unreadConversationsCount > 99 ? "99+" : unreadConversationsCount.toString();
   // ─── Renders

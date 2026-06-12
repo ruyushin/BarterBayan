@@ -17,6 +17,7 @@ import React, { useEffect, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
+  Image,
   KeyboardAvoidingView,
   Platform,
   Pressable,
@@ -308,9 +309,16 @@ export default function LoginScreen() {
         keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator={false}
       >
+        <View style={styles.logoContainer}>
+          <Image
+            source={require("../../assets/images/title.png")}
+            style={styles.logo}
+            resizeMode="contain"
+          />
+        </View>
+
         <View style={styles.header}>
-          <Text style={styles.headerText}>Welcome</Text>
-          <Text style={styles.headerText}>Back!</Text>
+          <Text style={styles.headerText}>Welcome Back!</Text>
         </View>
 
         <View
@@ -461,12 +469,20 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     paddingVertical: 40,
   },
+  logoContainer: {
+    alignItems: "center",
+    marginBottom: 24,
+  },
+  logo: {
+    width: 120,
+    height: 120,
+  },
   header: { marginBottom: 40 },
   headerText: {
-    fontSize: 48,
+    fontSize: 40,
     fontWeight: "bold",
-    textAlign: "left",
-    lineHeight: 42,
+    textAlign: "center",
+    lineHeight: 46,
     color: "#000000",
   },
   inputContainer: {

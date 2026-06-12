@@ -2,7 +2,7 @@
   "expo": {
     "name": "BarterBayan",
     "slug": "barterbayan",
-    "owner": "monarkuu",
+    "owner": "ruyushinn",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
@@ -14,6 +14,7 @@
     },
     "android": {
       "googleServicesFile": "./google-services.json",
+      "useNextNotificationsApi": true,
       "intentFilters": [
         {
           "action": "VIEW",
@@ -23,7 +24,10 @@
               "scheme": "barterbayanv10"
             }
           ],
-          "category": ["BROWSABLE", "DEFAULT"]
+          "category": [
+            "BROWSABLE",
+            "DEFAULT"
+          ]
         }
       ],
       "adaptiveIcon": {
@@ -51,6 +55,14 @@
           "resizeMode": "contain",
           "backgroundColor": "#FFFFFF"
         }
+      ],
+      "@react-native-community/datetimepicker",
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/images/notification-icon.png",
+          "color": "#2e2d7c"
+        }
       ]
     ],
     "experiments": {
@@ -60,7 +72,7 @@
     "extra": {
       "router": {},
       "eas": {
-        "projectId": "0f707a59-f8bc-4a36-9683-9095d0729577"
+        "projectId": "0dd1ff22-49ae-4540-ad40-63c6223c78af"
       }
     }
   }

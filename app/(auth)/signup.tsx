@@ -9,6 +9,7 @@ import React, { useRef, useState } from "react";
 import {
   Alert,
   Animated,
+  Image,
   Modal,
   Pressable,
   ScrollView,
@@ -20,6 +21,27 @@ import {
 } from "react-native";
 import { auth, db } from "../../firebaseConfig";
 
+function RequirementRow({ met, label }: { met: boolean; label: string }) {
+  return (
+    <View style={styles.requirementRow}>
+      <MaterialIcons
+        name={met ? "check-circle" : "radio-button-unchecked"}
+        size={16}
+        color={met ? "#5CB85C" : "#ADADAD"}
+        style={{ marginRight: 8 }}
+      />
+      <Text
+        style={[
+          styles.requirementText,
+          { color: met ? "#5CB85C" : "#999999" },
+        ]}
+      >
+        {label}
+      </Text>
+    </View>
+  );
+}
+
 export default function SignUpScreen() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -28,6 +50,12 @@ export default function SignUpScreen() {
     score: 0,
     label: "Very Weak",
     color: "#D9534F",
+  });
+  const [pwChecks, setPwChecks] = useState({
+    length: false,
+    uppercase: false,
+    number: false,
+    special: false,
   });
   const strengthOpacity = useRef(new Animated.Value(0)).current;
   const strengthTimer = useRef<any>(null);
@@ -82,6 +110,12 @@ export default function SignUpScreen() {
     setPassword(text);
     setErrors((e) => ({ ...e, password: undefined }));
     setPwStrength(evaluatePassword(text));
+    setPwChecks({
+      length: text.length >= 6,
+      uppercase: /[A-Z]/.test(text),
+      number: /[0-9]/.test(text),
+      special: /[^A-Za-z0-9]/.test(text),
+    });
     setIsTyping(true);
     Animated.timing(strengthOpacity, {
       toValue: 1,
@@ -109,8 +143,14 @@ export default function SignUpScreen() {
 
     if (!password) {
       nextErrors.password = "Password is required";
-    } else if (password.length < 6) {
-      nextErrors.password = "Password must be at least 6 characters";
+    } else if (
+      !pwChecks.length ||
+      !pwChecks.uppercase ||
+      !pwChecks.number ||
+      !pwChecks.special
+    ) {
+      nextErrors.password =
+        "Password must be at least 6 characters and include an uppercase letter, a number, and a special character.";
     }
 
     if (password !== confirm) {
@@ -125,7 +165,6 @@ export default function SignUpScreen() {
     setIsSubmitting(true);
     await createEmailAccount(email.trim(), password);
   };
-
   const createEmailAccount = async (email: string, password: string) => {
     setIsSubmitting(true);
     let user;
@@ -191,6 +230,14 @@ export default function SignUpScreen() {
     <View style={{ flex: 1 }}>
       <ScrollView style={[styles.container, { backgroundColor: "#ffffff" }]}>
         <View style={styles.content}>
+          <View style={styles.logoContainer}>
+            <Image
+              source={require("../../assets/images/title.png")}
+              style={styles.logo}
+              resizeMode="contain"
+            />
+          </View>
+
           <View style={styles.header}>
             <Text style={[styles.headerGradient, { color: textColor }]}>
               Create an
@@ -274,6 +321,25 @@ export default function SignUpScreen() {
                 />
               </View>
             </AnimatedAny.View>
+          )}
+
+          {/* Password Requirements Checklist */}
+          {password.length > 0 && (
+            <View style={styles.requirementsBox}>
+              <RequirementRow
+                met={pwChecks.length}
+                label="At least 6 characters"
+              />
+              <RequirementRow
+                met={pwChecks.uppercase}
+                label="One uppercase letter"
+              />
+              <RequirementRow met={pwChecks.number} label="One number" />
+              <RequirementRow
+                met={pwChecks.special}
+                label="One special character"
+              />
+            </View>
           )}
 
           {/* Confirm Password Input */}
@@ -365,7 +431,15 @@ export default function SignUpScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
-  content: { padding: 20, paddingTop: 60 },
+  content: { padding: 20, paddingTop: 40 },
+  logoContainer: {
+    alignItems: "center",
+    marginBottom: 16,
+  },
+  logo: {
+    width: 110,
+    height: 110,
+  },
   header: { marginBottom: 40 },
   headerGradient: {
     fontSize: 36,
@@ -398,6 +472,21 @@ const styles = StyleSheet.create({
     overflow: "hidden",
   },
   strengthFill: { height: "100%" },
+  requirementsBox: {
+    backgroundColor: "#F7F7FA",
+    borderRadius: 10,
+    padding: 12,
+    marginBottom: 16,
+    gap: 6,
+  },
+  requirementRow: {
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  requirementText: {
+    fontSize: 13,
+    fontWeight: "500",
+  },
   signupButton: {
     backgroundColor: "#2F2F6F",
     height: 55,
