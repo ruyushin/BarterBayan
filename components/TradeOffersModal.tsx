@@ -3,8 +3,11 @@ import { doc, getDoc } from "firebase/firestore";
 import React, { useEffect, useState } from "react";
 import {
   ActivityIndicator,
+  Alert,
   Image,
+  KeyboardAvoidingView,
   Modal,
+  Platform,
   SectionList,
   StyleSheet,
   Text,
@@ -24,12 +27,10 @@ import {
 import { TradeChatModal } from "./TradeChatModal";
 
 const NAVY = "#2f2f6f";
-const GREEN = "#27AE60";
 const RED = "#C0392B";
-const GOLD = "#C9A227";
 const COMPLETE_GREEN = "#16A34A";
 
-// ─── Section config (same order/palette as trade.tsx) ────────────────────────
+// ─── Status colours ───────────────────────────────────────────────────────────
 const STATUS_COLORS: Record<string, { bg: string; text: string }> = {
   pending: { bg: "#FFF7ED", text: "#D97706" },
   accepted: { bg: "#F0FDF4", text: "#16A34A" },
@@ -48,6 +49,15 @@ const OFFER_SECTIONS: {
   { key: "completed", label: "Completed", icon: "trophy" },
   { key: "declined", label: "Declined", icon: "close-circle" },
   { key: "cancelled", label: "Cancelled", icon: "ban" },
+];
+
+// ─── Decline presets (same as in trade.tsx DeclineReasonModal) ────────────────
+const DECLINE_PRESETS = [
+  "Item no longer available",
+  "Not interested in the offered trade",
+  "Condition mismatch",
+  "Looking for a different category",
+  "Other",
 ];
 
 interface TradeOffersModalProps {
@@ -74,7 +84,7 @@ async function fetchOffererName(uid: string): Promise<string> {
   return "Unknown User";
 }
 
-// ─── Sub-components ───────────────────────────────────────────────────────────
+// ─── StarRating ───────────────────────────────────────────────────────────────
 function StarRating({
   rating,
   onRate,
@@ -106,7 +116,7 @@ function StarRating({
   );
 }
 
-// ─── Section header (matches trade.tsx style) ─────────────────────────────────
+// ─── Section header ───────────────────────────────────────────────────────────
 function SectionHeader({
   sectionKey,
   label,
@@ -136,6 +146,139 @@ function SectionHeader({
   );
 }
 
+// ─── DeclineReasonSheet ───────────────────────────────────────────────────────
+// Rendered as a second Modal on top of TradeOffersModal so it works on all
+// platforms. Calls onConfirm(reason) when the user submits.
+function DeclineReasonSheet({
+  visible,
+  offererName,
+  onConfirm,
+  onCancel,
+}: {
+  visible: boolean;
+  offererName: string;
+  onConfirm: (reason: string) => Promise<void>;
+  onCancel: () => void;
+}) {
+  const [selected, setSelected] = useState<string | null>(null);
+  const [customReason, setCustomReason] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+
+  const reset = () => {
+    setSelected(null);
+    setCustomReason("");
+    setSubmitting(false);
+  };
+
+  const handleConfirm = async () => {
+    const reason =
+      selected === "Other" ? customReason.trim() : (selected ?? "");
+    if (!reason) {
+      Alert.alert("Reason required", "Please select or enter a reason.");
+      return;
+    }
+    setSubmitting(true);
+    try {
+      await onConfirm(reason);
+      reset();
+    } catch {
+      Alert.alert("Error", "Could not decline the offer. Please try again.");
+      setSubmitting(false);
+    }
+  };
+
+  const handleCancel = () => {
+    reset();
+    onCancel();
+  };
+
+  return (
+    <Modal
+      visible={visible}
+      transparent
+      animationType="fade"
+      statusBarTranslucent
+      onRequestClose={handleCancel}
+    >
+      <KeyboardAvoidingView
+        behavior={Platform.OS === "ios" ? "padding" : "padding"}
+        style={declineStyles.overlay}
+      >
+        <View style={declineStyles.sheet}>
+          <View style={declineStyles.handle} />
+          <Text style={declineStyles.title}>Decline Offer</Text>
+          <Text style={declineStyles.subtitle}>
+            Let {offererName} know why you're declining (optional but helpful):
+          </Text>
+
+          {DECLINE_PRESETS.map((preset) => (
+            <TouchableOpacity
+              key={preset}
+              style={[
+                declineStyles.option,
+                selected === preset && declineStyles.optionActive,
+              ]}
+              onPress={() => setSelected(preset)}
+              activeOpacity={0.8}
+              disabled={submitting}
+            >
+              <View
+                style={[
+                  declineStyles.radio,
+                  selected === preset && declineStyles.radioActive,
+                ]}
+              />
+              <Text
+                style={[
+                  declineStyles.optionText,
+                  selected === preset && declineStyles.optionTextActive,
+                ]}
+              >
+                {preset}
+              </Text>
+            </TouchableOpacity>
+          ))}
+
+          {selected === "Other" && (
+            <TextInput
+              style={declineStyles.input}
+              placeholder="Describe your reason…"
+              placeholderTextColor="#AAA"
+              value={customReason}
+              onChangeText={setCustomReason}
+              multiline
+              maxLength={200}
+              editable={!submitting}
+              textAlignVertical="top"
+            />
+          )}
+
+          <View style={declineStyles.actions}>
+            <TouchableOpacity
+              style={declineStyles.cancelBtn}
+              onPress={handleCancel}
+              activeOpacity={0.8}
+              disabled={submitting}
+            >
+              <Text style={declineStyles.cancelText}>Cancel</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[declineStyles.confirmBtn, submitting && { opacity: 0.6 }]}
+              onPress={handleConfirm}
+              activeOpacity={0.8}
+              disabled={submitting}
+            >
+              <Text style={declineStyles.confirmText}>
+                {submitting ? "Declining…" : "Decline Offer"}
+              </Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </KeyboardAvoidingView>
+    </Modal>
+  );
+}
+
 // ─── Main component ───────────────────────────────────────────────────────────
 export const TradeOffersModal: React.FC<TradeOffersModalProps> = ({
   visible,
@@ -158,6 +301,9 @@ export const TradeOffersModal: React.FC<TradeOffersModalProps> = ({
   const [reviewRating, setReviewRating] = useState(0);
   const [reviewComment, setReviewComment] = useState("");
   const [submittingReview, setSubmittingReview] = useState(false);
+
+  // FIX: decline-with-reason state
+  const [declineTarget, setDeclineTarget] = useState<TradeOffer | null>(null);
 
   const currentUser = auth.currentUser;
   const myUid = currentUser?.uid ?? "";
@@ -184,18 +330,28 @@ export const TradeOffersModal: React.FC<TradeOffersModalProps> = ({
       setOffers([]);
       setChatTrade(null);
       setOptimisticMarked(new Set());
+      setDeclineTarget(null);
     }
   }, [visible]);
 
-  const handleStatus = async (
-    offer: TradeOffer,
-    newStatus: "accepted" | "declined",
-  ) => {
+  // FIX: accept goes straight through; decline opens the reason sheet first
+  const handleAccept = async (offer: TradeOffer) => {
     setActioning(offer.id);
     try {
-      await updateTradeStatus(offer.id, newStatus);
+      await updateTradeStatus(offer.id, "accepted");
     } finally {
       setActioning(null);
+    }
+  };
+
+  const handleDeclineWithReason = async (reason: string) => {
+    if (!declineTarget) return;
+    setActioning(declineTarget.id);
+    try {
+      await updateTradeStatus(declineTarget.id, "declined", reason);
+    } finally {
+      setActioning(null);
+      setDeclineTarget(null);
     }
   };
 
@@ -237,7 +393,6 @@ export const TradeOffersModal: React.FC<TradeOffersModalProps> = ({
     }
   };
 
-  // Build sections — only include non-empty groups
   const offerSections = OFFER_SECTIONS.map((section) => ({
     ...section,
     data: offers.filter((o) => o.status === section.key),
@@ -245,10 +400,9 @@ export const TradeOffersModal: React.FC<TradeOffersModalProps> = ({
 
   const totalVisible = offers.length;
 
-  // ─── Render a single offer row with all interactive controls ───────────────
+  // ─── Render a single offer row ────────────────────────────────────────────
   const renderOfferItem = ({
     item: offer,
-    section,
   }: {
     item: TradeOffer;
     section: (typeof offerSections)[number];
@@ -273,9 +427,12 @@ export const TradeOffersModal: React.FC<TradeOffersModalProps> = ({
       offer.reviews?.[offer.offererId];
     const bothReviewed = !!myReview && !!theirReview;
 
+    // FIX: show decline reason banner when the offer was declined with a reason
+    const declineReason = (offer as any).declineReason as string | undefined;
+
     return (
       <View style={s2.card}>
-        {/* ── Offerer header ── */}
+        {/* Offerer header */}
         <View style={s2.cardHeader}>
           {offer.offererAvatar ? (
             <Image
@@ -303,7 +460,7 @@ export const TradeOffersModal: React.FC<TradeOffersModalProps> = ({
           </View>
         </View>
 
-        {/* ── Offered item ── */}
+        {/* Offered item */}
         <View style={s2.cardItem}>
           {offer.offeredItemImage ? (
             <Image
@@ -323,7 +480,7 @@ export const TradeOffersModal: React.FC<TradeOffersModalProps> = ({
           </View>
         </View>
 
-        {/* ── Optional message ── */}
+        {/* Optional message */}
         {offer.message ? (
           <View style={s2.cardMessage}>
             <Ionicons
@@ -337,7 +494,19 @@ export const TradeOffersModal: React.FC<TradeOffersModalProps> = ({
           </View>
         ) : null}
 
-        {/* ── Actions row ── */}
+        {/* FIX: decline reason banner */}
+        {offer.status === "declined" && declineReason ? (
+          <View style={s2.declineReasonBanner}>
+            <Ionicons
+              name="information-circle-outline"
+              size={14}
+              color="#E11D48"
+            />
+            <Text style={s2.declineReasonText}>Reason: {declineReason}</Text>
+          </View>
+        ) : null}
+
+        {/* Actions row */}
         <View style={s2.cardActions}>
           <TouchableOpacity
             style={s2.msgBtn}
@@ -350,9 +519,10 @@ export const TradeOffersModal: React.FC<TradeOffersModalProps> = ({
 
           {isPending && (
             <>
+              {/* FIX: Decline now opens the reason sheet instead of acting immediately */}
               <TouchableOpacity
                 style={[s2.actionBtn, s2.declineBtn]}
-                onPress={() => handleStatus(offer, "declined")}
+                onPress={() => setDeclineTarget(offer)}
                 disabled={isActioning}
                 activeOpacity={0.8}
               >
@@ -366,7 +536,7 @@ export const TradeOffersModal: React.FC<TradeOffersModalProps> = ({
               </TouchableOpacity>
               <TouchableOpacity
                 style={[s2.actionBtn, s2.acceptBtn]}
-                onPress={() => handleStatus(offer, "accepted")}
+                onPress={() => handleAccept(offer)}
                 disabled={isActioning}
                 activeOpacity={0.8}
               >
@@ -382,7 +552,7 @@ export const TradeOffersModal: React.FC<TradeOffersModalProps> = ({
           )}
         </View>
 
-        {/* ── Mark as Finished (accepted only) ── */}
+        {/* Mark as Finished (accepted only) */}
         {isAccepted &&
           (hasMarked ? (
             <View style={s2.waitingBanner}>
@@ -423,7 +593,7 @@ export const TradeOffersModal: React.FC<TradeOffersModalProps> = ({
             </TouchableOpacity>
           ))}
 
-        {/* ── Completed banner ── */}
+        {/* Completed banner */}
         {isCompleted && (
           <View style={s2.completedBanner}>
             <Ionicons name="trophy" size={15} color={COMPLETE_GREEN} />
@@ -431,7 +601,7 @@ export const TradeOffersModal: React.FC<TradeOffersModalProps> = ({
           </View>
         )}
 
-        {/* ── Review section (completed only) ── */}
+        {/* Review section */}
         {isCompleted && !myReview && (
           <TouchableOpacity
             style={s2.reviewBtn}
@@ -538,7 +708,7 @@ export const TradeOffersModal: React.FC<TradeOffersModalProps> = ({
         </View>
       </Modal>
 
-      {/* ── Chat modal ── */}
+      {/* Chat modal */}
       <TradeChatModal
         visible={!!chatTrade}
         trade={chatTrade}
@@ -553,7 +723,21 @@ export const TradeOffersModal: React.FC<TradeOffersModalProps> = ({
         }}
       />
 
-      {/* ── Review modal ── */}
+      {/* FIX: Decline reason sheet — separate Modal so it layers correctly */}
+      <DeclineReasonSheet
+        visible={!!declineTarget}
+        offererName={
+          declineTarget
+            ? offererNames[declineTarget.offererId] ||
+              declineTarget.offererName ||
+              "the offerer"
+            : ""
+        }
+        onConfirm={handleDeclineWithReason}
+        onCancel={() => setDeclineTarget(null)}
+      />
+
+      {/* Review modal */}
       <Modal
         visible={!!reviewOffer}
         transparent
@@ -617,7 +801,87 @@ export const TradeOffersModal: React.FC<TradeOffersModalProps> = ({
   );
 };
 
-// ─── Styles ───────────────────────────────────────────────────────────────────
+// ─── Decline sheet styles ─────────────────────────────────────────────────────
+const declineStyles = StyleSheet.create({
+  overlay: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.5)",
+    justifyContent: "flex-end",
+  },
+  sheet: {
+    backgroundColor: "#fff",
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    padding: 24,
+    paddingBottom: 40,
+  },
+  handle: {
+    width: 40,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: "#DDD",
+    alignSelf: "center",
+    marginBottom: 18,
+  },
+  title: { fontSize: 18, fontWeight: "700", color: "#1F1F1F", marginBottom: 6 },
+  subtitle: { fontSize: 13, color: "#666", marginBottom: 16, lineHeight: 18 },
+  option: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    paddingVertical: 11,
+    paddingHorizontal: 14,
+    borderRadius: 10,
+    borderWidth: 1.5,
+    borderColor: "#E5E7EB",
+    marginBottom: 8,
+    backgroundColor: "#FAFAFA",
+  },
+  optionActive: { borderColor: NAVY, backgroundColor: "#EEF0FF" },
+  radio: {
+    width: 16,
+    height: 16,
+    borderRadius: 8,
+    borderWidth: 2,
+    borderColor: "#CCC",
+  },
+  radioActive: { borderColor: NAVY, backgroundColor: NAVY },
+  optionText: { fontSize: 14, color: "#444" },
+  optionTextActive: { color: NAVY, fontWeight: "600" },
+  input: {
+    borderWidth: 1,
+    borderColor: "#E0E0E0",
+    borderRadius: 10,
+    padding: 12,
+    fontSize: 13,
+    color: "#333",
+    minHeight: 70,
+    marginBottom: 16,
+    marginTop: 4,
+    textAlignVertical: "top",
+  },
+  actions: { flexDirection: "row", gap: 10, marginTop: 8 },
+  cancelBtn: {
+    flex: 1,
+    paddingVertical: 13,
+    borderRadius: 12,
+    alignItems: "center",
+    backgroundColor: "#F3F4F6",
+    borderWidth: 1,
+    borderColor: "#E0E0E0",
+  },
+  cancelText: { fontSize: 14, fontWeight: "600", color: "#555" },
+  confirmBtn: {
+    flex: 1,
+    paddingVertical: 13,
+    borderRadius: 12,
+    alignItems: "center",
+    backgroundColor: "#E11D48",
+  },
+  confirmText: { fontSize: 14, fontWeight: "700", color: "#fff" },
+});
+
+// ─── Main styles ──────────────────────────────────────────────────────────────
 const s2 = StyleSheet.create({
   overlay: {
     flex: 1,
@@ -673,7 +937,6 @@ const s2 = StyleSheet.create({
   },
   list: { paddingHorizontal: 20, paddingBottom: 8 },
 
-  // ── Section header (matches trade.tsx) ──────────────────────────────────
   sectionHeader: {
     flexDirection: "row",
     alignItems: "center",
@@ -707,7 +970,6 @@ const s2 = StyleSheet.create({
   },
   sectionHeaderBadgeText: { fontSize: 12, fontWeight: "700" },
 
-  // ── Offer card ───────────────────────────────────────────────────────────
   card: {
     backgroundColor: "#FAFAFA",
     borderRadius: 16,
@@ -770,6 +1032,26 @@ const s2 = StyleSheet.create({
     flex: 1,
     lineHeight: 18,
   },
+
+  // FIX: decline reason banner
+  declineReasonBanner: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: 6,
+    backgroundColor: "#FFF1F2",
+    borderRadius: 8,
+    padding: 9,
+    marginBottom: 10,
+    borderWidth: 1,
+    borderColor: "#FECDD3",
+  },
+  declineReasonText: {
+    fontSize: 12,
+    color: "#E11D48",
+    flex: 1,
+    lineHeight: 17,
+  },
+
   cardActions: { flexDirection: "row", gap: 8, alignItems: "center" },
   msgBtn: {
     flexDirection: "row",
@@ -798,7 +1080,6 @@ const s2 = StyleSheet.create({
   acceptBtn: { backgroundColor: NAVY },
   actionBtnText: { fontSize: 13, fontWeight: "700" },
 
-  // ── Mark as finished ─────────────────────────────────────────────────────
   markBtn: {
     flexDirection: "row",
     alignItems: "center",
@@ -819,7 +1100,6 @@ const s2 = StyleSheet.create({
     textAlign: "center",
   },
 
-  // ── Waiting banner ───────────────────────────────────────────────────────
   waitingBanner: {
     flexDirection: "row",
     alignItems: "flex-start",
@@ -841,7 +1121,6 @@ const s2 = StyleSheet.create({
   },
   waitingSubtitle: { fontSize: 12, color: "#92400E", lineHeight: 16 },
 
-  // ── Completed ────────────────────────────────────────────────────────────
   completedBanner: {
     flexDirection: "row",
     alignItems: "center",
@@ -855,7 +1134,6 @@ const s2 = StyleSheet.create({
   },
   completedText: { fontSize: 13, fontWeight: "700", color: COMPLETE_GREEN },
 
-  // ── Review ───────────────────────────────────────────────────────────────
   reviewBtn: {
     flexDirection: "row",
     alignItems: "center",
@@ -913,7 +1191,6 @@ const s2 = StyleSheet.create({
   },
   closeBarText: { fontSize: 15, fontWeight: "600", color: "#888" },
 
-  // ── Review modal ─────────────────────────────────────────────────────────
   reviewOverlay: {
     flex: 1,
     backgroundColor: "rgba(0,0,0,0.5)",

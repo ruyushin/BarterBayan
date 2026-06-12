@@ -23,6 +23,7 @@ import {
   View,
   ViewStyle,
 } from "react-native";
+import { ItemDetailsCard } from "../components/ItemDetailsCard";
 import { auth } from "../firebaseConfig.ts";
 import {
   getUserInfo,
@@ -134,7 +135,6 @@ function MediaItem({ uri }: { uri: string }) {
       <Image
         source={{ uri }}
         style={media.image}
-        // FIX: was "cover" which zoomed/cropped — "contain" shows the full image
         resizeMode="contain"
         onError={() => setImgError(true)}
       />
@@ -198,8 +198,6 @@ export default function ProductDetailsScreen() {
       try {
         const itemData = JSON.parse(params.item);
         setItem(itemData);
-        // Read from shared likeCache first — it holds the freshest value
-        // written by either this screen or ProductDetailModal.
         const cached = getLikeState(itemData.id);
         if (cached) {
           setIsLiked(cached.isLiked);
@@ -254,7 +252,6 @@ export default function ProductDetailsScreen() {
       const newCount = nowLiked ? likeCount + 1 : Math.max(0, likeCount - 1);
       setIsLiked(nowLiked);
       setLikeCount(newCount);
-      // Write to shared cache so ProductDetailModal picks up the change.
       setLikeState(item.id, nowLiked, newCount);
       if (nowLiked) {
         await trackUserActivity(currentUser, "like", item.id, item.category);
@@ -439,7 +436,7 @@ export default function ProductDetailsScreen() {
               />
             )}
 
-            {/* Save button — top right */}
+            {/* Save button */}
             {mediaItems.length > 0 &&
               !isVideoUrl(mediaItems[currentMediaIndex]) && (
                 <TouchableOpacity
@@ -474,52 +471,18 @@ export default function ProductDetailsScreen() {
           <View style={styles.content}>
             <Text style={styles.title}>{item?.title}</Text>
 
-            {/* Details section */}
-            <View style={styles.detailsSection}>
-              <Text style={styles.detailsHeader}>Details</Text>
-
-              {!!item?.description && (
-                <View style={styles.descriptionContainer}>
-                  <Text style={styles.descriptionText}>
-                    {descriptionExpanded
-                      ? item.description
-                      : item.description.length > 300
-                        ? item.description.substring(0, 300) + "..."
-                        : item.description}
-                  </Text>
-                  {item.description.length > 300 && (
-                    <TouchableOpacity
-                      onPress={() =>
-                        setDescriptionExpanded(!descriptionExpanded)
-                      }
-                      style={styles.seeMoreButton}
-                    >
-                      <Text style={styles.seeMoreText}>
-                        {descriptionExpanded ? "See less" : "See more"}
-                      </Text>
-                    </TouchableOpacity>
-                  )}
-                </View>
-              )}
-
-              {!!item?.condition && (
-                <View style={styles.detailRow}>
-                  <Text style={styles.detailLabel}>Condition</Text>
-                  <View style={styles.conditionBadge}>
-                    <Text style={styles.conditionBadgeText}>
-                      {item.condition}
-                    </Text>
-                  </View>
-                </View>
-              )}
-
-              {!!item?.category && (
-                <View style={[styles.detailRow, { borderBottomWidth: 0 }]}>
-                  <Text style={styles.detailLabel}>Category</Text>
-                  <Text style={styles.detailValue}>{item.category}</Text>
-                </View>
-              )}
-            </View>
+            {/* ── NEW: Structured Details Card ── */}
+            <ItemDetailsCard
+              description={item?.description}
+              additionalDescription={item?.additionalDescription}
+              condition={item?.condition}
+              category={item?.category}
+              estimatedWeight={item?.estimatedWeight}
+              quantity={item?.quantity}
+              compact={false}
+              descriptionExpanded={descriptionExpanded}
+              onToggleDescription={() => setDescriptionExpanded((p) => !p)}
+            />
 
             {/* Owner card */}
             {!!ownerInfo && (
@@ -958,71 +921,20 @@ const styles = StyleSheet.create({
     fontWeight: "600",
     marginLeft: 6,
   } as TextStyle,
+  // Content area — white card
   content: {
     backgroundColor: "#fff",
-    paddingHorizontal: 20,
+    paddingHorizontal: 16,
     paddingVertical: 16,
-    gap: 16,
+    gap: 14,
   } as ViewStyle,
-  title: { fontSize: 24, fontWeight: "700", color: "#111827" } as TextStyle,
-  detailsSection: {
-    backgroundColor: "#F9FAFB",
-    borderRadius: 12,
-    padding: 16,
-    gap: 4,
-    marginVertical: 4,
-  } as ViewStyle,
-  detailsHeader: {
-    fontSize: 16,
+  title: {
+    fontSize: 22,
     fontWeight: "700",
     color: "#111827",
-    marginBottom: 8,
+    lineHeight: 28,
   } as TextStyle,
-  detailRow: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    paddingVertical: 10,
-    borderBottomWidth: 1,
-    borderBottomColor: "#E5E7EB",
-  } as ViewStyle,
-  detailLabel: {
-    fontSize: 14,
-    fontWeight: "600",
-    color: "#6B7280",
-  } as TextStyle,
-  detailValue: {
-    fontSize: 14,
-    fontWeight: "500",
-    color: "#111827",
-  } as TextStyle,
-  conditionBadge: {
-    backgroundColor: "#EEF0FF",
-    borderRadius: 8,
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderWidth: 1,
-    borderColor: "#C8CAEE",
-  } as ViewStyle,
-  conditionBadgeText: {
-    fontSize: 13,
-    fontWeight: "700",
-    color: NAVY,
-  } as TextStyle,
-  descriptionContainer: {
-    paddingVertical: 10,
-    borderBottomWidth: 1,
-    borderBottomColor: "#E5E7EB",
-    gap: 8,
-  } as ViewStyle,
-  descriptionText: {
-    fontSize: 14,
-    fontWeight: "500",
-    color: "#111827",
-    lineHeight: 20,
-  } as TextStyle,
-  seeMoreButton: { paddingVertical: 4 } as ViewStyle,
-  seeMoreText: { fontSize: 13, fontWeight: "600", color: NAVY } as TextStyle,
+  // Owner card
   ownerCard: {
     backgroundColor: "#F9FAFB",
     borderRadius: 16,

@@ -33,7 +33,6 @@ export const getAllItems = async () => {
     ...doc.data(),
   })) as any[];
 
-  // PATCH: also filter soft-deleted items alongside traded ones
   const items = allItems.filter((item) => !item.isTraded && !item.isDeleted);
 
   const ownerIds = [...new Set(items.map((i) => i.ownerId).filter(Boolean))];
@@ -82,7 +81,7 @@ export const searchItems = async (searchQuery: string) => {
     .filter(
       (item: any) =>
         !item.isTraded &&
-        !item.isDeleted && // PATCH: exclude deleted items from search
+        !item.isDeleted &&
         ((item.title && item.title.toLowerCase().includes(searchLower)) ||
           (item.description &&
             item.description.toLowerCase().includes(searchLower))),
@@ -121,19 +120,6 @@ export const getItemDetails = async (itemId: string) => {
   }
 };
 
-/**
- * PATCH: deleteItem
- * Hard-deletes the item document so it disappears from home, explore, and
- * every other listing screen immediately.
- *
- * Also cancels every pending trade that references this item so no one is
- * left waiting on a ghost offer. We do the trade cancellation inline here
- * (without importing tradeService) to avoid a circular module dependency.
- *
- * If you prefer a soft-delete instead of hard-delete, swap the `deleteDoc`
- * call for `updateDoc(itemRef, { isDeleted: true })` — the getAllItems /
- * searchItems filters above already exclude `isDeleted: true` items.
- */
 export const deleteItem = async (
   itemId: string,
   requestingUserId: string,
@@ -145,30 +131,29 @@ export const deleteItem = async (
   if (itemSnap.data()?.ownerId !== requestingUserId)
     throw new Error("You can only delete your own items.");
 
-  // Cancel all pending trades that reference this item as requested or offered
+  // FIX: Use single-field queries instead of compound (where + where) queries.
+  // Compound queries require a Firestore composite index to be manually created
+  // in the Firebase console — without it they throw and block the deletion.
+  // We fetch all trades for the item and filter status client-side instead.
   const now = new Date();
   const cancelFields = { status: "cancelled", updatedAt: now };
 
   const [snapReq, snapOff] = await Promise.all([
     getDocs(
-      query(
-        collection(db, "trades"),
-        where("requestedItemId", "==", itemId),
-        where("status", "==", "pending"),
-      ),
+      query(collection(db, "trades"), where("requestedItemId", "==", itemId)),
     ),
     getDocs(
-      query(
-        collection(db, "trades"),
-        where("offeredItemId", "==", itemId),
-        where("status", "==", "pending"),
-      ),
+      query(collection(db, "trades"), where("offeredItemId", "==", itemId)),
     ),
   ]);
 
   await Promise.all([
-    ...snapReq.docs.map((d) => updateDoc(d.ref, cancelFields)),
-    ...snapOff.docs.map((d) => updateDoc(d.ref, cancelFields)),
+    ...snapReq.docs
+      .filter((d) => d.data().status === "pending")
+      .map((d) => updateDoc(d.ref, cancelFields)),
+    ...snapOff.docs
+      .filter((d) => d.data().status === "pending")
+      .map((d) => updateDoc(d.ref, cancelFields)),
   ]).catch((e) =>
     console.warn(
       "Could not cancel pending trades for deleted item (non-fatal):",
@@ -236,7 +221,7 @@ export const addItem = async (itemData: {
       likes: itemData.likes || 0,
       likedBy: itemData.likedBy || [],
       isTraded: false,
-      isDeleted: false, // PATCH: explicit default so filter works correctly
+      isDeleted: false,
       createdAt: itemData.createdAt || new Date(),
     });
     return { id: docRef.id, ...itemData };

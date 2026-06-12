@@ -25,6 +25,7 @@ import { auth } from "../firebaseConfig";
 import { getUserInfo, updateItemLikes } from "../services/itemService";
 import { getLikeState, setLikeState } from "../services/likeCache";
 import { trackItemView, trackUserActivity } from "../services/trendingService";
+import { ItemDetailsCard } from "./ItemDetailsCard";
 import { ProposeTradeModal } from "./ProposeTradeModal";
 
 const SCREEN_WIDTH = Dimensions.get("window").width;
@@ -38,7 +39,6 @@ interface ProductDetailModalProps {
   onLikeChange?: (liked: boolean, count: number) => void;
 }
 
-// ─── Media helpers ─────────────────────────────────────────────────────────
 const isVideoUrl = (url: string): boolean => {
   if (!url || typeof url !== "string") return false;
   const lower = url.toLowerCase();
@@ -59,7 +59,6 @@ const isValidMediaUrl = (url: string | undefined): boolean => {
   return true;
 };
 
-// ─── Cross-platform save ────────────────────────────────────────────────────
 async function saveImageCrossPlatform(url: string) {
   if (Platform.OS === "web") {
     try {
@@ -92,7 +91,6 @@ async function saveImageCrossPlatform(url: string) {
   }
 }
 
-// ─── Single media slide ────────────────────────────────────────────────────
 function MediaSlide({ uri }: { uri: string }) {
   const [imgError, setImgError] = useState(false);
   const isVideo = isVideoUrl(uri);
@@ -130,7 +128,6 @@ function MediaSlide({ uri }: { uri: string }) {
       <Image
         source={{ uri }}
         style={slide.media}
-        // FIX: was "cover" which zoomed/cropped images — "contain" shows the full image
         resizeMode="contain"
         onError={() => setImgError(true)}
       />
@@ -141,15 +138,12 @@ function MediaSlide({ uri }: { uri: string }) {
 const slide = StyleSheet.create({
   wrapper: {
     width: SCREEN_WIDTH,
-    height: 320,
+    height: 300,
     backgroundColor: "#1a1a2e",
     justifyContent: "center",
     alignItems: "center",
   } as ViewStyle,
-  media: {
-    width: "100%",
-    height: "100%",
-  } as ImageStyle,
+  media: { width: "100%", height: "100%" } as ImageStyle,
   videoBadge: {
     position: "absolute",
     top: 10,
@@ -167,17 +161,10 @@ const slide = StyleSheet.create({
     fontSize: 11,
     fontWeight: "700",
   } as TextStyle,
-  errorBox: {
-    backgroundColor: "#f5f5f5",
-    gap: 8,
-  } as ViewStyle,
-  errorText: {
-    color: "#aaa",
-    fontSize: 13,
-  } as TextStyle,
+  errorBox: { backgroundColor: "#f5f5f5", gap: 8 } as ViewStyle,
+  errorText: { color: "#aaa", fontSize: 13 } as TextStyle,
 });
 
-// ─── Component ─────────────────────────────────────────────────────────────
 export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
   visible,
   item,
@@ -194,8 +181,6 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
   const [descriptionExpanded, setDescriptionExpanded] = useState(false);
   const [fullScreenIndex, setFullScreenIndex] = useState<number | null>(null);
   const [tradeModalVisible, setTradeModalVisible] = useState(false);
-
-  // No per-component like refs needed — likeCache is the shared source of truth.
 
   const isOwnItem = !!currentUser && currentUser === item?.ownerId;
 
@@ -218,13 +203,10 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
 
   const imageOnlyItems = mediaItems.filter((u) => !isVideoUrl(u));
 
-  // Every time the modal opens (or a different item is shown), read from the
-  // shared likeCache first — it holds the freshest value written by either
-  // this modal OR the full-screen detail page.  Fall back to the item prop
-  // only when the cache has no entry yet (first time this item is seen).
   useEffect(() => {
     if (visible && item) {
       setCurrentMediaIndex(0);
+      setDescriptionExpanded(false);
       loadOwnerInfo();
       if (currentUser) trackItemView(item.id, currentUser).catch(console.error);
 
@@ -264,7 +246,6 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
       const newCount = nowLiked ? likeCount + 1 : Math.max(0, likeCount - 1);
       setIsLiked(nowLiked);
       setLikeCount(newCount);
-      // Write to shared cache so the full-screen page picks up the change.
       setLikeState(item.id, nowLiked, newCount);
       onLikeChange?.(nowLiked, newCount);
       if (nowLiked) {
@@ -299,10 +280,8 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
     });
   };
 
-  const handleEnlargePress = () => {
+  const handleSeePost = () => {
     onClose();
-    // FIX: Pass the up-to-date like state so the full-screen detail page
-    // initialises correctly and doesn't allow a duplicate like.
     const updatedLikedBy: string[] = (() => {
       const base: string[] = Array.isArray(item?.likedBy)
         ? [...item.likedBy]
@@ -310,11 +289,10 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
       if (isLiked && currentUser && !base.includes(currentUser)) {
         base.push(currentUser);
       } else if (!isLiked && currentUser) {
-        return base.filter((id) => id !== currentUser);
+        return base.filter((id: string) => id !== currentUser);
       }
       return base;
     })();
-
     router.push({
       pathname: "/product-details",
       params: {
@@ -345,7 +323,6 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
         item?.userName ||
         "Unknown User";
 
-  // ── Full-screen viewer ────────────────────────────────────────────────────
   const renderFullScreen = () => {
     if (fullScreenIndex === null) return null;
     const url = imageOnlyItems[fullScreenIndex];
@@ -385,9 +362,9 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
               >
                 <Ionicons name="chevron-back" size={32} color="#fff" />
               </TouchableOpacity>
-              <Text style={styles.fullScreenCounter}>
-                {`${fullScreenIndex + 1} / ${imageOnlyItems.length}`}
-              </Text>
+              <Text
+                style={styles.fullScreenCounter}
+              >{`${fullScreenIndex + 1} / ${imageOnlyItems.length}`}</Text>
               <TouchableOpacity
                 onPress={() =>
                   setFullScreenIndex((p) =>
@@ -404,7 +381,6 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
     );
   };
 
-  // ── Carousel ──────────────────────────────────────────────────────────────
   const renderCarousel = () => (
     <View style={styles.carouselContainer}>
       {mediaItems.length === 0 ? (
@@ -442,8 +418,6 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
               setCurrentMediaIndex(idx);
             }}
           />
-
-          {/* Save button — top right */}
           {!isVideoUrl(mediaItems[currentMediaIndex]) && (
             <TouchableOpacity
               style={styles.saveImageBtn}
@@ -453,7 +427,6 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
               <Ionicons name="download-outline" size={18} color="#fff" />
             </TouchableOpacity>
           )}
-
           {mediaItems.length > 1 && (
             <View style={styles.pagination}>
               {mediaItems.map((u, i) => (
@@ -466,9 +439,9 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
                   ]}
                 />
               ))}
-              <Text style={styles.paginationText}>
-                {`${currentMediaIndex + 1} / ${mediaItems.length}`}
-              </Text>
+              <Text
+                style={styles.paginationText}
+              >{`${currentMediaIndex + 1} / ${mediaItems.length}`}</Text>
             </View>
           )}
         </>
@@ -488,17 +461,22 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
       >
         <View style={styles.modalOverlay}>
           <View style={styles.container}>
-            {/* Header */}
+            {/* ── Header ── */}
             <View style={styles.header}>
-              <TouchableOpacity onPress={onClose} style={styles.headerBtn}>
+              <TouchableOpacity onPress={onClose} style={styles.headerSideSlot}>
                 <Ionicons name="close" size={26} color={NAVY} />
               </TouchableOpacity>
+
               <Text style={styles.headerTitle}>Product Details</Text>
+
+              {/* "See post" replaces the expand icon */}
               <TouchableOpacity
-                onPress={handleEnlargePress}
-                style={styles.headerBtn}
+                onPress={handleSeePost}
+                style={styles.seePostBtn}
+                activeOpacity={0.7}
               >
-                <Ionicons name="expand" size={22} color={NAVY} />
+                <Text style={styles.seePostText}>See post</Text>
+                <Ionicons name="arrow-forward" size={13} color={NAVY} />
               </TouchableOpacity>
             </View>
 
@@ -508,58 +486,22 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
               style={styles.content}
               showsVerticalScrollIndicator={false}
               contentContainerStyle={styles.scrollContent}
+              keyboardShouldPersistTaps="handled"
             >
-              {/* Title */}
               <Text style={styles.title}>{item?.title}</Text>
 
-              {/* Details card */}
-              <View style={styles.detailsSection}>
-                <Text style={styles.detailsHeader}>Details</Text>
+              <ItemDetailsCard
+                description={item?.description}
+                additionalDescription={item?.additionalDescription}
+                condition={item?.condition || item?.itemCondition}
+                category={item?.category}
+                estimatedWeight={item?.estimatedWeight}
+                quantity={item?.quantity}
+                compact={true}
+                descriptionExpanded={descriptionExpanded}
+                onToggleDescription={() => setDescriptionExpanded((p) => !p)}
+              />
 
-                {!!item?.description && (
-                  <View style={styles.descriptionContainer}>
-                    <Text style={styles.descriptionText}>
-                      {descriptionExpanded
-                        ? item.description
-                        : item.description.length > 200
-                          ? item.description.substring(0, 200) + "..."
-                          : item.description}
-                    </Text>
-                    {item.description.length > 200 && (
-                      <TouchableOpacity
-                        onPress={() =>
-                          setDescriptionExpanded(!descriptionExpanded)
-                        }
-                        style={styles.seeMoreButton}
-                      >
-                        <Text style={styles.seeMoreText}>
-                          {descriptionExpanded ? "See less" : "See more"}
-                        </Text>
-                      </TouchableOpacity>
-                    )}
-                  </View>
-                )}
-
-                {!!item?.category && (
-                  <View style={styles.detailRow}>
-                    <Text style={styles.detailLabel}>Category</Text>
-                    <Text style={styles.detailValue}>{item.category}</Text>
-                  </View>
-                )}
-
-                {!!(item?.condition || item?.itemCondition) && (
-                  <View style={[styles.detailRow, { borderBottomWidth: 0 }]}>
-                    <Text style={styles.detailLabel}>Condition</Text>
-                    <View style={styles.conditionBadge}>
-                      <Text style={styles.conditionBadgeText}>
-                        {item.condition || item.itemCondition}
-                      </Text>
-                    </View>
-                  </View>
-                )}
-              </View>
-
-              {/* Owner card */}
               {!!ownerInfo && (
                 <TouchableOpacity
                   style={styles.ownerCard}
@@ -595,9 +537,9 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
                         <Text style={styles.rating}>
                           {ownerInfo.rating?.toFixed(1) || "N/A"}
                         </Text>
-                        <Text style={styles.tradeCount}>
-                          {`(${ownerInfo.tradeCount || 0} trades)`}
-                        </Text>
+                        <Text
+                          style={styles.tradeCount}
+                        >{`(${ownerInfo.tradeCount || 0} trades)`}</Text>
                       </View>
                     </View>
                   </View>
@@ -613,7 +555,6 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
                 </TouchableOpacity>
               )}
 
-              {/* Like button */}
               <TouchableOpacity
                 style={[styles.likeButton, isLiked && styles.likeButtonActive]}
                 onPress={handleLike}
@@ -640,7 +581,6 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
                 )}
               </TouchableOpacity>
 
-              {/* Action buttons */}
               {!isOwnItem ? (
                 <View style={styles.actionRow}>
                   <TouchableOpacity
@@ -686,10 +626,7 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
 };
 
 const styles = StyleSheet.create({
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: "rgba(0,0,0,0.5)",
-  } as ViewStyle,
+  modalOverlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.5)" } as ViewStyle,
   container: {
     flex: 1,
     backgroundColor: "#fff",
@@ -700,21 +637,36 @@ const styles = StyleSheet.create({
   } as ViewStyle,
   header: {
     flexDirection: "row",
-    justifyContent: "space-between",
     alignItems: "center",
-    paddingHorizontal: 20,
-    paddingVertical: 14,
+    paddingHorizontal: 12,
+    paddingVertical: 12,
     borderBottomWidth: 1,
     borderBottomColor: "#E5E7EB",
   } as ViewStyle,
-  headerBtn: { padding: 6 } as ViewStyle,
+  headerSideSlot: {
+    width: 38,
+    alignItems: "flex-start",
+    padding: 4,
+  } as ViewStyle,
   headerTitle: {
-    fontSize: 17,
+    flex: 1,
+    fontSize: 16,
     fontWeight: "700",
     color: NAVY,
+    textAlign: "center",
   } as TextStyle,
+  seePostBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    backgroundColor: "#EEF0FF",
+    borderRadius: 20,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+  } as ViewStyle,
+  seePostText: { fontSize: 12, fontWeight: "700", color: NAVY } as TextStyle,
   carouselContainer: {
-    height: 320,
+    height: 300,
     backgroundColor: "#1a1a2e",
     position: "relative",
   } as ViewStyle,
@@ -753,13 +705,8 @@ const styles = StyleSheet.create({
     borderRadius: 4,
     backgroundColor: "rgba(255,255,255,0.4)",
   } as ViewStyle,
-  paginationDotActive: {
-    backgroundColor: "#fff",
-    width: 20,
-  } as ViewStyle,
-  paginationDotVideo: {
-    backgroundColor: "rgba(201,162,39,0.8)",
-  } as ViewStyle,
+  paginationDotActive: { backgroundColor: "#fff", width: 20 } as ViewStyle,
+  paginationDotVideo: { backgroundColor: "rgba(201,162,39,0.8)" } as ViewStyle,
   paginationText: {
     color: "#fff",
     fontSize: 11,
@@ -796,10 +743,7 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     alignItems: "center",
   } as ViewStyle,
-  fullScreenImage: {
-    width: "100%",
-    height: "75%",
-  } as ImageStyle,
+  fullScreenImage: { width: "100%", height: "75%" } as ImageStyle,
   fullScreenControls: {
     position: "absolute",
     bottom: 40,
@@ -816,75 +760,16 @@ const styles = StyleSheet.create({
   } as TextStyle,
   content: { flex: 1 } as ViewStyle,
   scrollContent: {
-    paddingHorizontal: 20,
+    paddingHorizontal: 16,
     paddingTop: 16,
     paddingBottom: 32,
     gap: 14,
   } as ViewStyle,
   title: {
-    fontSize: 22,
+    fontSize: 20,
     fontWeight: "700",
     color: "#111827",
-  } as TextStyle,
-  detailsSection: {
-    backgroundColor: "#F9FAFB",
-    borderRadius: 12,
-    padding: 16,
-    gap: 4,
-  } as ViewStyle,
-  detailsHeader: {
-    fontSize: 15,
-    fontWeight: "700",
-    color: "#111827",
-    marginBottom: 6,
-  } as TextStyle,
-  detailRow: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    paddingVertical: 9,
-    borderBottomWidth: 1,
-    borderBottomColor: "#E5E7EB",
-  } as ViewStyle,
-  detailLabel: {
-    fontSize: 14,
-    fontWeight: "600",
-    color: "#6B7280",
-  } as TextStyle,
-  detailValue: {
-    fontSize: 14,
-    fontWeight: "500",
-    color: "#111827",
-  } as TextStyle,
-  conditionBadge: {
-    backgroundColor: "#EEF0FF",
-    borderRadius: 8,
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderWidth: 1,
-    borderColor: "#C8CAEE",
-  } as ViewStyle,
-  conditionBadgeText: {
-    fontSize: 13,
-    fontWeight: "700",
-    color: NAVY,
-  } as TextStyle,
-  descriptionContainer: {
-    paddingVertical: 10,
-    borderBottomWidth: 1,
-    borderBottomColor: "#E5E7EB",
-    gap: 6,
-  } as ViewStyle,
-  descriptionText: {
-    fontSize: 14,
-    color: "#111827",
-    lineHeight: 20,
-  } as TextStyle,
-  seeMoreButton: { paddingVertical: 4 } as ViewStyle,
-  seeMoreText: {
-    fontSize: 13,
-    fontWeight: "600",
-    color: NAVY,
+    lineHeight: 26,
   } as TextStyle,
   ownerCard: {
     backgroundColor: "#F9FAFB",
@@ -933,20 +818,9 @@ const styles = StyleSheet.create({
     gap: 4,
     marginTop: 3,
   } as ViewStyle,
-  rating: {
-    fontSize: 13,
-    fontWeight: "600",
-    color: "#FFB800",
-  } as TextStyle,
-  tradeCount: {
-    fontSize: 12,
-    color: "#6B7280",
-  } as TextStyle,
-  bio: {
-    fontSize: 13,
-    color: "#4B5563",
-    lineHeight: 18,
-  } as TextStyle,
+  rating: { fontSize: 13, fontWeight: "600", color: "#FFB800" } as TextStyle,
+  tradeCount: { fontSize: 12, color: "#6B7280" } as TextStyle,
+  bio: { fontSize: 13, color: "#4B5563", lineHeight: 18 } as TextStyle,
   viewProfileRow: {
     flexDirection: "row",
     alignItems: "center",
@@ -968,21 +842,10 @@ const styles = StyleSheet.create({
     borderColor: NAVY,
     backgroundColor: "#fff",
   } as ViewStyle,
-  likeButtonActive: {
-    backgroundColor: NAVY,
-    borderColor: NAVY,
-  } as ViewStyle,
-  likeButtonText: {
-    fontSize: 16,
-    fontWeight: "600",
-    color: NAVY,
-  } as TextStyle,
+  likeButtonActive: { backgroundColor: NAVY, borderColor: NAVY } as ViewStyle,
+  likeButtonText: { fontSize: 16, fontWeight: "600", color: NAVY } as TextStyle,
   likeButtonTextActive: { color: "#fff" } as TextStyle,
-  actionRow: {
-    flexDirection: "row",
-    gap: 10,
-    marginBottom: 8,
-  } as ViewStyle,
+  actionRow: { flexDirection: "row", gap: 10, marginBottom: 8 } as ViewStyle,
   messageButton: {
     flex: 1,
     flexDirection: "row",
@@ -1023,9 +886,5 @@ const styles = StyleSheet.create({
     backgroundColor: "#F3F4F6",
     borderRadius: 12,
   } as ViewStyle,
-  ownItemText: {
-    fontSize: 13,
-    color: "#888",
-    fontWeight: "500",
-  } as TextStyle,
+  ownItemText: { fontSize: 13, color: "#888", fontWeight: "500" } as TextStyle,
 });

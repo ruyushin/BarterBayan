@@ -324,7 +324,9 @@ export default function TradeScreen() {
   const [selectedItemIds, setSelectedItemIds] = useState<Set<string>>(
     new Set(),
   );
+  const [selectedCount, setSelectedCount] = useState(0);
   const [deleting, setDeleting] = useState(false);
+  const deletingRef = useRef(false);
 
   // ── Your Offers ───────────────────────────────────────────────────────────
   const [sentOffers, setSentOffers] = useState<TradeOffer[]>([]);
@@ -346,8 +348,11 @@ export default function TradeScreen() {
     useCallback(() => {
       fetchUserItems();
       return () => {
-        setIsSelectMode(false);
-        setSelectedItemIds(new Set());
+        if (!deletingRef.current) {
+          setIsSelectMode(false);
+          setSelectedItemIds(new Set());
+          setSelectedCount(0);
+        }
       };
     }, []),
   );
@@ -392,6 +397,7 @@ export default function TradeScreen() {
     setActiveTab(tab);
     setIsSelectMode(false);
     setSelectedItemIds(new Set());
+    setSelectedCount(0);
   };
 
   const handleAddItemPress = () => {
@@ -426,9 +432,6 @@ export default function TradeScreen() {
       return TRADE_SORT_CYCLE[(idx + 1) % TRADE_SORT_CYCLE.length];
     });
 
-  // FIX 2: Removed the `item.isTraded` early-return so completed/traded items
-  // are no longer silently hidden. They still appear in "Your Trades" but
-  // render with a "Traded" badge so the user can see all their uploads.
   const filteredItems = userItems
     .filter((item) => {
       const matchSearch =
@@ -464,6 +467,7 @@ export default function TradeScreen() {
     if (!isSelectMode) {
       setIsSelectMode(true);
       setSelectedItemIds(new Set([itemId]));
+      setSelectedCount(1);
     }
   };
 
@@ -471,78 +475,104 @@ export default function TradeScreen() {
     setSelectedItemIds((prev) => {
       const next = new Set(prev);
       next.has(itemId) ? next.delete(itemId) : next.add(itemId);
+      setSelectedCount(next.size);
       return next;
     });
   };
 
   const handleSelectAll = () => {
-    if (selectedItemIds.size === filteredItems.length) {
+    if (selectedCount === filteredItems.length) {
       setSelectedItemIds(new Set());
+      setSelectedCount(0);
     } else {
       setSelectedItemIds(new Set(filteredItems.map((i) => i.id)));
+      setSelectedCount(filteredItems.length);
     }
   };
 
   const handleCancelSelect = () => {
     setIsSelectMode(false);
     setSelectedItemIds(new Set());
+    setSelectedCount(0);
   };
 
   const handleDeleteSelected = () => {
-    if (selectedItemIds.size === 0) return;
-    const count = selectedItemIds.size;
-    Alert.alert(
-      "Delete Items",
-      `Delete ${count} item${count > 1 ? "s" : ""}? This also removes them from Home and Explore.`,
-      [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "Delete",
-          style: "destructive",
-          onPress: async () => {
-            // FIX 1: Snapshot IDs synchronously before any await so the
-            // functional updater below never reads a stale closure value.
-            const idsToDelete = new Set(selectedItemIds);
-            setDeleting(true);
-            try {
-              const uid = auth.currentUser?.uid ?? "";
-              await Promise.all(
-                [...idsToDelete].map((id) => deleteItem(id, uid)),
-              );
-              setUserItems((prev) =>
-                prev.filter((i) => !idsToDelete.has(i.id)),
-              );
-              setSelectedItemIds(new Set());
-              setIsSelectMode(false);
-            } catch (err) {
-              console.error("Delete failed:", err);
-              Alert.alert(
-                "Error",
-                "Failed to delete some items. Please try again.",
-              );
-            } finally {
-              setDeleting(false);
-            }
+    if (selectedCount === 0) return;
+    const idsToDelete = new Set(selectedItemIds);
+    const count = idsToDelete.size;
+
+    const doDelete = async () => {
+      deletingRef.current = true;
+      setDeleting(true);
+      try {
+        const uid = auth.currentUser?.uid ?? "";
+        await Promise.all([...idsToDelete].map((id) => deleteItem(id, uid)));
+        setUserItems((prev) => prev.filter((i) => !idsToDelete.has(i.id)));
+        setSelectedItemIds(new Set());
+        setSelectedCount(0);
+        setIsSelectMode(false);
+      } catch (err) {
+        console.error("Delete failed:", err);
+        Alert.alert("Error", "Failed to delete some items. Please try again.");
+      } finally {
+        deletingRef.current = false;
+        setDeleting(false);
+      }
+    };
+
+    if (Platform.OS === "web") {
+      const confirmed = window.confirm(
+        `Delete ${count} item${count > 1 ? "s" : ""}? This also removes them from Home and Explore.`,
+      );
+      if (confirmed) doDelete();
+    } else {
+      deletingRef.current = true;
+      Alert.alert(
+        "Delete Items",
+        `Delete ${count} item${count > 1 ? "s" : ""}? This also removes them from Home and Explore.`,
+        [
+          {
+            text: "Cancel",
+            style: "cancel",
+            onPress: () => {
+              deletingRef.current = false;
+            },
           },
-        },
-      ],
-    );
+          {
+            text: "Delete",
+            style: "destructive",
+            onPress: doDelete,
+          },
+        ],
+      );
+    }
   };
 
   // ─────────────────────────────────────────────────────────────────────────
-  // Your Offers — grouped by offeredItemId, filtered + sorted
+  // PATCH: Your Offers — grouped by offeredItemId, filtered + sorted
+  //
+  // Root-cause fix: the old code set g.category from the FIRST offer's
+  // offeredItemCategory only. If that field was empty (older trades), the
+  // category filter never matched anything.
+  //
+  // Fix: collect ALL category strings that appear across every offer in the
+  // group (both offeredItemCategory and requestedItemCategory), store them as
+  // `categorySet: Set<string>`, and match against ANY of them in the filter.
+  // The display label (`displayCategory`) just shows the first non-empty one.
   // ─────────────────────────────────────────────────────────────────────────
 
-  const offeredItemGroups = (() => {
-    type Group = {
-      itemId: string;
-      title: string;
-      image: string;
-      category: string;
-      offers: TradeOffer[];
-      latestAt: number;
-    };
-    const map = new Map<string, Group>();
+  type OfferGroup = {
+    itemId: string;
+    title: string;
+    image: string;
+    displayCategory: string; // first non-empty category, for the card label
+    categorySet: Set<string>; // full set for filter matching
+    offers: TradeOffer[];
+    latestAt: number;
+  };
+
+  const offeredItemGroups: OfferGroup[] = (() => {
+    const map = new Map<string, OfferGroup>();
 
     sentOffers.forEach((offer) => {
       const key = offer.offeredItemId ?? offer.offeredItemTitle ?? "unknown";
@@ -551,27 +581,49 @@ export default function TradeScreen() {
           itemId: offer.offeredItemId ?? key,
           title: offer.offeredItemTitle ?? "Unknown Item",
           image: offer.offeredItemImage ?? "",
-          category: (offer as any).offeredItemCategory ?? "",
+          displayCategory: "",
+          categorySet: new Set<string>(),
           offers: [],
           latestAt: 0,
         });
       }
       const entry = map.get(key)!;
       entry.offers.push(offer);
+
+      // Collect every category from this offer
+      if (offer.offeredItemCategory) {
+        entry.categorySet.add(offer.offeredItemCategory);
+        if (!entry.displayCategory)
+          entry.displayCategory = offer.offeredItemCategory;
+      }
+      if (offer.requestedItemCategory) {
+        entry.categorySet.add(offer.requestedItemCategory);
+        if (!entry.displayCategory)
+          entry.displayCategory = offer.requestedItemCategory;
+      }
+
       const t = offer.createdAt?.toMillis?.() ?? 0;
       if (t > entry.latestAt) entry.latestAt = t;
     });
 
-    return Array.from(map.values())
-      .filter((g) => {
-        const matchSearch =
-          offerSearch.length === 0 ||
-          g.title.toLowerCase().includes(offerSearch.toLowerCase());
-        const matchCat =
-          offerCategoryFilter === "All" || g.category === offerCategoryFilter;
-        return matchSearch && matchCat;
-      })
-      .sort((a, b) => (offerSortRecent ? b.latestAt - a.latestAt : 0));
+    return (
+      Array.from(map.values())
+        .filter((g) => {
+          // Search: match on item title
+          const matchSearch =
+            offerSearch.length === 0 ||
+            g.title.toLowerCase().includes(offerSearch.toLowerCase());
+
+          // PATCH: match if ANY category in the group equals the selected filter
+          const matchCat =
+            offerCategoryFilter === "All" ||
+            g.categorySet.has(offerCategoryFilter);
+
+          return matchSearch && matchCat;
+        })
+        // PATCH: sort by latestAt when "Recent" is toggled, otherwise stable order
+        .sort((a, b) => (offerSortRecent ? b.latestAt - a.latestAt : 0))
+    );
   })();
 
   const pendingCount = sentOffers.filter((o) => o.status === "pending").length;
@@ -586,7 +638,6 @@ export default function TradeScreen() {
         ? item.images[0]
         : item?.image || "https://via.placeholder.com/200";
     const isSelected = selectedItemIds.has(item.id);
-    // FIX 2: show a badge for traded items instead of hiding them
     const isTraded = !!item.isTraded;
     const isInTrade = !!item.inTrade && !isTraded;
 
@@ -621,7 +672,6 @@ export default function TradeScreen() {
 
           <View style={styles.imageWrapper}>
             <Image source={{ uri: imageUrl }} style={styles.image} />
-            {/* FIX 2: overlay badge for items that are in-trade or traded */}
             {(isTraded || isInTrade) && (
               <View
                 style={[
@@ -665,11 +715,7 @@ export default function TradeScreen() {
     );
   };
 
-  const renderOfferedItem = ({
-    item: group,
-  }: {
-    item: (typeof offeredItemGroups)[number];
-  }) => {
+  const renderOfferedItem = ({ item: group }: { item: OfferGroup }) => {
     const dominant = dominantStatus(group.offers);
     const statusStyle = dominant
       ? (STATUS_COLORS[dominant] ?? STATUS_COLORS.pending)
@@ -706,8 +752,9 @@ export default function TradeScreen() {
             <Text style={styles.itemName} numberOfLines={2}>
               {group.title}
             </Text>
-            {group.category ? (
-              <Text style={styles.itemCategory}>{group.category}</Text>
+            {/* PATCH: use displayCategory instead of the old group.category */}
+            {group.displayCategory ? (
+              <Text style={styles.itemCategory}>{group.displayCategory}</Text>
             ) : null}
           </View>
 
@@ -833,8 +880,7 @@ export default function TradeScreen() {
               >
                 <Ionicons
                   name={
-                    selectedItemIds.size > 0 &&
-                    selectedItemIds.size === filteredItems.length
+                    selectedCount > 0 && selectedCount === filteredItems.length
                       ? "checkbox"
                       : "square-outline"
                   }
@@ -842,8 +888,7 @@ export default function TradeScreen() {
                   color={NAVY}
                 />
                 <Text style={styles.selectBtnText}>
-                  {selectedItemIds.size > 0 &&
-                  selectedItemIds.size === filteredItems.length
+                  {selectedCount > 0 && selectedCount === filteredItems.length
                     ? "Deselect All"
                     : "Select All"}
                 </Text>
@@ -854,26 +899,24 @@ export default function TradeScreen() {
                   style={[
                     styles.selectBtn,
                     styles.deleteBtnWrapper,
-                    (selectedItemIds.size === 0 || deleting) &&
+                    (selectedCount === 0 || deleting) &&
                       styles.deleteBtnDisabled,
                   ]}
                   onPress={handleDeleteSelected}
-                  disabled={selectedItemIds.size === 0 || deleting}
+                  disabled={selectedCount === 0 || deleting}
                 >
                   <Ionicons
                     name="trash"
                     size={16}
-                    color={selectedItemIds.size > 0 ? "#E11D48" : "#CCC"}
+                    color={selectedCount > 0 ? "#E11D48" : "#CCC"}
                   />
                   <Text
                     style={[
                       styles.deleteText,
-                      selectedItemIds.size === 0 && styles.deleteTextDisabled,
+                      selectedCount === 0 && styles.deleteTextDisabled,
                     ]}
                   >
-                    {deleting
-                      ? "Deleting…"
-                      : `Delete (${selectedItemIds.size})`}
+                    {deleting ? "Deleting…" : `Delete (${selectedCount})`}
                   </Text>
                 </TouchableOpacity>
 
@@ -943,7 +986,8 @@ export default function TradeScreen() {
             >
               <Ionicons name="time-outline" size={14} color="#333" />
               <Text style={styles.smallText}>
-                Sort: {offerSortRecent ? "Recent" : "Default"}
+                {/* PATCH: show active state clearly */}
+                Sort: {offerSortRecent ? "Recent ✓" : "Default"}
               </Text>
             </TouchableOpacity>
             <TouchableOpacity
@@ -1124,7 +1168,6 @@ const styles = StyleSheet.create({
   },
   smallText: { fontSize: 13, color: "#444", marginLeft: 6 },
 
-  // Select toolbar
   selectToolbar: {
     flexDirection: "row",
     alignItems: "center",
@@ -1201,7 +1244,6 @@ const styles = StyleSheet.create({
     borderWidth: 2,
   },
 
-  // FIX 2: wrap image so badge can overlay it
   imageWrapper: { position: "relative" },
   image: { width: 55, height: 55, borderRadius: 8 },
   imageFallback: {

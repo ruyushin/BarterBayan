@@ -2,30 +2,51 @@ import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import React, { useEffect, useRef, useState } from "react";
 import {
-    ActivityIndicator,
-    Alert,
-    FlatList,
-    Image,
-    KeyboardAvoidingView,
-    Modal,
-    Platform,
-    StyleSheet,
-    Text,
-    TextInput,
-    TouchableOpacity,
-    View,
+  ActivityIndicator,
+  Alert,
+  FlatList,
+  Image,
+  Keyboard,
+  KeyboardEvent,
+  Modal,
+  Platform,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
 } from "react-native";
 import { auth } from "../firebaseConfig";
 import {
-    TradeMessage,
-    TradeOffer,
-    TradeReview,
-    sendTradeMessage,
-    submitTradeReview,
-    subscribeToTrade,
-    subscribeToTradeMessages,
-    updateTradeStatus,
+  TradeMessage,
+  TradeOffer,
+  TradeReview,
+  sendTradeMessage,
+  submitTradeReview,
+  subscribeToTrade,
+  subscribeToTradeMessages,
+  updateTradeStatus,
 } from "../services/tradeService";
+
+// ─────────────────────────────────────────────────────────────────────────────
+// NOTE: KeyboardAvoidingView is intentionally removed from this file.
+//
+// Root cause of the "shake / jump" bug:
+//   React Native's KeyboardAvoidingView does not know its own Y-offset when
+//   rendered inside a Modal on Android. It calculates the padding/height
+//   adjustment relative to the screen origin (0,0), but the Modal's sheet
+//   starts partway down the screen, so every keypress causes a large,
+//   incorrect offset that makes the whole sheet jump.
+//
+// Fix:
+//   • On Android: listen to Keyboard show/hide events, measure the actual
+//     keyboard height, and apply it as `marginBottom` on the sheet View.
+//     This is the only reliable approach inside a Modal on Android.
+//   • On iOS:    `KeyboardAvoidingView behavior="padding"` still works
+//     correctly because iOS Modals always start at (0,0).
+//
+// We conditionally wrap only on iOS to keep both platforms correct.
+// ─────────────────────────────────────────────────────────────────────────────
 
 const NAVY = "#2f2f6f";
 const GREEN = "#27AE60";
@@ -97,6 +118,20 @@ function StarRating({
   );
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Conditional iOS-only KeyboardAvoidingView wrapper
+// ─────────────────────────────────────────────────────────────────────────────
+
+function IOSKeyboardAvoid({ children }: { children: React.ReactNode }) {
+  if (Platform.OS !== "ios") return <>{children}</>;
+  const { KeyboardAvoidingView } = require("react-native");
+  return (
+    <KeyboardAvoidingView style={styles.overlay} behavior="padding">
+      {children}
+    </KeyboardAvoidingView>
+  );
+}
+
 interface TradeChatModalProps {
   visible: boolean;
   trade: TradeOffer | null;
@@ -125,13 +160,32 @@ export const TradeChatModal: React.FC<TradeChatModalProps> = ({
   const [loadingMsgs, setLoadingMsgs] = useState(true);
   const flatRef = useRef<FlatList>(null);
 
-  // Live trade doc keeps status, completedBy, reviews up to date
   const [liveTrade, setLiveTrade] = useState<TradeOffer | null>(trade);
 
   const [showReviewModal, setShowReviewModal] = useState(false);
   const [reviewRating, setReviewRating] = useState(0);
   const [reviewComment, setReviewComment] = useState("");
   const [submittingReview, setSubmittingReview] = useState(false);
+
+  // ── PATCH: Android keyboard offset driven by Keyboard listeners ──────────
+  // On Android, KeyboardAvoidingView inside a Modal jumps because it can't
+  // measure its own Y offset. We instead listen to keyboard events and apply
+  // marginBottom directly to the sheet View.
+  const [androidKeyboardHeight, setAndroidKeyboardHeight] = useState(0);
+
+  useEffect(() => {
+    if (Platform.OS !== "android") return;
+    const show = Keyboard.addListener("keyboardDidShow", (e: KeyboardEvent) => {
+      setAndroidKeyboardHeight(e.endCoordinates.height);
+    });
+    const hide = Keyboard.addListener("keyboardDidHide", () => {
+      setAndroidKeyboardHeight(0);
+    });
+    return () => {
+      show.remove();
+      hide.remove();
+    };
+  }, []);
 
   // Sync liveTrade when trade prop changes
   useEffect(() => {
@@ -166,7 +220,6 @@ export const TradeChatModal: React.FC<TradeChatModalProps> = ({
 
   const myUid = currentUser?.uid ?? "";
 
-  // BUG FIX: derive other participant from participants array, not hardcoded role
   const otherParticipantUid =
     liveTrade?.participants?.find((p) => p !== myUid) ??
     (isOwner ? (liveTrade?.offererId ?? "") : (liveTrade?.ownerId ?? ""));
@@ -176,10 +229,8 @@ export const TradeChatModal: React.FC<TradeChatModalProps> = ({
     : "Item Owner";
   const otherUserAvatar = isOwner ? (liveTrade?.offererAvatar ?? "") : "";
 
-  // Reviews keyed by reviewer's uid
   const reviews: Record<string, TradeReview> = liveTrade?.reviews ?? {};
   const myReview: TradeReview | undefined = reviews[myUid];
-  // BUG FIX: use derived otherParticipantUid, not targetUserId which could be wrong
   const theirReview: TradeReview | undefined = reviews[otherParticipantUid];
   const hasReviewed = !!myReview;
   const bothReviewed = !!myReview && !!theirReview;
@@ -227,7 +278,6 @@ export const TradeChatModal: React.FC<TradeChatModalProps> = ({
     if (!liveTrade || !currentUser || reviewRating === 0) return;
     setSubmittingReview(true);
     try {
-      // BUG FIX: target is the other participant, derived correctly
       const bothDone = await submitTradeReview(
         liveTrade.id,
         currentUser.uid,
@@ -280,6 +330,326 @@ export const TradeChatModal: React.FC<TradeChatModalProps> = ({
     grouped.push({ type: "msg", msg });
   }
 
+  // ── Sheet content (shared between iOS/Android) ───────────────────────────
+  const sheetContent = (
+    <View
+      style={[
+        styles.sheet,
+        // PATCH: on Android, push the sheet up by the keyboard height directly
+        Platform.OS === "android" && androidKeyboardHeight > 0
+          ? { marginBottom: androidKeyboardHeight }
+          : undefined,
+      ]}
+    >
+      <View style={styles.handle} />
+
+      {/* Header */}
+      <View style={styles.header}>
+        <TouchableOpacity onPress={onClose} style={styles.backBtn}>
+          <Ionicons name="chevron-back" size={22} color={NAVY} />
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={styles.headerCenter}
+          onPress={() => goToProfile(otherParticipantUid)}
+          activeOpacity={0.7}
+        >
+          {otherUserAvatar ? (
+            <Image
+              source={{ uri: otherUserAvatar }}
+              style={styles.headerAvatar}
+            />
+          ) : (
+            <View style={[styles.headerAvatar, styles.headerAvatarFallback]}>
+              <Text style={styles.headerAvatarInitial}>
+                {otherUserName?.[0]?.toUpperCase() ?? "?"}
+              </Text>
+            </View>
+          )}
+          <View style={styles.headerNameBlock}>
+            <Text style={styles.headerTitle} numberOfLines={1}>
+              {otherUserName}
+            </Text>
+            <StatusPill status={liveTrade?.status ?? "pending"} />
+          </View>
+          <Ionicons name="chevron-forward" size={14} color="#AAAAAA" />
+        </TouchableOpacity>
+
+        <View style={{ width: 34 }} />
+      </View>
+
+      {/* Trade summary card */}
+      <View style={styles.tradeCard}>
+        <View style={styles.tradeCardSide}>
+          {liveTrade?.offeredItemImage ? (
+            <Image
+              source={{ uri: liveTrade.offeredItemImage }}
+              style={styles.tradeCardImg}
+            />
+          ) : (
+            <View style={[styles.tradeCardImg, styles.tradeCardImgEmpty]}>
+              <Ionicons name="cube-outline" size={18} color="#CCC" />
+            </View>
+          )}
+          <Text style={styles.tradeCardLabel} numberOfLines={2}>
+            {liveTrade?.offeredItemTitle}
+          </Text>
+          <Text style={styles.tradeCardSub}>Offered</Text>
+        </View>
+        <View style={styles.tradeCardArrow}>
+          <Ionicons name="swap-horizontal" size={20} color={NAVY} />
+        </View>
+        <View style={styles.tradeCardSide}>
+          {liveTrade?.requestedItemImage ? (
+            <Image
+              source={{ uri: liveTrade.requestedItemImage }}
+              style={styles.tradeCardImg}
+            />
+          ) : (
+            <View style={[styles.tradeCardImg, styles.tradeCardImgEmpty]}>
+              <Ionicons name="cube-outline" size={18} color="#CCC" />
+            </View>
+          )}
+          <Text style={styles.tradeCardLabel} numberOfLines={2}>
+            {liveTrade?.requestedItemTitle}
+          </Text>
+          <Text style={styles.tradeCardSub}>Requested</Text>
+        </View>
+      </View>
+
+      {/* Accepted banner */}
+      {isAccepted && (
+        <View style={styles.acceptedBanner}>
+          <Ionicons name="checkmark-circle" size={16} color={GREEN} />
+          <Text style={styles.acceptedBannerText}>
+            Trade accepted — coordinate your meetup below!
+          </Text>
+        </View>
+      )}
+
+      {/* Completed section */}
+      {isCompleted && (
+        <View style={styles.completedSection}>
+          <View style={styles.completedBanner}>
+            <Ionicons name="trophy" size={16} color={COMPLETE_GREEN} />
+            <Text style={styles.completedBannerText}>Trade Completed!</Text>
+          </View>
+
+          {!hasReviewed ? (
+            <TouchableOpacity
+              style={styles.reviewPromptBtn}
+              onPress={() => setShowReviewModal(true)}
+              activeOpacity={0.85}
+            >
+              <Ionicons name="star-outline" size={16} color="#fff" />
+              <Text style={styles.reviewPromptBtnText}>
+                Rate Your Trade Partner
+              </Text>
+            </TouchableOpacity>
+          ) : !bothReviewed ? (
+            <View style={styles.reviewWaiting}>
+              <Ionicons name="time-outline" size={14} color="#D97706" />
+              <Text style={styles.reviewWaitingText}>
+                Your review is in — waiting for theirs
+              </Text>
+            </View>
+          ) : null}
+
+          {bothReviewed && theirReview && (
+            <View style={styles.receivedReviewCard}>
+              <Text style={styles.receivedReviewHeader}>
+                Review from {otherUserName}
+              </Text>
+              <StarRating rating={theirReview.rating} size={20} readonly />
+              {theirReview.comment ? (
+                <Text style={styles.receivedReviewComment}>
+                  "{theirReview.comment}"
+                </Text>
+              ) : null}
+            </View>
+          )}
+        </View>
+      )}
+
+      {/* Owner accept / decline */}
+      {canAction && (
+        <View style={styles.actionRow}>
+          <TouchableOpacity
+            style={[styles.actionBtn, styles.declineBtn]}
+            onPress={() => handleStatus("declined")}
+            disabled={actioning}
+          >
+            {actioning ? (
+              <ActivityIndicator size="small" color={RED} />
+            ) : (
+              <>
+                <Ionicons name="close-circle-outline" size={16} color={RED} />
+                <Text style={[styles.actionBtnText, { color: RED }]}>
+                  Decline
+                </Text>
+              </>
+            )}
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.actionBtn, styles.acceptBtn]}
+            onPress={() => handleStatus("accepted")}
+            disabled={actioning}
+          >
+            {actioning ? (
+              <ActivityIndicator size="small" color="#fff" />
+            ) : (
+              <>
+                <Ionicons
+                  name="checkmark-circle-outline"
+                  size={16}
+                  color="#fff"
+                />
+                <Text style={[styles.actionBtnText, { color: "#fff" }]}>
+                  Accept
+                </Text>
+              </>
+            )}
+          </TouchableOpacity>
+        </View>
+      )}
+
+      {/* Messages */}
+      {loadingMsgs ? (
+        <View style={styles.loaderBox}>
+          <ActivityIndicator color={NAVY} />
+        </View>
+      ) : (
+        <FlatList
+          ref={flatRef}
+          data={grouped}
+          keyExtractor={(_, i) => String(i)}
+          contentContainerStyle={styles.msgList}
+          onContentSizeChange={() =>
+            flatRef.current?.scrollToEnd({ animated: false })
+          }
+          ListEmptyComponent={
+            <View style={styles.emptyChat}>
+              <Ionicons name="chatbubbles-outline" size={32} color="#CCC" />
+              <Text style={styles.emptyChatText}>
+                No messages yet.{"\n"}Say hi to kick off the trade!
+              </Text>
+            </View>
+          }
+          renderItem={({ item }) => {
+            if (item.type === "date") {
+              return (
+                <View style={styles.dateSep}>
+                  <View style={styles.dateLine} />
+                  <Text style={styles.dateLabel}>{item.label}</Text>
+                  <View style={styles.dateLine} />
+                </View>
+              );
+            }
+            const { msg } = item;
+            const isMe = msg.senderId === myUid;
+            return (
+              <View
+                style={[
+                  styles.bubbleRow,
+                  isMe ? styles.bubbleRowMe : styles.bubbleRowThem,
+                ]}
+              >
+                {!isMe && (
+                  <TouchableOpacity
+                    onPress={() => goToProfile(otherParticipantUid)}
+                    activeOpacity={0.8}
+                  >
+                    {msg.senderAvatar ? (
+                      <Image
+                        source={{ uri: msg.senderAvatar }}
+                        style={styles.avatar}
+                      />
+                    ) : (
+                      <View style={[styles.avatar, styles.avatarFallback]}>
+                        <Text style={styles.avatarInitial}>
+                          {msg.senderName?.[0]?.toUpperCase() ?? "?"}
+                        </Text>
+                      </View>
+                    )}
+                  </TouchableOpacity>
+                )}
+                <View style={styles.bubbleWrap}>
+                  {!isMe && (
+                    <TouchableOpacity
+                      onPress={() => goToProfile(otherParticipantUid)}
+                      activeOpacity={0.7}
+                    >
+                      <Text style={styles.bubbleSender}>{msg.senderName}</Text>
+                    </TouchableOpacity>
+                  )}
+                  <View
+                    style={[
+                      styles.bubble,
+                      isMe ? styles.bubbleMe : styles.bubbleThem,
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.bubbleText,
+                        isMe ? styles.bubbleTextMe : styles.bubbleTextThem,
+                      ]}
+                    >
+                      {msg.text}
+                    </Text>
+                  </View>
+                  <Text
+                    style={[
+                      styles.bubbleTime,
+                      isMe ? styles.bubbleTimeMe : styles.bubbleTimeThem,
+                    ]}
+                  >
+                    {formatTime(msg.createdAt)}
+                  </Text>
+                </View>
+              </View>
+            );
+          }}
+        />
+      )}
+
+      {/* Input */}
+      {!isClosed ? (
+        <View style={styles.inputRow}>
+          <TextInput
+            style={styles.input}
+            placeholder="Type a message…"
+            placeholderTextColor="#AAAAAA"
+            value={text}
+            onChangeText={setText}
+            multiline
+            maxLength={500}
+            editable={!sending}
+          />
+          <TouchableOpacity
+            style={[
+              styles.sendBtn,
+              (!text.trim() || sending) && styles.sendBtnDisabled,
+            ]}
+            onPress={handleSend}
+            disabled={!text.trim() || sending}
+          >
+            {sending ? (
+              <ActivityIndicator size="small" color="#fff" />
+            ) : (
+              <Ionicons name="send" size={18} color="#fff" />
+            )}
+          </TouchableOpacity>
+        </View>
+      ) : (
+        <View style={styles.closedBar}>
+          <Text style={styles.closedBarText}>
+            This trade has been {liveTrade?.status}. Chat is read-only.
+          </Text>
+        </View>
+      )}
+    </View>
+  );
+
   return (
     <>
       <Modal
@@ -288,342 +658,21 @@ export const TradeChatModal: React.FC<TradeChatModalProps> = ({
         animationType="slide"
         onRequestClose={onClose}
       >
-        <KeyboardAvoidingView
-          style={styles.overlay}
-          behavior={Platform.OS === "ios" ? "padding" : "height"}
-        >
-          <View style={styles.sheet}>
-            <View style={styles.handle} />
-
-            {/* Header — tappable to view other user's profile */}
-            <View style={styles.header}>
-              <TouchableOpacity onPress={onClose} style={styles.backBtn}>
-                <Ionicons name="chevron-back" size={22} color={NAVY} />
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={styles.headerCenter}
-                onPress={() => goToProfile(otherParticipantUid)}
-                activeOpacity={0.7}
-              >
-                {otherUserAvatar ? (
-                  <Image
-                    source={{ uri: otherUserAvatar }}
-                    style={styles.headerAvatar}
-                  />
-                ) : (
-                  <View
-                    style={[styles.headerAvatar, styles.headerAvatarFallback]}
-                  >
-                    <Text style={styles.headerAvatarInitial}>
-                      {otherUserName?.[0]?.toUpperCase() ?? "?"}
-                    </Text>
-                  </View>
-                )}
-                <View style={styles.headerNameBlock}>
-                  <Text style={styles.headerTitle} numberOfLines={1}>
-                    {otherUserName}
-                  </Text>
-                  <StatusPill status={liveTrade?.status ?? "pending"} />
-                </View>
-                <Ionicons name="chevron-forward" size={14} color="#AAAAAA" />
-              </TouchableOpacity>
-
-              <View style={{ width: 34 }} />
-            </View>
-
-            {/* Trade summary card */}
-            <View style={styles.tradeCard}>
-              <View style={styles.tradeCardSide}>
-                {liveTrade?.offeredItemImage ? (
-                  <Image
-                    source={{ uri: liveTrade.offeredItemImage }}
-                    style={styles.tradeCardImg}
-                  />
-                ) : (
-                  <View style={[styles.tradeCardImg, styles.tradeCardImgEmpty]}>
-                    <Ionicons name="cube-outline" size={18} color="#CCC" />
-                  </View>
-                )}
-                <Text style={styles.tradeCardLabel} numberOfLines={2}>
-                  {liveTrade?.offeredItemTitle}
-                </Text>
-                <Text style={styles.tradeCardSub}>Offered</Text>
-              </View>
-              <View style={styles.tradeCardArrow}>
-                <Ionicons name="swap-horizontal" size={20} color={NAVY} />
-              </View>
-              <View style={styles.tradeCardSide}>
-                {liveTrade?.requestedItemImage ? (
-                  <Image
-                    source={{ uri: liveTrade.requestedItemImage }}
-                    style={styles.tradeCardImg}
-                  />
-                ) : (
-                  <View style={[styles.tradeCardImg, styles.tradeCardImgEmpty]}>
-                    <Ionicons name="cube-outline" size={18} color="#CCC" />
-                  </View>
-                )}
-                <Text style={styles.tradeCardLabel} numberOfLines={2}>
-                  {liveTrade?.requestedItemTitle}
-                </Text>
-                <Text style={styles.tradeCardSub}>Requested</Text>
-              </View>
-            </View>
-
-            {/* ── Accepted: coordination banner (mark as finished in parent modals) ── */}
-            {isAccepted && (
-              <View style={styles.acceptedBanner}>
-                <Ionicons name="checkmark-circle" size={16} color={GREEN} />
-                <Text style={styles.acceptedBannerText}>
-                  Trade accepted — coordinate your meetup below!
-                </Text>
-              </View>
-            )}
-
-            {/* ── Completed: review section ── */}
-            {isCompleted && (
-              <View style={styles.completedSection}>
-                <View style={styles.completedBanner}>
-                  <Ionicons name="trophy" size={16} color={COMPLETE_GREEN} />
-                  <Text style={styles.completedBannerText}>
-                    Trade Completed!
-                  </Text>
-                </View>
-
-                {!hasReviewed ? (
-                  <TouchableOpacity
-                    style={styles.reviewPromptBtn}
-                    onPress={() => setShowReviewModal(true)}
-                    activeOpacity={0.85}
-                  >
-                    <Ionicons name="star-outline" size={16} color="#fff" />
-                    <Text style={styles.reviewPromptBtnText}>
-                      Rate Your Trade Partner
-                    </Text>
-                  </TouchableOpacity>
-                ) : !bothReviewed ? (
-                  <View style={styles.reviewWaiting}>
-                    <Ionicons name="time-outline" size={14} color="#D97706" />
-                    <Text style={styles.reviewWaitingText}>
-                      Your review is in — waiting for theirs
-                    </Text>
-                  </View>
-                ) : null}
-
-                {/* Show their review only after both have submitted */}
-                {bothReviewed && theirReview && (
-                  <View style={styles.receivedReviewCard}>
-                    <Text style={styles.receivedReviewHeader}>
-                      Review from {otherUserName}
-                    </Text>
-                    <StarRating
-                      rating={theirReview.rating}
-                      size={20}
-                      readonly
-                    />
-                    {theirReview.comment ? (
-                      <Text style={styles.receivedReviewComment}>
-                        "{theirReview.comment}"
-                      </Text>
-                    ) : null}
-                  </View>
-                )}
-              </View>
-            )}
-
-            {/* Owner accept / decline */}
-            {canAction && (
-              <View style={styles.actionRow}>
-                <TouchableOpacity
-                  style={[styles.actionBtn, styles.declineBtn]}
-                  onPress={() => handleStatus("declined")}
-                  disabled={actioning}
-                >
-                  {actioning ? (
-                    <ActivityIndicator size="small" color={RED} />
-                  ) : (
-                    <>
-                      <Ionicons
-                        name="close-circle-outline"
-                        size={16}
-                        color={RED}
-                      />
-                      <Text style={[styles.actionBtnText, { color: RED }]}>
-                        Decline
-                      </Text>
-                    </>
-                  )}
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={[styles.actionBtn, styles.acceptBtn]}
-                  onPress={() => handleStatus("accepted")}
-                  disabled={actioning}
-                >
-                  {actioning ? (
-                    <ActivityIndicator size="small" color="#fff" />
-                  ) : (
-                    <>
-                      <Ionicons
-                        name="checkmark-circle-outline"
-                        size={16}
-                        color="#fff"
-                      />
-                      <Text style={[styles.actionBtnText, { color: "#fff" }]}>
-                        Accept
-                      </Text>
-                    </>
-                  )}
-                </TouchableOpacity>
-              </View>
-            )}
-
-            {/* Messages */}
-            {loadingMsgs ? (
-              <View style={styles.loaderBox}>
-                <ActivityIndicator color={NAVY} />
-              </View>
-            ) : (
-              <FlatList
-                ref={flatRef}
-                data={grouped}
-                keyExtractor={(_, i) => String(i)}
-                contentContainerStyle={styles.msgList}
-                onContentSizeChange={() =>
-                  flatRef.current?.scrollToEnd({ animated: false })
-                }
-                ListEmptyComponent={
-                  <View style={styles.emptyChat}>
-                    <Ionicons
-                      name="chatbubbles-outline"
-                      size={32}
-                      color="#CCC"
-                    />
-                    <Text style={styles.emptyChatText}>
-                      No messages yet.{"\n"}Say hi to kick off the trade!
-                    </Text>
-                  </View>
-                }
-                renderItem={({ item }) => {
-                  if (item.type === "date") {
-                    return (
-                      <View style={styles.dateSep}>
-                        <View style={styles.dateLine} />
-                        <Text style={styles.dateLabel}>{item.label}</Text>
-                        <View style={styles.dateLine} />
-                      </View>
-                    );
-                  }
-                  const { msg } = item;
-                  const isMe = msg.senderId === myUid;
-                  return (
-                    <View
-                      style={[
-                        styles.bubbleRow,
-                        isMe ? styles.bubbleRowMe : styles.bubbleRowThem,
-                      ]}
-                    >
-                      {!isMe && (
-                        <TouchableOpacity
-                          onPress={() => goToProfile(otherParticipantUid)}
-                          activeOpacity={0.8}
-                        >
-                          {msg.senderAvatar ? (
-                            <Image
-                              source={{ uri: msg.senderAvatar }}
-                              style={styles.avatar}
-                            />
-                          ) : (
-                            <View
-                              style={[styles.avatar, styles.avatarFallback]}
-                            >
-                              <Text style={styles.avatarInitial}>
-                                {msg.senderName?.[0]?.toUpperCase() ?? "?"}
-                              </Text>
-                            </View>
-                          )}
-                        </TouchableOpacity>
-                      )}
-                      <View style={styles.bubbleWrap}>
-                        {!isMe && (
-                          <TouchableOpacity
-                            onPress={() => goToProfile(otherParticipantUid)}
-                            activeOpacity={0.7}
-                          >
-                            <Text style={styles.bubbleSender}>
-                              {msg.senderName}
-                            </Text>
-                          </TouchableOpacity>
-                        )}
-                        <View
-                          style={[
-                            styles.bubble,
-                            isMe ? styles.bubbleMe : styles.bubbleThem,
-                          ]}
-                        >
-                          <Text
-                            style={[
-                              styles.bubbleText,
-                              isMe
-                                ? styles.bubbleTextMe
-                                : styles.bubbleTextThem,
-                            ]}
-                          >
-                            {msg.text}
-                          </Text>
-                        </View>
-                        <Text
-                          style={[
-                            styles.bubbleTime,
-                            isMe ? styles.bubbleTimeMe : styles.bubbleTimeThem,
-                          ]}
-                        >
-                          {formatTime(msg.createdAt)}
-                        </Text>
-                      </View>
-                    </View>
-                  );
-                }}
-              />
-            )}
-
-            {/* Input */}
-            {!isClosed ? (
-              <View style={styles.inputRow}>
-                <TextInput
-                  style={styles.input}
-                  placeholder="Type a message…"
-                  placeholderTextColor="#AAAAAA"
-                  value={text}
-                  onChangeText={setText}
-                  multiline
-                  maxLength={500}
-                  editable={!sending}
-                />
-                <TouchableOpacity
-                  style={[
-                    styles.sendBtn,
-                    (!text.trim() || sending) && styles.sendBtnDisabled,
-                  ]}
-                  onPress={handleSend}
-                  disabled={!text.trim() || sending}
-                >
-                  {sending ? (
-                    <ActivityIndicator size="small" color="#fff" />
-                  ) : (
-                    <Ionicons name="send" size={18} color="#fff" />
-                  )}
-                </TouchableOpacity>
-              </View>
-            ) : (
-              <View style={styles.closedBar}>
-                <Text style={styles.closedBarText}>
-                  This trade has been {liveTrade?.status}. Chat is read-only.
-                </Text>
-              </View>
-            )}
+        {/*
+         * PATCH: iOS uses KeyboardAvoidingView (behavior="padding") which
+         * works correctly because iOS Modal always starts at (0,0).
+         * Android uses a plain View — keyboard offset is handled via the
+         * `marginBottom` on the sheet (driven by the Keyboard listener above).
+         */}
+        {Platform.OS === "ios" ? (
+          <IOSKeyboardAvoid>
+            <View style={styles.overlayInner}>{sheetContent}</View>
+          </IOSKeyboardAvoid>
+        ) : (
+          <View style={styles.overlay}>
+            <View style={styles.overlayInner}>{sheetContent}</View>
           </View>
-        </KeyboardAvoidingView>
+        )}
       </Modal>
 
       {/* ── Review bottom sheet ── */}
@@ -692,6 +741,12 @@ const styles = StyleSheet.create({
   overlay: {
     flex: 1,
     backgroundColor: "rgba(0,0,0,0.5)",
+    justifyContent: "flex-end",
+  },
+  // PATCH: separate inner wrapper so the semi-transparent bg fills the screen
+  // while the sheet itself can respond to marginBottom without clipping the overlay.
+  overlayInner: {
+    flex: 1,
     justifyContent: "flex-end",
   },
   sheet: {

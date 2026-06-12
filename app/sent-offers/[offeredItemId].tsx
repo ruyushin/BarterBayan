@@ -1,6 +1,6 @@
 import { Ionicons } from "@expo/vector-icons";
 import { useLocalSearchParams, useRouter } from "expo-router";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -37,7 +37,7 @@ const STATUS_COLORS: Record<
   completed: { bg: "#E8F5E9", text: "#16A34A", border: "#BBF7D0" },
 };
 
-const FILTER_TABS: {
+const STATUS_FILTER_TABS: {
   key: TradeOffer["status"] | "all";
   label: string;
   icon: string;
@@ -132,21 +132,17 @@ function OfferDetailSheet({
       onRequestClose={onClose}
       statusBarTranslucent
     >
-      {/* Backdrop */}
       <TouchableWithoutFeedback onPress={onClose}>
         <Animated.View
           style={[sheetStyles.backdrop, { opacity: backdropAnim }]}
         />
       </TouchableWithoutFeedback>
 
-      {/* Sheet */}
       <Animated.View
         style={[sheetStyles.sheet, { transform: [{ translateY: slideAnim }] }]}
       >
-        {/* Drag handle */}
         <View style={sheetStyles.handle} />
 
-        {/* Close button */}
         <TouchableOpacity
           style={sheetStyles.closeBtn}
           onPress={onClose}
@@ -156,7 +152,7 @@ function OfferDetailSheet({
         </TouchableOpacity>
 
         <ScrollView showsVerticalScrollIndicator={false} bounces={false}>
-          {/* Status pill */}
+          {/* Status row */}
           <View style={sheetStyles.statusRow}>
             <View
               style={[
@@ -190,9 +186,31 @@ function OfferDetailSheet({
             )}
           </View>
 
-          {/* ── Item swap visual ── */}
+          {/* PATCH: show category badges if present */}
+          {(offer.offeredItemCategory || offer.requestedItemCategory) && (
+            <View style={sheetStyles.categoryRow}>
+              {offer.offeredItemCategory && (
+                <View style={sheetStyles.categoryPill}>
+                  <Ionicons name="pricetag-outline" size={11} color={NAVY} />
+                  <Text style={sheetStyles.categoryPillText}>
+                    {offer.offeredItemCategory}
+                  </Text>
+                </View>
+              )}
+              {offer.requestedItemCategory &&
+                offer.requestedItemCategory !== offer.offeredItemCategory && (
+                  <View style={sheetStyles.categoryPill}>
+                    <Ionicons name="pricetag-outline" size={11} color={NAVY} />
+                    <Text style={sheetStyles.categoryPillText}>
+                      {offer.requestedItemCategory}
+                    </Text>
+                  </View>
+                )}
+            </View>
+          )}
+
+          {/* Item swap visual */}
           <View style={sheetStyles.swapSection}>
-            {/* Offered item */}
             <View style={sheetStyles.swapItem}>
               <Image
                 source={{
@@ -209,12 +227,10 @@ function OfferDetailSheet({
               </View>
             </View>
 
-            {/* Arrow */}
             <View style={sheetStyles.swapArrow}>
               <Ionicons name="swap-horizontal" size={22} color={NAVY} />
             </View>
 
-            {/* Requested item */}
             <View style={sheetStyles.swapItem}>
               <Image
                 source={{
@@ -233,7 +249,7 @@ function OfferDetailSheet({
             </View>
           </View>
 
-          {/* ── Owner profile card ── */}
+          {/* Owner profile card */}
           <TouchableOpacity
             style={sheetStyles.ownerCard}
             onPress={onViewProfile}
@@ -256,7 +272,7 @@ function OfferDetailSheet({
             </View>
           </TouchableOpacity>
 
-          {/* ── Message preview ── */}
+          {/* Message preview */}
           {!!offer.message && (
             <View style={sheetStyles.messageBox}>
               <Ionicons
@@ -270,7 +286,21 @@ function OfferDetailSheet({
             </View>
           )}
 
-          {/* ── Confirmation progress (accepted only) ── */}
+          {/* PATCH: decline reason (visible to offerer after decline) */}
+          {offer.status === "declined" && (offer as any).declineReason && (
+            <View style={sheetStyles.declineReasonBox}>
+              <Ionicons
+                name="information-circle-outline"
+                size={14}
+                color="#E11D48"
+              />
+              <Text style={sheetStyles.declineReasonText}>
+                Reason: {(offer as any).declineReason}
+              </Text>
+            </View>
+          )}
+
+          {/* Confirmation progress (accepted only) */}
           {isAccepted && (
             <View style={sheetStyles.confirmProgress}>
               <View style={sheetStyles.confirmStep}>
@@ -327,9 +357,8 @@ function OfferDetailSheet({
             </View>
           )}
 
-          {/* ── Actions ── */}
+          {/* Actions */}
           <View style={sheetStyles.actions}>
-            {/* Message — shown for accepted / completed */}
             {(isAccepted || isCompleted) && (
               <TouchableOpacity
                 style={sheetStyles.messageBtn}
@@ -341,7 +370,6 @@ function OfferDetailSheet({
               </TouchableOpacity>
             )}
 
-            {/* Mark as finished */}
             {isAccepted && (
               <TouchableOpacity
                 style={[
@@ -379,10 +407,12 @@ function OfferDetailSheet({
               </TouchableOpacity>
             )}
 
-            {/* Cancel — pending only */}
             {isPending && (
               <TouchableOpacity
-                style={sheetStyles.cancelBtn}
+                style={[
+                  sheetStyles.cancelBtn,
+                  isCancelling && { opacity: 0.6 },
+                ]}
                 onPress={onCancel}
                 disabled={isCancelling}
                 activeOpacity={0.8}
@@ -402,7 +432,6 @@ function OfferDetailSheet({
               </TouchableOpacity>
             )}
 
-            {/* Completed badge */}
             {isCompleted && (
               <View style={sheetStyles.completedBadge}>
                 <Ionicons name="trophy" size={15} color="#16A34A" />
@@ -430,15 +459,19 @@ export default function SentOffersScreen() {
 
   const [allOffers, setAllOffers] = useState<TradeOffer[]>([]);
   const [offersLoading, setOffersLoading] = useState(true);
-  const [activeFilter, setActiveFilter] = useState<
+
+  // ── PATCH: two independent filter axes ───────────────────────────────────
+  // statusFilter: which trade statuses to show (the original tab row)
+  // categoryFilter: which category to show (new chip row, derived from data)
+  const [statusFilter, setStatusFilter] = useState<
     TradeOffer["status"] | "all"
   >("all");
+  const [categoryFilter, setCategoryFilter] = useState("All");
 
   const [cancellingId, setCancellingId] = useState<string | null>(null);
   const [completingId, setCompletingId] = useState<string | null>(null);
   const [chatTrade, setChatTrade] = useState<TradeOffer | null>(null);
 
-  // Detail sheet state
   const [selectedOffer, setSelectedOffer] = useState<TradeOffer | null>(null);
   const [sheetVisible, setSheetVisible] = useState(false);
 
@@ -463,6 +496,29 @@ export default function SentOffersScreen() {
     };
   }, [offeredItemId]);
 
+  // ── PATCH: derive the unique category list from live offer data ──────────
+  // We check both offeredItemCategory and requestedItemCategory so the filter
+  // catches offers where only one side has a category stored.
+  const availableCategories = useMemo<string[]>(() => {
+    const set = new Set<string>();
+    for (const o of allOffers) {
+      if (o.offeredItemCategory) set.add(o.offeredItemCategory);
+      if (o.requestedItemCategory) set.add(o.requestedItemCategory);
+    }
+    return Array.from(set).sort();
+  }, [allOffers]);
+
+  // Reset category filter whenever the offer list changes and the previously
+  // selected category no longer exists (e.g. after a cancel).
+  useEffect(() => {
+    if (
+      categoryFilter !== "All" &&
+      !availableCategories.includes(categoryFilter)
+    ) {
+      setCategoryFilter("All");
+    }
+  }, [availableCategories]);
+
   const openDetail = (offer: TradeOffer) => {
     setSelectedOffer(offer);
     setSheetVisible(true);
@@ -470,33 +526,20 @@ export default function SentOffersScreen() {
 
   const closeDetail = () => {
     setSheetVisible(false);
-    // keep selectedOffer set while animation plays out
     setTimeout(() => setSelectedOffer(null), 300);
   };
 
-  const handleCancel = (offer: TradeOffer) => {
-    Alert.alert(
-      "Cancel Offer",
-      `Cancel your offer for "${offer.requestedItemTitle}"?`,
-      [
-        { text: "Keep it", style: "cancel" },
-        {
-          text: "Cancel Offer",
-          style: "destructive",
-          onPress: async () => {
-            setCancellingId(offer.id);
-            try {
-              await cancelTradeOffer(offer.id);
-              closeDetail();
-            } catch (err: any) {
-              Alert.alert("Error", err?.message ?? "Failed to cancel.");
-            } finally {
-              setCancellingId(null);
-            }
-          },
-        },
-      ],
-    );
+  const handleCancel = async (offer: TradeOffer) => {
+    if (cancellingId != null) return;
+    setCancellingId(offer.id);
+    try {
+      await cancelTradeOffer(offer.id);
+      closeDetail();
+    } catch (err: any) {
+      Alert.alert("Error", err?.message ?? "Failed to cancel offer.");
+    } finally {
+      setCancellingId(null);
+    }
   };
 
   const handleComplete = async (offer: TradeOffer) => {
@@ -516,16 +559,22 @@ export default function SentOffersScreen() {
     const ownerId = (offer as any).ownerId;
     if (!ownerId) return;
     closeDetail();
-    // Small delay so sheet closes before navigating
     setTimeout(() => router.push(`/profile/${ownerId}`), 250);
   };
 
-  const filteredOffers =
-    activeFilter === "all"
-      ? allOffers
-      : allOffers.filter((o) => o.status === activeFilter);
+  // ── PATCH: apply both status AND category filters ────────────────────────
+  const filteredOffers = useMemo(() => {
+    return allOffers.filter((o) => {
+      const matchStatus = statusFilter === "all" || o.status === statusFilter;
+      const matchCategory =
+        categoryFilter === "All" ||
+        o.offeredItemCategory === categoryFilter ||
+        o.requestedItemCategory === categoryFilter;
+      return matchStatus && matchCategory;
+    });
+  }, [allOffers, statusFilter, categoryFilter]);
 
-  const countFor = (key: string) =>
+  const countForStatus = (key: string) =>
     key === "all"
       ? allOffers.length
       : allOffers.filter((o) => o.status === key).length;
@@ -573,17 +622,17 @@ export default function SentOffersScreen() {
         </View>
       </View>
 
-      {/* ── Filter Tabs ── */}
+      {/* ── Status Filter Tabs ── */}
       <ScrollView
         horizontal
         showsHorizontalScrollIndicator={false}
         style={styles.filterBar}
         contentContainerStyle={styles.filterBarContent}
       >
-        {FILTER_TABS.map((tab) => {
-          const count = countFor(tab.key);
+        {STATUS_FILTER_TABS.map((tab) => {
+          const count = countForStatus(tab.key);
           if (count === 0 && tab.key !== "all") return null;
-          const isActive = activeFilter === tab.key;
+          const isActive = statusFilter === tab.key;
           const color =
             tab.key === "all" ? NAVY : (STATUS_COLORS[tab.key]?.text ?? NAVY);
           const bg =
@@ -600,7 +649,7 @@ export default function SentOffersScreen() {
                   borderColor: color,
                 },
               ]}
-              onPress={() => setActiveFilter(tab.key)}
+              onPress={() => setStatusFilter(tab.key)}
               activeOpacity={0.7}
             >
               <Ionicons
@@ -640,6 +689,47 @@ export default function SentOffersScreen() {
         })}
       </ScrollView>
 
+      {/* ── PATCH: Category Filter Chips ────────────────────────────────────
+           Only rendered when at least one offer has a category stored.
+           Chips are derived live from the offer data so they're always
+           accurate — no hardcoded list needed.
+      ──────────────────────────────────────────────────────────────────── */}
+      {availableCategories.length > 0 && (
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          style={styles.categoryBar}
+          contentContainerStyle={styles.categoryBarContent}
+        >
+          {["All", ...availableCategories].map((cat) => {
+            const isActive = categoryFilter === cat;
+            return (
+              <TouchableOpacity
+                key={cat}
+                style={[
+                  styles.categoryChip,
+                  isActive && styles.categoryChipActive,
+                ]}
+                onPress={() => setCategoryFilter(cat)}
+                activeOpacity={0.7}
+              >
+                {isActive && (
+                  <Ionicons name="pricetag" size={11} color="#fff" />
+                )}
+                <Text
+                  style={[
+                    styles.categoryChipText,
+                    isActive && styles.categoryChipTextActive,
+                  ]}
+                >
+                  {cat}
+                </Text>
+              </TouchableOpacity>
+            );
+          })}
+        </ScrollView>
+      )}
+
       {/* ── Offers List ── */}
       {offersLoading ? (
         <View style={styles.centered}>
@@ -650,15 +740,29 @@ export default function SentOffersScreen() {
         <View style={styles.centered}>
           <Ionicons name="swap-horizontal-outline" size={52} color="#DDD" />
           <Text style={styles.emptyTitle}>
-            {activeFilter === "all"
+            {statusFilter === "all" && categoryFilter === "All"
               ? "No offers sent for this item"
-              : `No ${activeFilter} offers`}
+              : "No matching offers"}
           </Text>
           <Text style={styles.emptySubtitle}>
-            {activeFilter === "all"
-              ? "Offers you send using this item will appear here."
-              : "Switch to All to see other offers."}
+            {statusFilter !== "all" || categoryFilter !== "All"
+              ? "Try clearing a filter to see more offers."
+              : "Offers you send using this item will appear here."}
           </Text>
+          {/* Quick-clear button when filters are active */}
+          {(statusFilter !== "all" || categoryFilter !== "All") && (
+            <TouchableOpacity
+              style={styles.clearFiltersBtn}
+              onPress={() => {
+                setStatusFilter("all");
+                setCategoryFilter("All");
+              }}
+              activeOpacity={0.8}
+            >
+              <Ionicons name="close-circle-outline" size={14} color={NAVY} />
+              <Text style={styles.clearFiltersBtnText}>Clear Filters</Text>
+            </TouchableOpacity>
+          )}
         </View>
       ) : (
         <ScrollView
@@ -749,18 +853,33 @@ function SentOfferCard({
       activeOpacity={0.85}
     >
       {/* Status pill */}
-      <View
-        style={[styles.cardStatusPill, { backgroundColor: statusStyle.bg }]}
-      >
+      <View style={styles.cardTopRow}>
         <View
-          style={[styles.cardStatusDot, { backgroundColor: statusStyle.text }]}
-        />
-        <Text style={[styles.cardStatusText, { color: statusStyle.text }]}>
-          {offer.status.charAt(0).toUpperCase() + offer.status.slice(1)}
-        </Text>
+          style={[styles.cardStatusPill, { backgroundColor: statusStyle.bg }]}
+        >
+          <View
+            style={[
+              styles.cardStatusDot,
+              { backgroundColor: statusStyle.text },
+            ]}
+          />
+          <Text style={[styles.cardStatusText, { color: statusStyle.text }]}>
+            {offer.status.charAt(0).toUpperCase() + offer.status.slice(1)}
+          </Text>
+        </View>
+
+        {/* PATCH: inline category badge on the card */}
+        {(offer.offeredItemCategory || offer.requestedItemCategory) && (
+          <View style={styles.cardCategoryPill}>
+            <Ionicons name="pricetag-outline" size={10} color={NAVY} />
+            <Text style={styles.cardCategoryText} numberOfLines={1}>
+              {offer.requestedItemCategory ?? offer.offeredItemCategory}
+            </Text>
+          </View>
+        )}
       </View>
 
-      {/* Owner / target row */}
+      {/* Owner row */}
       <View style={styles.ownerRow}>
         <Image
           source={{
@@ -782,7 +901,6 @@ function SentOfferCard({
             </Text>
           )}
         </View>
-        {/* Tap hint */}
         <View style={styles.detailHint}>
           <Text style={styles.detailHintText}>Details</Text>
           <Ionicons name="chevron-forward" size={12} color={NAVY} />
@@ -822,15 +940,26 @@ function SentOfferCard({
         </View>
       )}
 
+      {/* PATCH: decline reason inline on the card (visible only to offerer) */}
+      {offer.status === "declined" && (offer as any).declineReason && (
+        <View style={styles.declineReasonBox}>
+          <Ionicons
+            name="information-circle-outline"
+            size={12}
+            color="#E11D48"
+          />
+          <Text style={styles.declineReasonText} numberOfLines={2}>
+            Reason: {(offer as any).declineReason}
+          </Text>
+        </View>
+      )}
+
       {/* Actions */}
       <View style={styles.actions}>
         {isPending && (
           <TouchableOpacity
-            style={styles.cancelBtn}
-            onPress={(e) => {
-              e.stopPropagation?.();
-              onCancel();
-            }}
+            style={[styles.cancelBtn, isCancelling && { opacity: 0.6 }]}
+            onPress={onCancel}
             disabled={isCancelling}
             activeOpacity={0.8}
           >
@@ -852,10 +981,7 @@ function SentOfferCard({
         {(isAccepted || isCompleted) && (
           <TouchableOpacity
             style={styles.messageBtn}
-            onPress={(e) => {
-              e.stopPropagation?.();
-              onMessage();
-            }}
+            onPress={onMessage}
             activeOpacity={0.8}
           >
             <Ionicons name="chatbubble-outline" size={14} color={NAVY} />
@@ -870,10 +996,7 @@ function SentOfferCard({
               iHaveConfirmed && styles.completeBtnWaiting,
               otherHasConfirmed && styles.completeBtnHighlight,
             ]}
-            onPress={(e) => {
-              e.stopPropagation?.();
-              onComplete();
-            }}
+            onPress={onComplete}
             disabled={isCompleting || iHaveConfirmed}
             activeOpacity={0.85}
           >
@@ -958,7 +1081,7 @@ const sheetStyles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    marginBottom: 16,
+    marginBottom: 8,
   },
   statusPill: {
     flexDirection: "row",
@@ -972,8 +1095,42 @@ const sheetStyles = StyleSheet.create({
   statusDot: { width: 7, height: 7, borderRadius: 4 },
   statusText: { fontSize: 12, fontWeight: "700" },
   dateText: { fontSize: 12, color: "#9CA3AF" },
-
-  // ── Swap section ──────────────────────────────────────────────────────────
+  // PATCH: category badges in detail sheet
+  categoryRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 6,
+    marginBottom: 12,
+  },
+  categoryPill: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    backgroundColor: "#ECEDF8",
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 20,
+  },
+  categoryPillText: { fontSize: 11, fontWeight: "600", color: NAVY },
+  // PATCH: decline reason in detail sheet
+  declineReasonBox: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: 7,
+    backgroundColor: "#FFF1F2",
+    borderRadius: 10,
+    padding: 11,
+    marginBottom: 14,
+    borderWidth: 1,
+    borderColor: "#FECDD3",
+  },
+  declineReasonText: {
+    fontSize: 13,
+    color: "#E11D48",
+    flex: 1,
+    lineHeight: 18,
+    fontWeight: "500",
+  },
   swapSection: {
     flexDirection: "row",
     alignItems: "center",
@@ -1015,8 +1172,6 @@ const sheetStyles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-
-  // ── Owner card ────────────────────────────────────────────────────────────
   ownerCard: {
     flexDirection: "row",
     alignItems: "center",
@@ -1044,8 +1199,6 @@ const sheetStyles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-
-  // ── Message ───────────────────────────────────────────────────────────────
   messageBox: {
     flexDirection: "row",
     alignItems: "flex-start",
@@ -1062,8 +1215,6 @@ const sheetStyles = StyleSheet.create({
     flex: 1,
     lineHeight: 19,
   },
-
-  // ── Confirmation progress ─────────────────────────────────────────────────
   confirmProgress: {
     flexDirection: "row",
     alignItems: "center",
@@ -1084,8 +1235,6 @@ const sheetStyles = StyleSheet.create({
   },
   confirmLine: { flex: 1, height: 2, marginHorizontal: 6, borderRadius: 1 },
   confirmLabel: { fontSize: 11, fontWeight: "600", color: "#9CA3AF" },
-
-  // ── Actions ───────────────────────────────────────────────────────────────
   actions: { gap: 10 },
   messageBtn: {
     flexDirection: "row",
@@ -1138,8 +1287,6 @@ const sheetStyles = StyleSheet.create({
 // ── Main screen styles ────────────────────────────────────────────────────────
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#F8F9FF" },
-
-  // ── Header ────────────────────────────────────────────────────────────────
   header: {
     flexDirection: "row",
     alignItems: "center",
@@ -1160,8 +1307,6 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   headerTitle: { fontSize: 17, fontWeight: "700", color: "#111827" },
-
-  // ── Item Hero ─────────────────────────────────────────────────────────────
   itemHero: {
     flexDirection: "row",
     alignItems: "center",
@@ -1185,10 +1330,7 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     backgroundColor: "#F3F4F6",
   },
-  itemHeroImageEmpty: {
-    justifyContent: "center",
-    alignItems: "center",
-  },
+  itemHeroImageEmpty: { justifyContent: "center", alignItems: "center" },
   itemHeroInfo: { flex: 1, gap: 4 },
   itemHeroLabel: {
     fontSize: 11,
@@ -1211,8 +1353,6 @@ const styles = StyleSheet.create({
     fontWeight: "600",
     textTransform: "uppercase",
   },
-
-  // ── Filter Bar ────────────────────────────────────────────────────────────
   filterBar: { maxHeight: 52, marginBottom: 4 },
   filterBarContent: { paddingHorizontal: 16, gap: 6, alignItems: "center" },
   filterTab: {
@@ -1238,10 +1378,33 @@ const styles = StyleSheet.create({
   },
   filterBadgeText: { fontSize: 9, fontWeight: "800" },
 
-  // ── List ──────────────────────────────────────────────────────────────────
-  listContent: { paddingHorizontal: 16, paddingTop: 12, paddingBottom: 100 },
+  // PATCH: category chip row
+  categoryBar: { maxHeight: 44, marginBottom: 4 },
+  categoryBarContent: {
+    paddingHorizontal: 16,
+    gap: 6,
+    alignItems: "center",
+  },
+  categoryChip: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 20,
+    borderWidth: 1.5,
+    borderColor: "#D0D4FF",
+    backgroundColor: "#fff",
+    flexShrink: 0,
+  },
+  categoryChipActive: {
+    backgroundColor: NAVY,
+    borderColor: NAVY,
+  },
+  categoryChipText: { fontSize: 11, fontWeight: "700", color: NAVY },
+  categoryChipTextActive: { color: "#fff" },
 
-  // ── Card ──────────────────────────────────────────────────────────────────
+  listContent: { paddingHorizontal: 16, paddingTop: 12, paddingBottom: 100 },
   card: {
     backgroundColor: "#fff",
     borderRadius: 16,
@@ -1255,6 +1418,13 @@ const styles = StyleSheet.create({
     elevation: 1,
     gap: 10,
   },
+  // PATCH: row that holds status pill + category badge side by side
+  cardTopRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    flexWrap: "wrap",
+  },
   cardStatusPill: {
     flexDirection: "row",
     alignItems: "center",
@@ -1266,8 +1436,17 @@ const styles = StyleSheet.create({
   },
   cardStatusDot: { width: 6, height: 6, borderRadius: 3 },
   cardStatusText: { fontSize: 11, fontWeight: "700" },
-
-  // ── Owner row ─────────────────────────────────────────────────────────────
+  // PATCH: category on the card itself
+  cardCategoryPill: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    backgroundColor: "#ECEDF8",
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 20,
+  },
+  cardCategoryText: { fontSize: 10, fontWeight: "600", color: NAVY },
   ownerRow: { flexDirection: "row", alignItems: "center", gap: 10 },
   ownerAvatar: {
     width: 36,
@@ -1287,8 +1466,6 @@ const styles = StyleSheet.create({
     borderRadius: 8,
   },
   detailHintText: { fontSize: 11, fontWeight: "600", color: NAVY },
-
-  // ── Swap row ──────────────────────────────────────────────────────────────
   swapRow: {
     flexDirection: "row",
     alignItems: "center",
@@ -1316,8 +1493,6 @@ const styles = StyleSheet.create({
     lineHeight: 17,
   },
   swapRightSide: { flex: 1 },
-
-  // ── Message box ───────────────────────────────────────────────────────────
   messageBox: {
     flexDirection: "row",
     alignItems: "flex-start",
@@ -1333,8 +1508,24 @@ const styles = StyleSheet.create({
     flex: 1,
     lineHeight: 17,
   },
-
-  // ── Actions ───────────────────────────────────────────────────────────────
+  // PATCH: decline reason on the card
+  declineReasonBox: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: 6,
+    backgroundColor: "#FFF1F2",
+    borderRadius: 8,
+    padding: 9,
+    borderWidth: 1,
+    borderColor: "#FECDD3",
+  },
+  declineReasonText: {
+    fontSize: 11,
+    color: "#E11D48",
+    flex: 1,
+    lineHeight: 16,
+    fontWeight: "500",
+  },
   actions: { flexDirection: "row", gap: 8, alignItems: "center" },
   cancelBtn: {
     flex: 1,
@@ -1385,8 +1576,6 @@ const styles = StyleSheet.create({
     backgroundColor: "#F0FDF4",
   },
   completedBadgeText: { fontSize: 12, fontWeight: "700", color: "#16A34A" },
-
-  // ── States ────────────────────────────────────────────────────────────────
   centered: {
     flex: 1,
     alignItems: "center",
@@ -1407,4 +1596,15 @@ const styles = StyleSheet.create({
     textAlign: "center",
     lineHeight: 19,
   },
+  clearFiltersBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    backgroundColor: "#ECEDF8",
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 20,
+    marginTop: 4,
+  },
+  clearFiltersBtnText: { fontSize: 13, fontWeight: "700", color: NAVY },
 });

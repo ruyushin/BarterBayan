@@ -1,25 +1,28 @@
 import { FontAwesome, Ionicons } from "@expo/vector-icons";
-import * as FileSystem from "expo-file-system";
-import * as MediaLibrary from "expo-media-library";
-import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
+import { useFocusEffect, useRouter } from "expo-router";
 import { onAuthStateChanged } from "firebase/auth";
+import {
+  addDoc,
+  collection,
+  getFirestore,
+  serverTimestamp,
+} from "firebase/firestore";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
-  Dimensions,
   FlatList,
   Image,
   Modal,
-  Platform,
   Pressable,
+  RefreshControl,
   SafeAreaView,
-  ScrollView,
   StyleSheet,
   Text,
   TextInput,
   TouchableOpacity,
-  View,
+  useWindowDimensions,
+  View
 } from "react-native";
 import { ProposeTradeModal } from "../../components/ProposeTradeModal";
 import { auth } from "../../firebaseConfig";
@@ -27,6 +30,7 @@ import {
   addComment,
   addCommentReply,
   deleteComment,
+  deleteItem,
   getAllItems,
   getUserSavedItems,
   updateCommentLike,
@@ -34,16 +38,15 @@ import {
   updateItemSave,
 } from "../../services/itemService";
 import { getLikeState, setLikeState } from "../../services/likeCache";
-
 import {
   getPersonalizedSuggestions,
   getTrendingItems,
 } from "../../services/trendingService";
 
-const { width: screenWidth, height: screenHeight } = Dimensions.get("window");
 const NAVY = "#2f2f6f";
 const GOLD = "#C9A227";
 const PLACEHOLDER = "https://via.placeholder.com/400x200?text=No+Image";
+const db = getFirestore();
 
 const FILTER_CATEGORIES = [
   "All",
@@ -54,12 +57,24 @@ const FILTER_CATEGORIES = [
   "Household",
 ];
 
+const REPORT_REASONS = [
+  "Spam or misleading",
+  "Inappropriate content",
+  "Counterfeit or fake item",
+  "Prohibited item",
+  "Scam or fraud",
+  "Other",
+];
+
 // ── URI guard ─────────────────────────────────────────────────────────────────
 function safeUri(uri: any): string {
   if (!uri || typeof uri !== "string") return PLACEHOLDER;
-  if (uri.startsWith("blob:")) return PLACEHOLDER;
-  if (uri.startsWith("file:")) return PLACEHOLDER;
-  if (uri.startsWith("data:")) return PLACEHOLDER;
+  if (
+    uri.startsWith("blob:") ||
+    uri.startsWith("file:") ||
+    uri.startsWith("data:")
+  )
+    return PLACEHOLDER;
   if (!uri.startsWith("http")) return PLACEHOLDER;
   return uri;
 }
@@ -69,53 +84,51 @@ function safeUriList(images: any): string[] {
   return raw.map(safeUri).filter((u) => u !== PLACEHOLDER);
 }
 
-// ── Cross-platform save ───────────────────────────────────────────────────────
-async function saveImageCrossPlatform(url: string) {
-  if (Platform.OS === "web") {
-    try {
-      const res = await fetch(url);
-      const blob = await res.blob();
-      const objectUrl = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = objectUrl;
-      a.download = `barterbayan-${Date.now()}.jpg`;
-      a.click();
-      URL.revokeObjectURL(objectUrl);
-    } catch {
-      Alert.alert("Error", "Failed to download image.");
-    }
-  } else {
-    try {
-      const { status } = await MediaLibrary.requestPermissionsAsync();
-      if (status !== "granted") {
-        Alert.alert("Permission denied", "Camera roll permission is required.");
-        return;
-      }
-      const filename = `BarterBayan_${Date.now()}.jpg`;
-      const fileDir = (FileSystem as any).documentDirectory || "";
-      const result = await FileSystem.downloadAsync(url, fileDir + filename);
-      await MediaLibrary.saveToLibraryAsync(result.uri);
-      Alert.alert("Saved!", "Image saved to your gallery.");
-    } catch {
-      Alert.alert("Error", "Failed to save image.");
-    }
+// ── Date formatter ────────────────────────────────────────────────────────────
+function formatPostDate(timestamp: any): string {
+  if (!timestamp) return "";
+  let date: Date;
+  try {
+    if (timestamp?.toDate) date = timestamp.toDate();
+    else if (timestamp instanceof Date) date = timestamp;
+    else if (typeof timestamp === "number") date = new Date(timestamp);
+    else date = new Date(timestamp);
+    if (isNaN(date.getTime())) return "";
+  } catch {
+    return "";
   }
+
+  const now = new Date();
+  const diffMs = now.getTime() - date.getTime();
+  const diffSec = Math.floor(diffMs / 1000);
+  const diffMin = Math.floor(diffSec / 60);
+  const diffHr = Math.floor(diffMin / 60);
+  const diffDays = Math.floor(diffHr / 24);
+
+  if (diffSec < 60) return "Just now";
+  if (diffMin < 60) return `${diffMin}m ago`;
+  if (diffHr < 24) return `${diffHr}h ago`;
+  if (diffDays === 1) return "Yesterday";
+  if (diffDays < 7) return `${diffDays}d ago`;
+  return (
+    date.toLocaleDateString("en-US", { month: "short", day: "numeric" }) +
+    " · " +
+    date.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" })
+  );
 }
 
 // ── Main Screen ───────────────────────────────────────────────────────────────
 export default function Screen() {
-  const params = useLocalSearchParams<{
-    filter?: string;
-    search?: string;
-    type?: string;
-  }>();
   const router = useRouter();
   const [search, setSearch] = useState("");
-  const [sortType, setSortType] = useState("none");
+  const [sortType, setSortType] = useState<
+    "none" | "likes" | "name" | "recent"
+  >("none");
   const [filter, setFilter] = useState("All");
   const [isFilterOpen, setIsFilterOpen] = useState(false);
   const [allItems, setAllItems] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [isRefreshing, setIsRefreshing] = useState(false);
   const [userId, setUserId] = useState<string | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
   const [typeFilter, setTypeFilter] = useState<
@@ -131,23 +144,20 @@ export default function Screen() {
     return () => unsubscribe();
   }, []);
 
-  // Refetch on screen focus so likes/saves stay in sync when returning
-  // from product-details or any other screen
   useFocusEffect(
     useCallback(() => {
       setRefreshKey((k) => k + 1);
     }, []),
   );
 
-  useEffect(() => {
-    const fetchItems = async () => {
+  const fetchItems = useCallback(
+    async (silent = false) => {
       try {
-        if (isInitialLoad) setLoading(true);
+        if (!silent && isInitialLoad) setLoading(true);
         const allEnriched = await getAllItems();
         const enrichMap = Object.fromEntries(
           allEnriched.map((i: any) => [i.id, i]),
         );
-
         let items: any[];
         if (typeFilter === "trending") {
           const trending = await getTrendingItems(50);
@@ -172,41 +182,44 @@ export default function Screen() {
         } else {
           items = allEnriched;
         }
-
         setAllItems(items);
         setIsInitialLoad(false);
       } catch (error) {
         console.error("Error fetching items:", error);
       } finally {
-        if (isInitialLoad) setLoading(false);
+        setLoading(false);
+        setIsRefreshing(false);
       }
-    };
-    fetchItems();
-  }, [refreshKey, userId, typeFilter]);
+    },
+    [typeFilter, userId, isInitialLoad],
+  );
 
   useEffect(() => {
-    if (
-      typeof params.filter === "string" &&
-      FILTER_CATEGORIES.includes(params.filter)
-    ) {
-      setFilter(params.filter);
-    } else {
-      setFilter("All");
-    }
-    if (typeof params.search === "string") setSearch(params.search);
-    if (params.type === "trending") setTypeFilter("trending");
-    else if (params.type === "personalized") setTypeFilter("personalized");
-    else setTypeFilter("all");
-  }, [params.filter, params.search, params.type]);
+    fetchItems();
+  }, [refreshKey, typeFilter]);
+
+  const handleRefresh = () => {
+    setIsRefreshing(true);
+    fetchItems(true);
+  };
+
+  const handleItemDeleted = (itemId: string) => {
+    setAllItems((prev) => prev.filter((i) => i.id !== itemId));
+  };
+
+  const sortLabels: Record<string, string> = {
+    none: "Default",
+    likes: "Most Liked",
+    name: "Name",
+    recent: "Most Recent",
+  };
 
   const filteredItems = allItems
     .filter((item) => {
       const matchSearch =
-        search.length === 0 ||
-        (item.title &&
-          item.title.toLowerCase().includes(search.toLowerCase())) ||
-        (item.description &&
-          item.description.toLowerCase().includes(search.toLowerCase()));
+        !search.length ||
+        item.title?.toLowerCase().includes(search.toLowerCase()) ||
+        item.description?.toLowerCase().includes(search.toLowerCase());
       const matchFilter = filter === "All" || item.category === filter;
       return matchSearch && matchFilter;
     })
@@ -214,12 +227,28 @@ export default function Screen() {
       if (sortType === "likes") return (b.likes || 0) - (a.likes || 0);
       if (sortType === "name")
         return (a.title || "").localeCompare(b.title || "");
+      if (sortType === "recent") {
+        const getTime = (item: any) => {
+          const ts = item.createdAt;
+          if (!ts) return 0;
+          if (ts?.toMillis) return ts.toMillis();
+          if (ts instanceof Date) return ts.getTime();
+          return new Date(ts).getTime() || 0;
+        };
+        return getTime(b) - getTime(a);
+      }
       return 0;
     });
 
   const handleSort = () =>
     setSortType((prev) =>
-      prev === "none" ? "likes" : prev === "likes" ? "name" : "none",
+      prev === "none"
+        ? "likes"
+        : prev === "likes"
+          ? "name"
+          : prev === "name"
+            ? "recent"
+            : "none",
     );
 
   if (loading) {
@@ -241,9 +270,18 @@ export default function Screen() {
         renderItem={({ item }) => (
           <ItemCard
             item={item}
-            onCommentAdded={() => setRefreshKey((prev) => prev + 1)}
+            onCommentAdded={() => setRefreshKey((p) => p + 1)}
+            onDelete={handleItemDeleted}
           />
         )}
+        refreshControl={
+          <RefreshControl
+            refreshing={isRefreshing}
+            onRefresh={handleRefresh}
+            colors={[NAVY]}
+            tintColor={NAVY}
+          />
+        }
         ListHeaderComponent={
           <>
             {/* Search Bar */}
@@ -266,6 +304,16 @@ export default function Screen() {
                   }}
                   onSubmitEditing={() => setSearchPopupVisible(false)}
                 />
+                {search.length > 0 && (
+                  <TouchableOpacity
+                    onPress={() => {
+                      setSearch("");
+                      setSearchPopupVisible(false);
+                    }}
+                  >
+                    <Ionicons name="close-circle" size={18} color="#aaa" />
+                  </TouchableOpacity>
+                )}
               </View>
 
               {searchPopupVisible && search.trim().length > 0 && (
@@ -275,10 +323,10 @@ export default function Screen() {
                       .filter(
                         (item) =>
                           item.title
-                            .toLowerCase()
+                            ?.toLowerCase()
                             .includes(search.toLowerCase()) ||
                           item.category
-                            .toLowerCase()
+                            ?.toLowerCase()
                             .includes(search.toLowerCase()),
                       )
                       .slice(0, 5);
@@ -286,8 +334,8 @@ export default function Screen() {
                       <>
                         <Text style={styles.popupTitle}>
                           {results.length > 0
-                            ? `Found ${results.length} related posts`
-                            : "No related posts found"}
+                            ? `${results.length} results`
+                            : "No results found"}
                         </Text>
                         {results.length > 0 ? (
                           results.map((item) => (
@@ -347,7 +395,7 @@ export default function Screen() {
                   >
                     <Ionicons
                       name={icons[type]}
-                      size={16}
+                      size={15}
                       color={isActive ? "#fff" : NAVY}
                     />
                     <Text
@@ -366,17 +414,33 @@ export default function Screen() {
             {/* Sort / Filter row */}
             <View style={styles.filterRow}>
               <Pressable style={styles.filterBtn} onPress={handleSort}>
-                <Text style={styles.filterText}>{`Sort (${sortType})`}</Text>
-                <Ionicons name="swap-vertical" size={14} />
+                <Ionicons name="swap-vertical" size={13} color={NAVY} />
+                <Text style={styles.filterText}>{sortLabels[sortType]}</Text>
               </Pressable>
               <Pressable
-                style={styles.filterBtn}
+                style={[
+                  styles.filterBtn,
+                  filter !== "All" && styles.filterBtnActive,
+                ]}
                 onPress={() => setIsFilterOpen((p) => !p)}
               >
-                <Text style={styles.filterText}>{`Filter (${filter})`}</Text>
+                <Ionicons
+                  name="options-outline"
+                  size={13}
+                  color={filter !== "All" ? "#fff" : NAVY}
+                />
+                <Text
+                  style={[
+                    styles.filterText,
+                    filter !== "All" && styles.filterTextActive,
+                  ]}
+                >
+                  {filter}
+                </Text>
                 <Ionicons
                   name={isFilterOpen ? "chevron-up" : "chevron-down"}
-                  size={14}
+                  size={13}
+                  color={filter !== "All" ? "#fff" : NAVY}
                 />
               </Pressable>
             </View>
@@ -390,8 +454,19 @@ export default function Screen() {
                       setFilter(category);
                       setIsFilterOpen(false);
                     }}
-                    style={styles.dropdownItem}
+                    style={[
+                      styles.dropdownItem,
+                      filter === category && styles.dropdownItemActive,
+                    ]}
                   >
+                    {filter === category && (
+                      <Ionicons
+                        name="checkmark"
+                        size={14}
+                        color={NAVY}
+                        style={{ marginRight: 6 }}
+                      />
+                    )}
                     <Text
                       style={[
                         styles.dropdownText,
@@ -408,8 +483,10 @@ export default function Screen() {
         }
         ListEmptyComponent={
           <View style={styles.emptyContainer}>
+            <Ionicons name="search-outline" size={40} color="#ccc" />
+            <Text style={styles.emptyTitle}>No items found</Text>
             <Text style={styles.emptyText}>
-              No items found. Try adjusting your search or filters.
+              Try adjusting your search or filters.
             </Text>
           </View>
         }
@@ -421,22 +498,22 @@ export default function Screen() {
 }
 
 // ─── ItemCard ─────────────────────────────────────────────────────────────────
-function ItemCard({ item, onCommentAdded }: any) {
+function ItemCard({ item, onCommentAdded, onDelete }: any) {
   const router = useRouter();
+  const { width: screenWidth } = useWindowDimensions();
+  const imageHeight = screenWidth * 0.62;
 
   const currentUser = auth.currentUser?.uid;
   const currentUserName =
     auth.currentUser?.displayName ||
     (auth.currentUser?.email
       ? auth.currentUser.email.split("@")[0]
-      : auth.currentUser?.uid
-        ? `User_${auth.currentUser.uid.slice(0, 5)}`
-        : "User");
+      : `User_${auth.currentUser?.uid?.slice(0, 5) ?? ""}`);
   const currentUserPhotoURL =
     auth.currentUser?.photoURL || "https://i.pravatar.cc/150?img=1";
   const isOwnItem = !!currentUser && currentUser === item?.ownerId;
 
-  // ── Like state — seed from likeCache first, fall back to item prop ──────────
+  // ── Like state ──────────────────────────────────────────────────────────────
   const _cached = getLikeState(item.id);
   const [isLiked, setIsLiked] = useState(
     _cached
@@ -451,10 +528,8 @@ function ItemCard({ item, onCommentAdded }: any) {
   const [comments, setComments] = useState<any[]>(item.comments || []);
   const [showComments, setShowComments] = useState(false);
   const [commentText, setCommentText] = useState("");
-  const [loading, setLoading] = useState(false);
+  const [likeLoading, setLikeLoading] = useState(false);
   const [commentsLoading, setCommentsLoading] = useState(false);
-  const [showImageGallery, setShowImageGallery] = useState(false);
-  const [currentImageIndex, setCurrentImageIndex] = useState(0);
   const [replyingToCommentId, setReplyingToCommentId] = useState<string | null>(
     null,
   );
@@ -463,6 +538,13 @@ function ItemCard({ item, onCommentAdded }: any) {
   const [deletedCommentData, setDeletedCommentData] = useState<any>(null);
   const deleteTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [tradeModalVisible, setTradeModalVisible] = useState(false);
+
+  // ── Options & Report ────────────────────────────────────────────────────────
+  const [showOptions, setShowOptions] = useState(false);
+  const [showReportModal, setShowReportModal] = useState(false);
+  const [reportTarget, setReportTarget] = useState<"post" | "user">("post");
+  const [selectedReason, setSelectedReason] = useState("");
+  const [reportSubmitting, setReportSubmitting] = useState(false);
 
   const imagesList = (() => {
     const safe = safeUriList(item?.images);
@@ -479,9 +561,8 @@ function ItemCard({ item, onCommentAdded }: any) {
     item?.userName && item.userName.trim().length > 0
       ? item.userName
       : "Unknown User";
+  const postDate = formatPostDate(item?.createdAt || item?.date);
 
-  // Sync like state: prefer likeCache (holds changes from modal/detail screen),
-  // fall back to fresh item prop when no cache entry exists yet.
   useEffect(() => {
     const entry = getLikeState(item.id);
     if (entry) {
@@ -502,9 +583,7 @@ function ItemCard({ item, onCommentAdded }: any) {
     try {
       const saved = await getUserSavedItems(currentUser);
       setIsSaved(saved.some((s: any) => s.id === item.id));
-    } catch (error) {
-      console.error("Error checking saved items:", error);
-    }
+    } catch {}
   };
 
   const handleLike = async () => {
@@ -513,19 +592,17 @@ function ItemCard({ item, onCommentAdded }: any) {
       return;
     }
     try {
-      setLoading(true);
+      setLikeLoading(true);
       const nowLiked = !isLiked;
       const newCount = nowLiked ? likes + 1 : Math.max(0, likes - 1);
       await updateItemLikes(item.id, currentUser, nowLiked);
       setIsLiked(nowLiked);
       setLikes(newCount);
-      // Write to shared cache so ProductDetailModal and ProductDetailsScreen
-      // see the same value without a Firestore round-trip.
       setLikeState(item.id, nowLiked, newCount);
     } catch {
-      Alert.alert("Error", "Failed to update like status.");
+      Alert.alert("Error", "Failed to update like.");
     } finally {
-      setLoading(false);
+      setLikeLoading(false);
     }
   };
 
@@ -535,17 +612,10 @@ function ItemCard({ item, onCommentAdded }: any) {
       return;
     }
     try {
-      setCommentsLoading(true);
       await updateItemSave(item.id, currentUser, !isSaved);
       setIsSaved(!isSaved);
-      Alert.alert(
-        "Success",
-        isSaved ? "Item removed from saved" : "Item saved successfully",
-      );
     } catch {
       Alert.alert("Error", "Failed to save item.");
-    } finally {
-      setCommentsLoading(false);
     }
   };
 
@@ -558,8 +628,6 @@ function ItemCard({ item, onCommentAdded }: any) {
       Alert.alert("Cannot message", "You cannot message yourself.");
       return;
     }
-    // Navigate to inbox/chat with the owner pre-selected so the user
-    // can compose and send their own message — no auto-send.
     router.push({
       pathname: "/chat",
       params: {
@@ -568,12 +636,6 @@ function ItemCard({ item, onCommentAdded }: any) {
         itemTitle: item.title,
       },
     });
-  };
-
-  const handleSaveGalleryImage = async () => {
-    const currentImage = imagesList[currentImageIndex];
-    if (!currentImage || currentImage === PLACEHOLDER) return;
-    await saveImageCrossPlatform(currentImage);
   };
 
   const handleAddComment = async () => {
@@ -593,6 +655,7 @@ function ItemCard({ item, onCommentAdded }: any) {
       );
       setComments([...comments, newComment]);
       setCommentText("");
+      onCommentAdded?.();
     } catch {
       Alert.alert("Error", "Failed to add comment.");
     } finally {
@@ -680,10 +743,10 @@ function ItemCard({ item, onCommentAdded }: any) {
 
   const handleDeleteComment = async (commentId: string) => {
     try {
-      const commentToDeleteObj = comments.find((c) => c.id === commentId);
+      const toDelete = comments.find((c) => c.id === commentId);
       await deleteComment(item.id, commentId);
       setComments(comments.filter((c) => c.id !== commentId));
-      setDeletedCommentData(commentToDeleteObj);
+      setDeletedCommentData(toDelete);
       setDeleteToastVisible(true);
       if (deleteTimerRef.current) clearTimeout(deleteTimerRef.current);
       deleteTimerRef.current = setTimeout(
@@ -714,8 +777,75 @@ function ItemCard({ item, onCommentAdded }: any) {
     }
   };
 
-  const getTopLevelCommentCount = () =>
+  const handleDeletePost = () => {
+    setShowOptions(false);
+    Alert.alert(
+      "Delete Post",
+      "This will permanently remove your listing from the explore feed and the trade tab. This cannot be undone.",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Delete",
+          style: "destructive",
+          onPress: async () => {
+            try {
+              await deleteItem(item.id);
+              onDelete?.(item.id);
+            } catch {
+              Alert.alert("Error", "Failed to delete post. Please try again.");
+            }
+          },
+        },
+      ],
+    );
+  };
+
+  const handleOpenReport = (target: "post" | "user") => {
+    setShowOptions(false);
+    setReportTarget(target);
+    setSelectedReason("");
+    setShowReportModal(true);
+  };
+
+  const handleSubmitReport = async () => {
+    if (!selectedReason) {
+      Alert.alert("Select a reason", "Please choose a reason for your report.");
+      return;
+    }
+    if (!currentUser) {
+      Alert.alert("Please log in", "You must be logged in to report content.");
+      return;
+    }
+    try {
+      setReportSubmitting(true);
+      await addDoc(collection(db, "reports"), {
+        type: reportTarget,
+        targetId: reportTarget === "post" ? item.id : item.ownerId,
+        itemId: item.id,
+        reportedBy: currentUser,
+        reason: selectedReason,
+        createdAt: serverTimestamp(),
+      });
+      setShowReportModal(false);
+      Alert.alert(
+        "Report submitted",
+        "Thank you. Our team will review this shortly.",
+      );
+    } catch {
+      Alert.alert("Error", "Failed to submit report. Please try again.");
+    } finally {
+      setReportSubmitting(false);
+    }
+  };
+
+  const getCommentCount = () =>
     comments.reduce((count, c) => count + 1 + (c.replies?.length || 0), 0);
+
+  const navigateToDetails = () =>
+    router.push({
+      pathname: "/product-details",
+      params: { itemId: item.id, item: JSON.stringify(item) },
+    });
 
   return (
     <View style={styles.card}>
@@ -725,7 +855,7 @@ function ItemCard({ item, onCommentAdded }: any) {
         onClose={() => setTradeModalVisible(false)}
       />
 
-      {/* HEADER */}
+      {/* ── HEADER ── */}
       <View style={styles.cardHeader}>
         <TouchableOpacity
           style={styles.userInfo}
@@ -749,109 +879,71 @@ function ItemCard({ item, onCommentAdded }: any) {
           )}
           <View style={styles.userDetails}>
             <Text style={styles.username}>{resolvedName}</Text>
-            <Text style={styles.date}>
-              {item.date || new Date().toLocaleDateString()}
-            </Text>
+            {!!postDate && <Text style={styles.date}>{postDate}</Text>}
           </View>
+        </TouchableOpacity>
+
+        {/* Category badge */}
+        {!!item?.category && (
+          <View style={styles.categoryBadge}>
+            <Text style={styles.categoryBadgeText}>{item.category}</Text>
+          </View>
+        )}
+
+        {/* Options menu button */}
+        <TouchableOpacity
+          style={styles.optionsBtn}
+          onPress={() => setShowOptions(true)}
+          hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+        >
+          <Ionicons name="ellipsis-horizontal" size={20} color="#999" />
         </TouchableOpacity>
       </View>
 
-      {/* IMAGE */}
+      {/* ── IMAGE ── */}
       <TouchableOpacity
-        style={styles.cardImageContainer}
-        onPress={() => setShowImageGallery(true)}
+        activeOpacity={0.95}
+        onPress={navigateToDetails}
+        style={[styles.cardImageContainer, { height: imageHeight }]}
       >
         <Image
           source={{ uri: imageUrl }}
-          style={styles.cardImage}
+          style={[styles.cardImage, { height: imageHeight }]}
+          resizeMode="cover"
           onError={() => console.warn("Failed to load image:", imageUrl)}
         />
         {imagesList.length > 1 && (
           <View style={styles.imageCountBadge}>
+            <Ionicons name="images-outline" size={13} color="white" />
             <Text style={styles.imageCountText}>{imagesList.length}</Text>
-            <Ionicons name="image" size={12} color="white" />
           </View>
         )}
-        <TouchableOpacity
-          style={styles.fullscreenButton}
-          onPress={() =>
-            router.push({
-              pathname: "/product-details",
-              params: { itemId: item.id, item: JSON.stringify(item) },
-            })
-          }
-          activeOpacity={0.7}
-        >
-          <Ionicons name="expand" size={20} color="#fff" />
-        </TouchableOpacity>
+        {/* Condition badge on image */}
+        {!!item?.condition && (
+          <View style={styles.conditionOverlay}>
+            <Text style={styles.conditionOverlayText}>{item.condition}</Text>
+          </View>
+        )}
       </TouchableOpacity>
 
-      {/* IMAGE GALLERY MODAL */}
-      <Modal
-        visible={showImageGallery}
-        transparent
-        statusBarTranslucent
-        onRequestClose={() => setShowImageGallery(false)}
+      {/* ── TITLE & DESCRIPTION ── */}
+      <TouchableOpacity
+        onPress={navigateToDetails}
+        activeOpacity={0.85}
+        style={styles.cardContent}
       >
-        <View style={styles.galleryContainer}>
-          <ScrollView
-            horizontal
-            pagingEnabled
-            onMomentumScrollEnd={(e) => {
-              const idx = Math.round(
-                e.nativeEvent.contentOffset.x / screenWidth,
-              );
-              setCurrentImageIndex(idx);
-            }}
-            style={styles.imageScroller}
-          >
-            {imagesList.map((img: string, idx: number) => (
-              <Image
-                key={idx}
-                source={{ uri: img }}
-                style={{
-                  width: screenWidth,
-                  height: screenHeight,
-                  resizeMode: "contain",
-                }}
-              />
-            ))}
-          </ScrollView>
-          <View style={styles.galleryControls}>
-            {/* Save button */}
-            <TouchableOpacity
-              style={styles.galleryBtn}
-              onPress={handleSaveGalleryImage}
-            >
-              <Ionicons name="download-outline" size={22} color="white" />
-            </TouchableOpacity>
-            <Text style={styles.imageCounter}>
-              {`${currentImageIndex + 1} / ${imagesList.length}`}
-            </Text>
-            <TouchableOpacity
-              style={styles.galleryBtn}
-              onPress={() => setShowImageGallery(false)}
-            >
-              <Ionicons name="close" size={24} color="white" />
-            </TouchableOpacity>
-          </View>
-        </View>
-      </Modal>
-
-      {/* TITLE & DESCRIPTION */}
-      <View style={styles.cardContent}>
         <Text style={styles.title}>{item.title}</Text>
-        <Text style={styles.description}>{item.description}</Text>
-      </View>
+        {!!item?.description && (
+          <Text style={styles.description} numberOfLines={2}>
+            {item.description}
+          </Text>
+        )}
+      </TouchableOpacity>
 
-      {/* ACTION BUTTONS */}
+      {/* ── ACTION BUTTONS ── */}
       {isOwnItem ? (
         <View style={styles.ownItemBanner}>
-          <Ionicons
-            name="information-circle-outline"
-            size={14}
-            color="#AAAAAA"
-          />
+          <Ionicons name="person-outline" size={13} color="#AAAAAA" />
           <Text style={styles.ownItemText}>Your listing</Text>
         </View>
       ) : (
@@ -859,10 +951,9 @@ function ItemCard({ item, onCommentAdded }: any) {
           <TouchableOpacity
             style={styles.actionBtn}
             onPress={handleSendMessage}
-            disabled={commentsLoading}
             activeOpacity={0.8}
           >
-            <Ionicons name="send" size={14} color={NAVY} />
+            <Ionicons name="chatbubble-outline" size={15} color={NAVY} />
             <Text style={styles.actionBtnText}>Message</Text>
           </TouchableOpacity>
           <TouchableOpacity
@@ -870,7 +961,7 @@ function ItemCard({ item, onCommentAdded }: any) {
             onPress={() => setTradeModalVisible(true)}
             activeOpacity={0.8}
           >
-            <Ionicons name="swap-horizontal" size={14} color={GOLD} />
+            <Ionicons name="swap-horizontal" size={15} color={GOLD} />
             <Text style={[styles.actionBtnText, styles.actionBtnTextTrade]}>
               Propose Trade
             </Text>
@@ -878,94 +969,151 @@ function ItemCard({ item, onCommentAdded }: any) {
         </View>
       )}
 
-      {/* FOOTER STATS */}
+      {/* ── FOOTER STATS ── */}
       <View style={styles.cardFooter}>
-        <View style={styles.statRow}>
-          <View style={styles.stat}>
-            <Pressable onPress={handleLike} disabled={loading}>
-              <Ionicons
-                name={isLiked ? "heart" : "heart-outline"}
-                size={18}
-                color={isLiked ? "#FF4444" : "#666"}
-              />
-            </Pressable>
-            <Text style={styles.statText}>{likes}</Text>
-          </View>
-          <Pressable
-            style={styles.stat}
-            onPress={() => setShowComments(!showComments)}
+        {/* Like */}
+        <TouchableOpacity
+          style={styles.footerAction}
+          onPress={handleLike}
+          disabled={likeLoading}
+          activeOpacity={0.7}
+        >
+          <View
+            style={[
+              styles.footerIconWrap,
+              isLiked && styles.footerIconWrapLiked,
+            ]}
           >
-            <Ionicons name="chatbubble-outline" size={18} color="#666" />
-            <Text style={styles.statText}>{getTopLevelCommentCount()}</Text>
-          </Pressable>
-          <Pressable
-            style={styles.stat}
-            onPress={handleSave}
-            disabled={commentsLoading}
+            <Ionicons
+              name={isLiked ? "heart" : "heart-outline"}
+              size={22}
+              color={isLiked ? "#FF4444" : "#555"}
+            />
+          </View>
+          <Text
+            style={[styles.footerCount, isLiked && styles.footerCountLiked]}
+          >
+            {likes}
+          </Text>
+        </TouchableOpacity>
+
+        {/* Comment */}
+        <TouchableOpacity
+          style={styles.footerAction}
+          onPress={() => setShowComments(!showComments)}
+          activeOpacity={0.7}
+        >
+          <View
+            style={[
+              styles.footerIconWrap,
+              showComments && styles.footerIconWrapActive,
+            ]}
+          >
+            <Ionicons
+              name={showComments ? "chatbubble" : "chatbubble-outline"}
+              size={21}
+              color={showComments ? NAVY : "#555"}
+            />
+          </View>
+          <Text
+            style={[
+              styles.footerCount,
+              showComments && styles.footerCountActive,
+            ]}
+          >
+            {getCommentCount()}
+          </Text>
+        </TouchableOpacity>
+
+        {/* Save */}
+        <TouchableOpacity
+          style={styles.footerAction}
+          onPress={handleSave}
+          activeOpacity={0.7}
+        >
+          <View
+            style={[
+              styles.footerIconWrap,
+              isSaved && styles.footerIconWrapSaved,
+            ]}
           >
             <FontAwesome
               name={isSaved ? "bookmark" : "bookmark-o"}
-              size={16}
-              color={isSaved ? NAVY : "#666"}
+              size={20}
+              color={isSaved ? NAVY : "#555"}
             />
-            <Text style={styles.statText}>{isSaved ? "Saved" : "Save"}</Text>
-          </Pressable>
-        </View>
+          </View>
+          <Text
+            style={[styles.footerCount, isSaved && styles.footerCountSaved]}
+          >
+            {isSaved ? "Saved" : "Save"}
+          </Text>
+        </TouchableOpacity>
       </View>
 
-      {/* COMMENTS */}
+      {/* ── COMMENTS ── */}
       {showComments && (
         <View style={styles.commentsSection}>
           <Text
             style={styles.commentsTitle}
-          >{`Comments (${getTopLevelCommentCount()})`}</Text>
-          <View style={styles.commentInputContainer}>
-            <TextInput
-              style={styles.commentInput}
-              placeholder="Add a comment..."
-              value={commentText}
-              onChangeText={setCommentText}
-              multiline
+          >{`Comments (${getCommentCount()})`}</Text>
+
+          {/* Comment input */}
+          <View style={styles.commentInputRow}>
+            <Image
+              source={{ uri: currentUserPhotoURL }}
+              style={styles.commentInputAvatar}
             />
-            <TouchableOpacity
-              style={styles.commentSendBtn}
-              onPress={handleAddComment}
-              disabled={commentsLoading || !commentText.trim()}
-            >
-              <Ionicons name="send" size={16} color={NAVY} />
-            </TouchableOpacity>
+            <View style={styles.commentInputWrap}>
+              <TextInput
+                style={styles.commentInput}
+                placeholder="Write a comment…"
+                placeholderTextColor="#aaa"
+                value={commentText}
+                onChangeText={setCommentText}
+                multiline
+              />
+              <TouchableOpacity
+                style={[
+                  styles.commentSendBtn,
+                  (!commentText.trim() || commentsLoading) &&
+                    styles.commentSendBtnDisabled,
+                ]}
+                onPress={handleAddComment}
+                disabled={commentsLoading || !commentText.trim()}
+              >
+                <Ionicons name="send" size={16} color="#fff" />
+              </TouchableOpacity>
+            </View>
           </View>
 
-          <FlatList
-            data={comments}
-            keyExtractor={(c) => c.id}
-            scrollEnabled={false}
-            renderItem={({ item: comment }) => {
-              const isCommentLiked = (comment.likedBy || []).includes(
-                currentUser,
-              );
-              return (
-                <View style={styles.commentItem}>
-                  <TouchableOpacity
-                    onPress={() =>
-                      comment.userId &&
-                      router.push({
-                        pathname: "/user-profile",
-                        params: { userId: comment.userId },
-                      })
-                    }
-                    activeOpacity={0.8}
-                  >
-                    <Image
-                      source={{
-                        uri:
-                          comment.userAvatar ||
-                          "https://i.pravatar.cc/150?img=1",
-                      }}
-                      style={styles.commentAvatar}
-                    />
-                  </TouchableOpacity>
-                  <View style={styles.commentContent}>
+          {/* Comment list */}
+          {comments.map((comment) => {
+            const isCommentLiked = (comment.likedBy || []).includes(
+              currentUser,
+            );
+            return (
+              <View key={comment.id} style={styles.commentItem}>
+                <TouchableOpacity
+                  onPress={() =>
+                    comment.userId &&
+                    router.push({
+                      pathname: "/user-profile",
+                      params: { userId: comment.userId },
+                    })
+                  }
+                  activeOpacity={0.8}
+                >
+                  <Image
+                    source={{
+                      uri:
+                        comment.userAvatar || "https://i.pravatar.cc/150?img=1",
+                    }}
+                    style={styles.commentAvatar}
+                  />
+                </TouchableOpacity>
+                <View style={styles.commentBody}>
+                  <View style={styles.commentBubble}>
                     <TouchableOpacity
                       onPress={() =>
                         comment.userId &&
@@ -974,172 +1122,330 @@ function ItemCard({ item, onCommentAdded }: any) {
                           params: { userId: comment.userId },
                         })
                       }
-                      activeOpacity={0.8}
                     >
                       <Text style={styles.commentUserName}>
-                        {comment.userName && comment.userName.trim().length > 0
-                          ? comment.userName
-                          : "User"}
+                        {comment.userName?.trim() || "User"}
                       </Text>
                     </TouchableOpacity>
                     <Text style={styles.commentText}>{comment.text}</Text>
-                    <View style={styles.commentActions}>
-                      <Pressable
-                        onPress={() =>
-                          handleCommentLike(comment.id, isCommentLiked)
-                        }
-                        style={styles.commentLikeBtn}
+                  </View>
+
+                  {/* Comment actions */}
+                  <View style={styles.commentActions}>
+                    <TouchableOpacity
+                      style={styles.commentActionBtn}
+                      onPress={() =>
+                        handleCommentLike(comment.id, isCommentLiked)
+                      }
+                      hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                    >
+                      <Ionicons
+                        name={isCommentLiked ? "heart" : "heart-outline"}
+                        size={16}
+                        color={isCommentLiked ? "#FF4444" : "#999"}
+                      />
+                      <Text
+                        style={[
+                          styles.commentActionText,
+                          isCommentLiked && { color: "#FF4444" },
+                        ]}
+                      >
+                        {comment.likes || 0}
+                      </Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={styles.commentActionBtn}
+                      onPress={() =>
+                        setReplyingToCommentId(
+                          replyingToCommentId === comment.id
+                            ? null
+                            : comment.id,
+                        )
+                      }
+                      hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                    >
+                      <Ionicons
+                        name="arrow-undo-outline"
+                        size={15}
+                        color={NAVY}
+                      />
+                      <Text style={[styles.commentActionText, { color: NAVY }]}>
+                        Reply
+                      </Text>
+                    </TouchableOpacity>
+                    {currentUser === comment.userId && (
+                      <TouchableOpacity
+                        style={styles.commentActionBtn}
+                        onPress={() => handleDeleteComment(comment.id)}
+                        hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
                       >
                         <Ionicons
-                          name={isCommentLiked ? "heart" : "heart-outline"}
-                          size={14}
-                          color={isCommentLiked ? "#FF4444" : "#999"}
+                          name="trash-outline"
+                          size={15}
+                          color="#FF6B6B"
                         />
-                        <Text style={styles.commentLikeText}>
-                          {comment.likes || 0}
-                        </Text>
-                      </Pressable>
-                      <Pressable
-                        onPress={() =>
-                          setReplyingToCommentId(
-                            replyingToCommentId === comment.id
-                              ? null
-                              : comment.id,
-                          )
-                        }
-                        style={styles.commentReplyBtn}
-                      >
-                        <Ionicons name="arrow-redo" size={14} color={NAVY} />
-                        <Text style={styles.commentReplyText}>Reply</Text>
-                      </Pressable>
-                      {currentUser === comment.userId && (
-                        <Pressable
-                          onPress={() => handleDeleteComment(comment.id)}
-                          style={styles.commentDeleteBtn}
-                        >
-                          <Ionicons name="trash" size={14} color="#FF6B6B" />
-                        </Pressable>
-                      )}
-                    </View>
-
-                    {comment.replies && comment.replies.length > 0 && (
-                      <View style={styles.repliesContainer}>
-                        {comment.replies.map((reply: any) => (
-                          <View key={reply.id} style={styles.replyItem}>
-                            <TouchableOpacity
-                              onPress={() =>
-                                reply.userId &&
-                                router.push({
-                                  pathname: "/user-profile",
-                                  params: { userId: reply.userId },
-                                })
-                              }
-                              activeOpacity={0.8}
-                            >
-                              <Image
-                                source={{
-                                  uri:
-                                    reply.userAvatar ||
-                                    "https://i.pravatar.cc/150?img=1",
-                                }}
-                                style={styles.replyAvatar}
-                              />
-                            </TouchableOpacity>
-                            <View style={styles.replyContent}>
-                              <TouchableOpacity
-                                onPress={() =>
-                                  reply.userId &&
-                                  router.push({
-                                    pathname: "/user-profile",
-                                    params: { userId: reply.userId },
-                                  })
-                                }
-                                activeOpacity={0.8}
-                              >
-                                <Text style={styles.replyUserName}>
-                                  {reply.userName &&
-                                  reply.userName.trim().length > 0
-                                    ? reply.userName
-                                    : "User"}
-                                </Text>
-                              </TouchableOpacity>
-                              <Text style={styles.replyText}>{reply.text}</Text>
-                            </View>
-                          </View>
-                        ))}
-                      </View>
-                    )}
-
-                    {replyingToCommentId === comment.id && (
-                      <View style={styles.replyInputContainer}>
-                        <TextInput
-                          style={styles.replyInput}
-                          placeholder="Write a reply..."
-                          value={replyText}
-                          onChangeText={setReplyText}
-                          multiline
-                        />
-                        <TouchableOpacity
-                          style={styles.replySendBtn}
-                          onPress={() => handleAddReply(comment.id)}
-                          disabled={commentsLoading || !replyText.trim()}
-                        >
-                          <Ionicons name="send" size={14} color={NAVY} />
-                        </TouchableOpacity>
-                      </View>
+                      </TouchableOpacity>
                     )}
                   </View>
+
+                  {/* Replies */}
+                  {comment.replies && comment.replies.length > 0 && (
+                    <View style={styles.repliesContainer}>
+                      {comment.replies.map((reply: any) => (
+                        <View key={reply.id} style={styles.replyItem}>
+                          <Image
+                            source={{
+                              uri:
+                                reply.userAvatar ||
+                                "https://i.pravatar.cc/150?img=1",
+                            }}
+                            style={styles.replyAvatar}
+                          />
+                          <View style={styles.replyBubble}>
+                            <Text style={styles.replyUserName}>
+                              {reply.userName?.trim() || "User"}
+                            </Text>
+                            <Text style={styles.replyText}>{reply.text}</Text>
+                          </View>
+                        </View>
+                      ))}
+                    </View>
+                  )}
+
+                  {/* Reply input */}
+                  {replyingToCommentId === comment.id && (
+                    <View style={styles.replyInputRow}>
+                      <TextInput
+                        style={styles.replyInput}
+                        placeholder={`Reply to ${comment.userName?.trim() || "User"}…`}
+                        placeholderTextColor="#aaa"
+                        value={replyText}
+                        onChangeText={setReplyText}
+                        multiline
+                        autoFocus
+                      />
+                      <TouchableOpacity
+                        style={[
+                          styles.replySendBtn,
+                          (!replyText.trim() || commentsLoading) &&
+                            styles.commentSendBtnDisabled,
+                        ]}
+                        onPress={() => handleAddReply(comment.id)}
+                        disabled={commentsLoading || !replyText.trim()}
+                      >
+                        <Ionicons name="send" size={14} color="#fff" />
+                      </TouchableOpacity>
+                    </View>
+                  )}
                 </View>
-              );
-            }}
-          />
+              </View>
+            );
+          })}
         </View>
       )}
 
-      {/* DELETE TOAST */}
+      {/* ── DELETE TOAST ── */}
       {deleteToastVisible && (
         <View style={styles.deleteToast}>
-          <Text style={styles.deleteToastText}>
-            1 comment deleted. Tap to undo.
-          </Text>
+          <Text style={styles.deleteToastText}>Comment deleted.</Text>
           <TouchableOpacity onPress={handleUndoDelete}>
             <Text style={styles.deleteToastUndo}>Undo</Text>
           </TouchableOpacity>
         </View>
       )}
+
+      {/* ── OPTIONS MODAL ── */}
+      <Modal
+        visible={showOptions}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowOptions(false)}
+      >
+        <TouchableOpacity
+          style={styles.optionsOverlay}
+          activeOpacity={1}
+          onPress={() => setShowOptions(false)}
+        >
+          <View style={styles.optionsMenu}>
+            <View style={styles.optionsHandle} />
+            {isOwnItem ? (
+              <TouchableOpacity
+                style={styles.optionRow}
+                onPress={handleDeletePost}
+              >
+                <View
+                  style={[styles.optionIcon, { backgroundColor: "#FFF0F0" }]}
+                >
+                  <Ionicons name="trash-outline" size={18} color="#FF4444" />
+                </View>
+                <View>
+                  <Text style={[styles.optionLabel, { color: "#FF4444" }]}>
+                    Delete Post
+                  </Text>
+                  <Text style={styles.optionSub}>
+                    Removes listing from explore & trade
+                  </Text>
+                </View>
+              </TouchableOpacity>
+            ) : (
+              <>
+                <TouchableOpacity
+                  style={styles.optionRow}
+                  onPress={() => handleOpenReport("post")}
+                >
+                  <View
+                    style={[styles.optionIcon, { backgroundColor: "#FFF8EC" }]}
+                  >
+                    <Ionicons name="flag-outline" size={18} color={GOLD} />
+                  </View>
+                  <View>
+                    <Text style={styles.optionLabel}>Report Post</Text>
+                    <Text style={styles.optionSub}>
+                      Flag this listing for review
+                    </Text>
+                  </View>
+                </TouchableOpacity>
+                <View style={styles.optionDivider} />
+                <TouchableOpacity
+                  style={styles.optionRow}
+                  onPress={() => handleOpenReport("user")}
+                >
+                  <View
+                    style={[styles.optionIcon, { backgroundColor: "#F0F0FF" }]}
+                  >
+                    <Ionicons
+                      name="person-remove-outline"
+                      size={18}
+                      color={NAVY}
+                    />
+                  </View>
+                  <View>
+                    <Text style={styles.optionLabel}>Report User</Text>
+                    <Text style={styles.optionSub}>
+                      Report {resolvedName}'s account
+                    </Text>
+                  </View>
+                </TouchableOpacity>
+              </>
+            )}
+          </View>
+        </TouchableOpacity>
+      </Modal>
+
+      {/* ── REPORT MODAL ── */}
+      <Modal
+        visible={showReportModal}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setShowReportModal(false)}
+      >
+        <View style={styles.reportOverlay}>
+          <View style={styles.reportSheet}>
+            <View style={styles.optionsHandle} />
+            <Text style={styles.reportTitle}>
+              {reportTarget === "post" ? "Report Post" : `Report User`}
+            </Text>
+            <Text style={styles.reportSub}>
+              {reportTarget === "post"
+                ? "Why are you reporting this listing?"
+                : `Why are you reporting ${resolvedName}?`}
+            </Text>
+            {REPORT_REASONS.map((reason) => (
+              <TouchableOpacity
+                key={reason}
+                style={[
+                  styles.reportReasonRow,
+                  selectedReason === reason && styles.reportReasonRowSelected,
+                ]}
+                onPress={() => setSelectedReason(reason)}
+              >
+                <View
+                  style={[
+                    styles.reportRadio,
+                    selectedReason === reason && styles.reportRadioSelected,
+                  ]}
+                >
+                  {selectedReason === reason && (
+                    <View style={styles.reportRadioInner} />
+                  )}
+                </View>
+                <Text
+                  style={[
+                    styles.reportReasonText,
+                    selectedReason === reason &&
+                      styles.reportReasonTextSelected,
+                  ]}
+                >
+                  {reason}
+                </Text>
+              </TouchableOpacity>
+            ))}
+            <View style={styles.reportActions}>
+              <TouchableOpacity
+                style={styles.reportCancelBtn}
+                onPress={() => setShowReportModal(false)}
+              >
+                <Text style={styles.reportCancelText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[
+                  styles.reportSubmitBtn,
+                  (!selectedReason || reportSubmitting) &&
+                    styles.reportSubmitBtnDisabled,
+                ]}
+                onPress={handleSubmitReport}
+                disabled={!selectedReason || reportSubmitting}
+              >
+                {reportSubmitting ? (
+                  <ActivityIndicator size="small" color="#fff" />
+                ) : (
+                  <Text style={styles.reportSubmitText}>Submit Report</Text>
+                )}
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
 
+// ─── Styles ───────────────────────────────────────────────────────────────────
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#ECECEC" },
+  container: { flex: 1, backgroundColor: "#F0F0F5" },
+
+  // Search
   searchWrapper: {
     marginHorizontal: 16,
     marginTop: 30,
     marginBottom: 4,
     position: "relative",
-    overflow: "visible",
     zIndex: 9999,
   },
   searchContainer: {
     flexDirection: "row",
     alignItems: "center",
-    backgroundColor: "#F5F5F5",
+    backgroundColor: "#fff",
     borderRadius: 14,
-    height: 48,
+    height: 50,
     borderWidth: 1,
     borderColor: "#E9E9E9",
     paddingHorizontal: 14,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 6,
+    elevation: 2,
   },
   searchIcon: { marginRight: 10 },
   searchInput: { flex: 1, color: "#242424", fontSize: 15, paddingVertical: 8 },
   searchPopup: {
     position: "absolute",
-    top: 52,
+    top: 54,
     left: 0,
     right: 0,
     borderRadius: 16,
-    backgroundColor: "#FFFFFF",
+    backgroundColor: "#fff",
     borderColor: "#E5E7EB",
     borderWidth: 1,
     padding: 14,
@@ -1151,7 +1457,7 @@ const styles = StyleSheet.create({
     zIndex: 10000,
   },
   popupTitle: {
-    fontSize: 14,
+    fontSize: 13,
     fontWeight: "700",
     color: "#111827",
     marginBottom: 10,
@@ -1160,81 +1466,110 @@ const styles = StyleSheet.create({
   searchResultItem: {
     paddingVertical: 10,
     borderBottomWidth: 1,
-    borderBottomColor: "#E5E7EB",
+    borderBottomColor: "#F3F4F6",
   },
   searchResultText: { fontSize: 14, fontWeight: "600", color: "#111827" },
   searchResultCategory: { fontSize: 12, color: "#6B7280", marginTop: 2 },
-  noResultsText: { color: "#6B7280", fontSize: 13, lineHeight: 20 },
+  noResultsText: { color: "#6B7280", fontSize: 13 },
+
+  // Type filter
   typeFilterRow: {
     flexDirection: "row",
     marginHorizontal: 12,
-    marginBottom: 16,
-    gap: 10,
+    marginBottom: 12,
+    gap: 8,
     marginTop: 12,
   },
   typeFilterBtn: {
     flexDirection: "row",
     alignItems: "center",
     paddingHorizontal: 14,
-    paddingVertical: 10,
+    paddingVertical: 9,
     borderRadius: 20,
-    backgroundColor: "#F0F0F0",
-    borderWidth: 2,
-    borderColor: "transparent",
+    backgroundColor: "#fff",
+    borderWidth: 1.5,
+    borderColor: "#E0E0E0",
     gap: 6,
   },
   typeFilterBtnActive: { backgroundColor: NAVY, borderColor: NAVY },
-  typeFilterText: { fontSize: 13, fontWeight: "600", color: "#666" },
-  typeFilterTextActive: { color: "#FFFFFF", fontWeight: "700" },
-  filterRow: { flexDirection: "row", marginHorizontal: 15, marginBottom: 10 },
+  typeFilterText: { fontSize: 13, fontWeight: "600", color: "#555" },
+  typeFilterTextActive: { color: "#fff" },
+
+  // Sort / Filter
+  filterRow: {
+    flexDirection: "row",
+    marginHorizontal: 14,
+    marginBottom: 10,
+    gap: 8,
+  },
   filterBtn: {
     flexDirection: "row",
-    backgroundColor: "#D9D9D9",
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 6,
-    marginRight: 10,
     alignItems: "center",
-  },
-  filterText: { marginRight: 5, fontSize: 13 },
-  filterDropdown: {
-    marginHorizontal: 15,
-    backgroundColor: "white",
+    backgroundColor: "#fff",
+    paddingHorizontal: 12,
+    paddingVertical: 8,
     borderRadius: 10,
+    gap: 5,
     borderWidth: 1,
-    borderColor: "#DDD",
+    borderColor: "#E0E0E0",
+  },
+  filterBtnActive: { backgroundColor: NAVY, borderColor: NAVY },
+  filterText: { fontSize: 13, fontWeight: "600", color: NAVY },
+  filterTextActive: { color: "#fff" },
+  filterDropdown: {
+    marginHorizontal: 14,
+    backgroundColor: "#fff",
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: "#E5E7EB",
     overflow: "hidden",
     marginBottom: 10,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.07,
+    shadowRadius: 8,
+    elevation: 3,
   },
-  dropdownItem: { paddingVertical: 12, paddingHorizontal: 15 },
-  dropdownText: { fontSize: 13, color: "#333" },
+  dropdownItem: {
+    paddingVertical: 13,
+    paddingHorizontal: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: "#F3F4F6",
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  dropdownItemActive: { backgroundColor: "#F0F0FF" },
+  dropdownText: { fontSize: 14, color: "#333" },
   dropdownTextActive: { fontWeight: "700", color: NAVY },
+
+  // Card
   card: {
-    backgroundColor: "#FFFFFF",
+    backgroundColor: "#fff",
     marginHorizontal: 12,
     marginBottom: 16,
-    borderRadius: 14,
+    borderRadius: 16,
     overflow: "hidden",
     shadowColor: "#000",
     shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
+    shadowOpacity: 0.07,
+    shadowRadius: 8,
     elevation: 3,
   },
   cardHeader: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    padding: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
     borderBottomWidth: 1,
-    borderBottomColor: "#F0F0F0",
+    borderBottomColor: "#F5F5F5",
   },
   userInfo: { flexDirection: "row", alignItems: "center", flex: 1 },
   avatar: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    marginRight: 12,
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    marginRight: 10,
     backgroundColor: "#E8E8E8",
   },
   avatarFallback: {
@@ -1245,76 +1580,61 @@ const styles = StyleSheet.create({
   avatarInitial: { color: "#fff", fontSize: 16, fontWeight: "800" },
   userDetails: { flex: 1 },
   username: { fontWeight: "700", fontSize: 14, color: "#1F1F1F" },
-  date: { fontSize: 12, color: "#999", marginTop: 2 },
+  date: { fontSize: 11, color: "#9CA3AF", marginTop: 1 },
+  categoryBadge: {
+    backgroundColor: "#EEF0FF",
+    paddingHorizontal: 9,
+    paddingVertical: 4,
+    borderRadius: 8,
+    marginRight: 8,
+  },
+  categoryBadgeText: { fontSize: 11, fontWeight: "700", color: NAVY },
+  optionsBtn: { padding: 6 },
 
+  // Image
   cardImageContainer: {
     position: "relative",
     width: "100%",
-    height: 220,
     backgroundColor: "#F5F5F5",
   },
-  cardImage: { width: "100%", height: 220, backgroundColor: "#F5F5F5" },
+  cardImage: { width: "100%", backgroundColor: "#F5F5F5" },
   imageCountBadge: {
     position: "absolute",
     bottom: 10,
     right: 10,
-    backgroundColor: "rgba(0,0,0,0.6)",
-    paddingHorizontal: 10,
-    paddingVertical: 6,
+    backgroundColor: "rgba(0,0,0,0.65)",
+    paddingHorizontal: 9,
+    paddingVertical: 5,
     borderRadius: 20,
     flexDirection: "row",
     alignItems: "center",
-    gap: 6,
+    gap: 5,
   },
   imageCountText: { color: "white", fontSize: 12, fontWeight: "700" },
-  fullscreenButton: {
+  conditionOverlay: {
     position: "absolute",
-    top: 10,
-    right: 10,
-    backgroundColor: "rgba(0,0,0,0.6)",
-    paddingHorizontal: 10,
-    paddingVertical: 8,
+    bottom: 10,
+    left: 10,
+    backgroundColor: "rgba(47,47,111,0.85)",
+    paddingHorizontal: 9,
+    paddingVertical: 4,
     borderRadius: 8,
-    justifyContent: "center",
-    alignItems: "center",
   },
-  galleryContainer: { flex: 1, backgroundColor: "#000" },
-  imageScroller: { flex: 1 },
-  galleryControls: {
-    position: "absolute",
-    bottom: 20,
-    left: 0,
-    right: 0,
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    paddingHorizontal: 20,
-  },
-  galleryBtn: {
-    width: 50,
-    height: 50,
-    borderRadius: 25,
-    backgroundColor: "rgba(255,255,255,0.3)",
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  imageCounter: {
-    color: "white",
-    fontSize: 16,
-    fontWeight: "600",
-    textAlign: "center",
-    flex: 1,
-  },
-  cardContent: { padding: 14 },
-  title: { fontWeight: "700", fontSize: 16, color: "#1F1F1F", marginBottom: 6 },
-  description: { fontSize: 13, color: "#666", lineHeight: 18 },
+  conditionOverlayText: { color: "#fff", fontSize: 11, fontWeight: "700" },
+
+  // Content
+  cardContent: { paddingHorizontal: 14, paddingTop: 12, paddingBottom: 10 },
+  title: { fontWeight: "700", fontSize: 16, color: "#1F1F1F", marginBottom: 4 },
+  description: { fontSize: 13, color: "#6B7280", lineHeight: 18 },
+
+  // Action buttons
   actionButtons: {
     flexDirection: "row",
     paddingHorizontal: 14,
     paddingVertical: 10,
     borderTopWidth: 1,
-    borderTopColor: "#F0F0F0",
-    gap: 10,
+    borderTopColor: "#F5F5F5",
+    gap: 8,
   },
   actionBtn: {
     flex: 1,
@@ -1322,42 +1642,67 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     backgroundColor: "#EFF1FF",
-    paddingVertical: 9,
+    paddingVertical: 10,
     paddingHorizontal: 10,
-    borderRadius: 8,
-    gap: 5,
+    borderRadius: 10,
+    gap: 6,
   },
   actionBtnTrade: {
     backgroundColor: "#FEF9EC",
     borderWidth: 1,
     borderColor: "#F0D98A",
   },
-  actionBtnText: { fontSize: 12, fontWeight: "600", color: NAVY },
+  actionBtnText: { fontSize: 13, fontWeight: "600", color: NAVY },
   actionBtnTextTrade: { color: GOLD },
   ownItemBanner: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
     gap: 5,
-    paddingVertical: 9,
-    paddingHorizontal: 14,
+    paddingVertical: 10,
     borderTopWidth: 1,
-    borderTopColor: "#F0F0F0",
+    borderTopColor: "#F5F5F5",
     backgroundColor: "#FAFAFA",
   },
   ownItemText: { fontSize: 12, color: "#AAAAAA", fontWeight: "500" },
+
+  // Footer stats (bigger buttons)
   cardFooter: {
-    paddingHorizontal: 14,
-    paddingVertical: 12,
+    flexDirection: "row",
+    paddingHorizontal: 8,
+    paddingVertical: 8,
     borderTopWidth: 1,
-    borderTopColor: "#F0F0F0",
+    borderTopColor: "#F5F5F5",
+    justifyContent: "space-around",
   },
-  statRow: { flexDirection: "row", justifyContent: "space-around" },
-  stat: { alignItems: "center", paddingHorizontal: 12 },
-  statText: { fontSize: 12, color: "#666", marginTop: 4 },
+  footerAction: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+    paddingVertical: 6,
+  },
+  footerIconWrap: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: "#F5F5F5",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  footerIconWrapLiked: { backgroundColor: "#FFF0F0" },
+  footerIconWrapActive: { backgroundColor: "#EFF1FF" },
+  footerIconWrapSaved: { backgroundColor: "#EFF1FF" },
+  footerCount: { fontSize: 13, color: "#666", fontWeight: "600", minWidth: 20 },
+  footerCountLiked: { color: "#FF4444" },
+  footerCountActive: { color: NAVY },
+  footerCountSaved: { color: NAVY },
+
+  // Comments
   commentsSection: {
     borderTopWidth: 1,
-    borderTopColor: "#F0F0F0",
+    borderTopColor: "#F5F5F5",
     padding: 14,
     backgroundColor: "#FAFAFA",
   },
@@ -1365,104 +1710,260 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: "700",
     color: "#1F1F1F",
-    marginBottom: 12,
+    marginBottom: 14,
   },
-  commentInputContainer: { flexDirection: "row", marginBottom: 14, gap: 8 },
+  commentInputRow: {
+    flexDirection: "row",
+    alignItems: "flex-end",
+    gap: 10,
+    marginBottom: 16,
+  },
+  commentInputAvatar: { width: 36, height: 36, borderRadius: 18 },
+  commentInputWrap: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "flex-end",
+    backgroundColor: "#fff",
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: "#E5E7EB",
+    paddingLeft: 12,
+    paddingRight: 6,
+    paddingVertical: 6,
+  },
   commentInput: {
     flex: 1,
-    backgroundColor: "#FFFFFF",
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: "#E0E0E0",
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    fontSize: 13,
+    fontSize: 14,
+    color: "#111",
     maxHeight: 80,
+    paddingVertical: 2,
   },
   commentSendBtn: {
-    width: 36,
-    height: 36,
-    borderRadius: 8,
-    backgroundColor: "#EFF1FF",
-    alignItems: "center",
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: NAVY,
     justifyContent: "center",
+    alignItems: "center",
+    marginLeft: 6,
   },
-  commentItem: { flexDirection: "row", marginBottom: 12 },
-  commentAvatar: { width: 32, height: 32, borderRadius: 16, marginRight: 10 },
-  commentContent: { flex: 1 },
-  commentUserName: { fontWeight: "700", fontSize: 13, color: "#1F1F1F" },
-  commentText: { fontSize: 12, color: "#555", marginTop: 4, lineHeight: 16 },
-  commentActions: { flexDirection: "row", marginTop: 6, gap: 12 },
-  commentLikeBtn: { flexDirection: "row", alignItems: "center", gap: 4 },
-  commentLikeText: { fontSize: 11, color: "#999" },
-  commentDeleteBtn: { padding: 4 },
-  commentReplyBtn: { flexDirection: "row", alignItems: "center", gap: 4 },
-  commentReplyText: { fontSize: 11, color: NAVY, fontWeight: "600" },
+  commentSendBtnDisabled: { opacity: 0.4 },
+
+  commentItem: { flexDirection: "row", marginBottom: 14 },
+  commentAvatar: { width: 36, height: 36, borderRadius: 18, marginRight: 10 },
+  commentBody: { flex: 1 },
+  commentBubble: {
+    backgroundColor: "#fff",
+    borderRadius: 14,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderWidth: 1,
+    borderColor: "#F0F0F0",
+  },
+  commentUserName: {
+    fontWeight: "700",
+    fontSize: 13,
+    color: "#1F1F1F",
+    marginBottom: 2,
+  },
+  commentText: { fontSize: 13, color: "#444", lineHeight: 18 },
+  commentActions: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginTop: 6,
+    gap: 14,
+    paddingLeft: 4,
+  },
+  commentActionBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    paddingVertical: 4,
+  },
+  commentActionText: { fontSize: 13, color: "#999", fontWeight: "600" },
+
   repliesContainer: {
     marginTop: 10,
-    marginLeft: 10,
-    paddingLeft: 10,
+    marginLeft: 4,
+    paddingLeft: 12,
     borderLeftWidth: 2,
-    borderLeftColor: "#E0E0E0",
+    borderLeftColor: "#E5E7EB",
   },
-  replyItem: { flexDirection: "row", marginBottom: 10 },
+  replyItem: { flexDirection: "row", marginBottom: 8 },
   replyAvatar: { width: 28, height: 28, borderRadius: 14, marginRight: 8 },
-  replyContent: { flex: 1 },
-  replyUserName: { fontWeight: "600", fontSize: 12, color: "#1F1F1F" },
-  replyText: { fontSize: 11, color: "#555", marginTop: 2, lineHeight: 14 },
-  replyInputContainer: { flexDirection: "row", marginTop: 10, gap: 6 },
-  replyInput: {
+  replyBubble: {
     flex: 1,
-    backgroundColor: "#FFFFFF",
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: "#E0E0E0",
+    backgroundColor: "#F5F5FB",
+    borderRadius: 12,
     paddingHorizontal: 10,
     paddingVertical: 8,
+  },
+  replyUserName: {
+    fontWeight: "700",
     fontSize: 12,
+    color: "#1F1F1F",
+    marginBottom: 2,
+  },
+  replyText: { fontSize: 12, color: "#555", lineHeight: 16 },
+  replyInputRow: {
+    flexDirection: "row",
+    alignItems: "flex-end",
+    marginTop: 8,
+    gap: 8,
+  },
+  replyInput: {
+    flex: 1,
+    backgroundColor: "#fff",
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: "#E5E7EB",
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    fontSize: 13,
     maxHeight: 60,
   },
   replySendBtn: {
     width: 32,
     height: 32,
-    borderRadius: 8,
-    backgroundColor: "#EFF1FF",
-    alignItems: "center",
+    borderRadius: 16,
+    backgroundColor: NAVY,
     justifyContent: "center",
+    alignItems: "center",
   },
+
+  // Delete toast
+  deleteToast: {
+    position: "absolute",
+    top: 16,
+    left: 12,
+    right: 12,
+    backgroundColor: "#1F1F1F",
+    borderRadius: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    zIndex: 1000,
+  },
+  deleteToastText: { fontSize: 13, color: "#fff", fontWeight: "500", flex: 1 },
+  deleteToastUndo: {
+    fontSize: 13,
+    fontWeight: "700",
+    color: GOLD,
+    marginLeft: 12,
+  },
+
+  // Options modal
+  optionsOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.4)",
+    justifyContent: "flex-end",
+  },
+  optionsMenu: {
+    backgroundColor: "#fff",
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    paddingHorizontal: 20,
+    paddingTop: 10,
+    paddingBottom: 36,
+  },
+  optionsHandle: {
+    width: 40,
+    height: 4,
+    backgroundColor: "#DDD",
+    borderRadius: 2,
+    alignSelf: "center",
+    marginBottom: 16,
+  },
+  optionRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingVertical: 14,
+    gap: 14,
+  },
+  optionIcon: {
+    width: 42,
+    height: 42,
+    borderRadius: 12,
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  optionLabel: { fontSize: 15, fontWeight: "700", color: "#111" },
+  optionSub: { fontSize: 12, color: "#999", marginTop: 1 },
+  optionDivider: { height: 1, backgroundColor: "#F3F4F6", marginVertical: 4 },
+
+  // Report modal
+  reportOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.5)",
+    justifyContent: "flex-end",
+  },
+  reportSheet: {
+    backgroundColor: "#fff",
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    paddingHorizontal: 20,
+    paddingTop: 10,
+    paddingBottom: 36,
+  },
+  reportTitle: {
+    fontSize: 18,
+    fontWeight: "800",
+    color: "#111",
+    marginBottom: 4,
+  },
+  reportSub: { fontSize: 13, color: "#888", marginBottom: 16 },
+  reportReasonRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingVertical: 13,
+    borderBottomWidth: 1,
+    borderBottomColor: "#F3F4F6",
+    gap: 12,
+  },
+  reportReasonRowSelected: { backgroundColor: "#F8F8FF" },
+  reportRadio: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    borderWidth: 2,
+    borderColor: "#DDD",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  reportRadioSelected: { borderColor: NAVY },
+  reportRadioInner: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    backgroundColor: NAVY,
+  },
+  reportReasonText: { fontSize: 14, color: "#333", flex: 1 },
+  reportReasonTextSelected: { fontWeight: "600", color: NAVY },
+  reportActions: { flexDirection: "row", gap: 12, marginTop: 20 },
+  reportCancelBtn: { flex: 1, paddingVertical: 13, alignItems: "center" },
+  reportCancelText: { fontSize: 14, color: "#888", fontWeight: "600" },
+  reportSubmitBtn: {
+    flex: 2,
+    backgroundColor: NAVY,
+    borderRadius: 12,
+    paddingVertical: 13,
+    alignItems: "center",
+  },
+  reportSubmitBtnDisabled: { opacity: 0.45 },
+  reportSubmitText: { fontSize: 14, fontWeight: "700", color: "#fff" },
+
+  // Loader / Empty
   loaderContainer: { flex: 1, justifyContent: "center", alignItems: "center" },
   loadingText: { marginTop: 10, fontSize: 14, color: "#777" },
   emptyContainer: {
     flex: 1,
     justifyContent: "center",
     alignItems: "center",
-    marginVertical: 50,
+    marginVertical: 60,
+    gap: 8,
   },
-  emptyText: { fontSize: 14, color: "#777", textAlign: "center" },
-  deleteToast: {
-    position: "absolute",
-    top: 20,
-    left: 12,
-    right: 12,
-    backgroundColor: "#2C2C2C",
-    borderRadius: 12,
-    paddingHorizontal: 16,
-    paddingVertical: 14,
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.3,
-    shadowRadius: 6,
-    elevation: 5,
-    zIndex: 1000,
-  },
-  deleteToastText: { fontSize: 14, color: "white", fontWeight: "500", flex: 1 },
-  deleteToastUndo: {
-    fontSize: 14,
-    fontWeight: "600",
-    color: GOLD,
-    marginLeft: 12,
-  },
+  emptyTitle: { fontSize: 16, fontWeight: "700", color: "#555" },
+  emptyText: { fontSize: 13, color: "#999", textAlign: "center" },
 });
