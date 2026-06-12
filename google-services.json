@@ -43,11 +43,27 @@
       },
       "oauth_client": [
         {
+          "client_id": "1081232685961-4sp6floqto4cjkjt09hfjatm9tg0umih.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.ruyuching.barterbayan",
+            "certificate_hash": "27747180f2f49d74b04a110189f3015c0e063a5b"
+          }
+        },
+        {
           "client_id": "1081232685961-gkth525m4vagv916gs9h1om0o41bbora.apps.googleusercontent.com",
           "client_type": 1,
           "android_info": {
             "package_name": "com.ruyuching.barterbayan",
             "certificate_hash": "fdf5904f766c9f8144ca4e0a19abf9699ba29f1b"
+          }
+        },
+        {
+          "client_id": "1081232685961-k4ujge7oh3k1ebdbo2t64g6bitiuoiak.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.ruyuching.barterbayan",
+            "certificate_hash": "d55448a265118521e7f2e7472a39b48b1e110b31"
           }
         },
         {

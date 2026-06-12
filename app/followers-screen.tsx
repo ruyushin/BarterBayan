@@ -11,25 +11,43 @@ import { useLocalSearchParams, useRouter } from "expo-router";
 import { doc, onSnapshot } from "firebase/firestore";
 import React, { useEffect, useState } from "react";
 import {
-    ActivityIndicator,
-    Alert,
-    FlatList,
-    Image,
-    StyleSheet,
-    Text,
-    TouchableOpacity,
-    View,
+  ActivityIndicator,
+  Alert,
+  FlatList,
+  Image,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
 } from "react-native";
 import { auth, db } from "../firebaseConfig";
 import {
-    FollowUser,
-    getFollowers,
-    getFollowing,
-    subscribeToFollowState,
-    toggleFollow,
+  FollowUser,
+  getFollowers,
+  getFollowing,
+  subscribeToFollowState,
+  toggleFollow,
 } from "../services/followService";
+import { getUserInfo } from "../services/itemService";
 
 const NAVY = "#2f2f6f";
+
+// ── Display name resolver ─────────────────────────────────────────────────────
+// Mirrors ProductDetailModal: firstName + lastName first, then falls through
+// displayName, name, fullName, username handle.
+function resolveDisplayName(user: FollowUser): string {
+  const firstName = (user as any).firstName?.trim();
+  const lastName = (user as any).lastName?.trim();
+  if (firstName && lastName) return `${firstName} ${lastName}`;
+  return (
+    (user as any).displayName?.trim() ||
+    (user as any).name?.trim() ||
+    (user as any).fullName?.trim() ||
+    firstName ||                   // single first name if no last name
+    user.username?.trim() ||
+    "User"
+  );
+}
 
 // ─── Follow Button (self-contained, real-time) ────────────────────────────────
 function FollowBtn({
@@ -58,12 +76,15 @@ function FollowBtn({
   const handlePress = async () => {
     setLoading(true);
     try {
-      const currentUsername =
-        currentUser.displayName || currentUser.email?.split("@")[0] || "User";
+      // Use the resolved display name (not handle) in follow records
+      const currentDisplayName =
+        currentUser.displayName?.trim() ||
+        currentUser.email?.split("@")[0] ||
+        "User";
       const currentAvatar = currentUser.photoURL ?? undefined;
       await toggleFollow(
         currentUser.uid,
-        { username: currentUsername, avatarUrl: currentAvatar },
+        { username: currentDisplayName, avatarUrl: currentAvatar },
         targetUserId,
         targetUserData,
         following,
@@ -102,6 +123,36 @@ function FollowBtn({
 function UserRow({ user }: { user: FollowUser }) {
   const router = useRouter();
   const [failed, setFailed] = useState(false);
+  // Seed from follow record immediately; upgrade to full profile name async
+  const [displayName, setDisplayName] = useState(resolveDisplayName(user));
+  const [resolvedAvatar, setResolvedAvatar] = useState(user.avatarUrl);
+
+  useEffect(() => {
+    if (!user.uid) return;
+    let cancelled = false;
+    getUserInfo(user.uid)
+      .then((info) => {
+        if (cancelled || !info) return;
+        const firstName = info.firstName?.trim();
+        const lastName = info.lastName?.trim();
+        const name =
+          firstName && lastName
+            ? `${firstName} ${lastName}`
+            : info.displayName?.trim() ||
+              info.name?.trim() ||
+              info.fullName?.trim() ||
+              firstName ||
+              info.username?.trim() ||
+              info.userName?.trim() ||
+              resolveDisplayName(user);
+        if (name) setDisplayName(name);
+        if (info.avatarUrl) setResolvedAvatar(info.avatarUrl);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [user.uid]);
 
   return (
     <TouchableOpacity
@@ -111,22 +162,22 @@ function UserRow({ user }: { user: FollowUser }) {
         router.push({ pathname: "/user-profile", params: { userId: user.uid } })
       }
     >
-      {user.avatarUrl && !failed ? (
+      {resolvedAvatar && !failed ? (
         <Image
-          source={{ uri: user.avatarUrl }}
+          source={{ uri: resolvedAvatar }}
           style={styles.avatar}
           onError={() => setFailed(true)}
         />
       ) : (
         <View style={[styles.avatar, styles.avatarFallback]}>
           <Text style={styles.avatarInitial}>
-            {(user.username || "?")[0].toUpperCase()}
+            {(displayName || "?")[0].toUpperCase()}
           </Text>
         </View>
       )}
 
       <View style={styles.rowInfo}>
-        <Text style={styles.rowName}>{user.username}</Text>
+        <Text style={styles.rowName}>{displayName}</Text>
         {user.isVerified && (
           <View style={styles.verifiedBadge}>
             <Ionicons name="checkmark" size={9} color="#fff" />
@@ -136,7 +187,7 @@ function UserRow({ user }: { user: FollowUser }) {
 
       <FollowBtn
         targetUserId={user.uid}
-        targetUserData={{ username: user.username, avatarUrl: user.avatarUrl }}
+        targetUserData={{ username: displayName, avatarUrl: resolvedAvatar }}
       />
     </TouchableOpacity>
   );

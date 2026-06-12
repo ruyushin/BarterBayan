@@ -54,6 +54,9 @@ const STATUS_PRIORITY: TradeOffer["status"][] = [
 const TRADE_SORT_CYCLE = ["none", "recent", "likes", "name"] as const;
 type TradeSortType = (typeof TRADE_SORT_CYCLE)[number];
 
+const OFFER_SORT_OPTIONS = ["Default", "Recent"] as const;
+type OfferSortValue = "default" | "recent";
+
 function dominantStatus(offers: TradeOffer[]): TradeOffer["status"] | null {
   for (const s of STATUS_PRIORITY) {
     if (offers.some((o) => o.status === s)) return s;
@@ -316,6 +319,7 @@ export default function TradeScreen() {
   const [sortType, setSortType] = useState<TradeSortType>("none");
   const [filterCategory, setFilterCategory] = useState("All");
   const [isFilterOpen, setIsFilterOpen] = useState(false);
+  const [isSortOpen, setIsSortOpen] = useState(false);
   const [userItems, setUserItems] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -332,7 +336,8 @@ export default function TradeScreen() {
   const [sentOffers, setSentOffers] = useState<TradeOffer[]>([]);
   const [offerSearch, setOfferSearch] = useState("");
   const [offerCategoryFilter, setOfferCategoryFilter] = useState("All");
-  const [offerSortRecent, setOfferSortRecent] = useState(false);
+  const [offerSortValue, setOfferSortValue] = useState<OfferSortValue>("default");
+  const [isOfferSortOpen, setIsOfferSortOpen] = useState(false);
   const [isOfferFilterOpen, setIsOfferFilterOpen] = useState(false);
 
   const { openTradeId } = useLocalSearchParams<{ openTradeId?: string }>();
@@ -398,6 +403,10 @@ export default function TradeScreen() {
     setIsSelectMode(false);
     setSelectedItemIds(new Set());
     setSelectedCount(0);
+    setIsOfferSortOpen(false);
+    setIsOfferFilterOpen(false);
+    setIsFilterOpen(false);
+    setIsSortOpen(false);
   };
 
   const handleAddItemPress = () => {
@@ -426,11 +435,6 @@ export default function TradeScreen() {
     name: "A–Z",
   };
 
-  const handleTradeSort = () =>
-    setSortType((prev) => {
-      const idx = TRADE_SORT_CYCLE.indexOf(prev);
-      return TRADE_SORT_CYCLE[(idx + 1) % TRADE_SORT_CYCLE.length];
-    });
 
   const filteredItems = userItems
     .filter((item) => {
@@ -549,24 +553,15 @@ export default function TradeScreen() {
   };
 
   // ─────────────────────────────────────────────────────────────────────────
-  // PATCH: Your Offers — grouped by offeredItemId, filtered + sorted
-  //
-  // Root-cause fix: the old code set g.category from the FIRST offer's
-  // offeredItemCategory only. If that field was empty (older trades), the
-  // category filter never matched anything.
-  //
-  // Fix: collect ALL category strings that appear across every offer in the
-  // group (both offeredItemCategory and requestedItemCategory), store them as
-  // `categorySet: Set<string>`, and match against ANY of them in the filter.
-  // The display label (`displayCategory`) just shows the first non-empty one.
+  // Your Offers — grouped by offeredItemId, filtered + sorted
   // ─────────────────────────────────────────────────────────────────────────
 
   type OfferGroup = {
     itemId: string;
     title: string;
     image: string;
-    displayCategory: string; // first non-empty category, for the card label
-    categorySet: Set<string>; // full set for filter matching
+    displayCategory: string;
+    categorySet: Set<string>;
     offers: TradeOffer[];
     latestAt: number;
   };
@@ -590,7 +585,6 @@ export default function TradeScreen() {
       const entry = map.get(key)!;
       entry.offers.push(offer);
 
-      // Collect every category from this offer
       if (offer.offeredItemCategory) {
         entry.categorySet.add(offer.offeredItemCategory);
         if (!entry.displayCategory)
@@ -606,24 +600,17 @@ export default function TradeScreen() {
       if (t > entry.latestAt) entry.latestAt = t;
     });
 
-    return (
-      Array.from(map.values())
-        .filter((g) => {
-          // Search: match on item title
-          const matchSearch =
-            offerSearch.length === 0 ||
-            g.title.toLowerCase().includes(offerSearch.toLowerCase());
-
-          // PATCH: match if ANY category in the group equals the selected filter
-          const matchCat =
-            offerCategoryFilter === "All" ||
-            g.categorySet.has(offerCategoryFilter);
-
-          return matchSearch && matchCat;
-        })
-        // PATCH: sort by latestAt when "Recent" is toggled, otherwise stable order
-        .sort((a, b) => (offerSortRecent ? b.latestAt - a.latestAt : 0))
-    );
+    return Array.from(map.values())
+      .filter((g) => {
+        const matchSearch =
+          offerSearch.length === 0 ||
+          g.title.toLowerCase().includes(offerSearch.toLowerCase());
+        const matchCat =
+          offerCategoryFilter === "All" ||
+          g.categorySet.has(offerCategoryFilter);
+        return matchSearch && matchCat;
+      })
+      .sort((a, b) => (offerSortValue === "recent" ? b.latestAt - a.latestAt : 0));
   })();
 
   const pendingCount = sentOffers.filter((o) => o.status === "pending").length;
@@ -752,7 +739,6 @@ export default function TradeScreen() {
             <Text style={styles.itemName} numberOfLines={2}>
               {group.title}
             </Text>
-            {/* PATCH: use displayCategory instead of the old group.category */}
             {group.displayCategory ? (
               <Text style={styles.itemCategory}>{group.displayCategory}</Text>
             ) : null}
@@ -931,35 +917,96 @@ export default function TradeScreen() {
             </View>
           ) : (
             <View style={styles.row}>
-              <TouchableOpacity
-                style={styles.smallButton}
-                onPress={handleTradeSort}
-              >
-                <Ionicons name="swap-vertical" size={14} color="#333" />
-                <Text style={styles.smallText}>
-                  Sort: {SORT_LABEL[sortType]}
-                </Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={styles.smallButton}
-                onPress={() => setIsFilterOpen((p) => !p)}
-              >
-                <Ionicons name="funnel" size={14} color="#333" />
-                <Text style={styles.smallText}>Category: {filterCategory}</Text>
-              </TouchableOpacity>
+              {/* Sort dropdown */}
+              <View>
+                <TouchableOpacity
+                  style={styles.smallButton}
+                  onPress={() => {
+                    setIsSortOpen((p) => !p);
+                    setIsFilterOpen(false);
+                  }}
+                >
+                  <Ionicons name="swap-vertical" size={14} color="#333" />
+                  <Text style={styles.smallText}>
+                    Sort: {SORT_LABEL[sortType]}
+                  </Text>
+                  <Ionicons
+                    name={isSortOpen ? "chevron-up" : "chevron-down"}
+                    size={12}
+                    color="#555"
+                    style={{ marginLeft: 2 }}
+                  />
+                </TouchableOpacity>
+              </View>
+              {/* Category dropdown */}
+              <View>
+                <TouchableOpacity
+                  style={styles.smallButton}
+                  onPress={() => {
+                    setIsFilterOpen((p) => !p);
+                    setIsSortOpen(false);
+                  }}
+                >
+                  <Ionicons name="funnel" size={14} color="#333" />
+                  <Text style={styles.smallText}>Category: {filterCategory}</Text>
+                  <Ionicons
+                    name={isFilterOpen ? "chevron-up" : "chevron-down"}
+                    size={12}
+                    color="#555"
+                    style={{ marginLeft: 2 }}
+                  />
+                </TouchableOpacity>
+              </View>
             </View>
           )}
 
+          {/* Sort dropdown list */}
+          {isSortOpen && !isSelectMode && (
+            <View style={styles.filterDropdown}>
+              {(Object.entries(SORT_LABEL) as [TradeSortType, string][]).map(
+                ([val, label], idx, arr) => (
+                  <TouchableOpacity
+                    key={val}
+                    onPress={() => {
+                      setSortType(val);
+                      setIsSortOpen(false);
+                    }}
+                    style={[
+                      styles.dropdownItem,
+                      idx < arr.length - 1 && styles.dropdownItemBorder,
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.dropdownText,
+                        sortType === val && styles.dropdownTextActive,
+                      ]}
+                    >
+                      {label}
+                    </Text>
+                    {sortType === val && (
+                      <Ionicons name="checkmark" size={14} color={NAVY} />
+                    )}
+                  </TouchableOpacity>
+                ),
+              )}
+            </View>
+          )}
+
+          {/* Category dropdown list */}
           {isFilterOpen && !isSelectMode && (
             <View style={styles.filterDropdown}>
-              {FILTER_CATEGORIES.map((cat) => (
+              {FILTER_CATEGORIES.map((cat, idx) => (
                 <TouchableOpacity
                   key={cat}
                   onPress={() => {
                     setFilterCategory(cat);
                     setIsFilterOpen(false);
                   }}
-                  style={styles.dropdownItem}
+                  style={[
+                    styles.dropdownItem,
+                    idx < FILTER_CATEGORIES.length - 1 && styles.dropdownItemBorder,
+                  ]}
                 >
                   <Text
                     style={[
@@ -969,6 +1016,9 @@ export default function TradeScreen() {
                   >
                     {cat}
                   </Text>
+                  {filterCategory === cat && (
+                    <Ionicons name="checkmark" size={14} color={NAVY} />
+                  )}
                 </TouchableOpacity>
               ))}
             </View>
@@ -980,37 +1030,99 @@ export default function TradeScreen() {
       {activeTab === "offers" && (
         <>
           <View style={styles.row}>
-            <TouchableOpacity
-              style={styles.smallButton}
-              onPress={() => setOfferSortRecent((p) => !p)}
-            >
-              <Ionicons name="time-outline" size={14} color="#333" />
-              <Text style={styles.smallText}>
-                {/* PATCH: show active state clearly */}
-                Sort: {offerSortRecent ? "Recent ✓" : "Default"}
-              </Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={styles.smallButton}
-              onPress={() => setIsOfferFilterOpen((p) => !p)}
-            >
-              <Ionicons name="funnel" size={14} color="#333" />
-              <Text style={styles.smallText}>
-                Category: {offerCategoryFilter}
-              </Text>
-            </TouchableOpacity>
+            {/* Sort dropdown */}
+            <View>
+              <TouchableOpacity
+                style={styles.smallButton}
+                onPress={() => {
+                  setIsOfferSortOpen((p) => !p);
+                  setIsOfferFilterOpen(false);
+                }}
+              >
+                <Ionicons name="swap-vertical" size={14} color="#333" />
+                <Text style={styles.smallText}>
+                  Sort: {offerSortValue === "recent" ? "Recent" : "Default"}
+                </Text>
+                <Ionicons
+                  name={isOfferSortOpen ? "chevron-up" : "chevron-down"}
+                  size={12}
+                  color="#555"
+                  style={{ marginLeft: 2 }}
+                />
+              </TouchableOpacity>
+            </View>
+
+            {/* Category dropdown */}
+            <View>
+              <TouchableOpacity
+                style={styles.smallButton}
+                onPress={() => {
+                  setIsOfferFilterOpen((p) => !p);
+                  setIsOfferSortOpen(false);
+                }}
+              >
+                <Ionicons name="funnel" size={14} color="#333" />
+                <Text style={styles.smallText}>
+                  Category: {offerCategoryFilter}
+                </Text>
+                <Ionicons
+                  name={isOfferFilterOpen ? "chevron-up" : "chevron-down"}
+                  size={12}
+                  color="#555"
+                  style={{ marginLeft: 2 }}
+                />
+              </TouchableOpacity>
+            </View>
           </View>
 
+          {/* Sort dropdown list */}
+          {isOfferSortOpen && (
+            <View style={styles.filterDropdown}>
+              {OFFER_SORT_OPTIONS.map((opt, idx) => {
+                const val = opt.toLowerCase() as OfferSortValue;
+                return (
+                  <TouchableOpacity
+                    key={opt}
+                    onPress={() => {
+                      setOfferSortValue(val);
+                      setIsOfferSortOpen(false);
+                    }}
+                    style={[
+                      styles.dropdownItem,
+                      idx < OFFER_SORT_OPTIONS.length - 1 && styles.dropdownItemBorder,
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.dropdownText,
+                        offerSortValue === val && styles.dropdownTextActive,
+                      ]}
+                    >
+                      {opt}
+                    </Text>
+                    {offerSortValue === val && (
+                      <Ionicons name="checkmark" size={14} color={NAVY} />
+                    )}
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+          )}
+
+          {/* Category dropdown list */}
           {isOfferFilterOpen && (
             <View style={styles.filterDropdown}>
-              {FILTER_CATEGORIES.map((cat) => (
+              {FILTER_CATEGORIES.map((cat, idx) => (
                 <TouchableOpacity
                   key={cat}
                   onPress={() => {
                     setOfferCategoryFilter(cat);
                     setIsOfferFilterOpen(false);
                   }}
-                  style={styles.dropdownItem}
+                  style={[
+                    styles.dropdownItem,
+                    idx < FILTER_CATEGORIES.length - 1 && styles.dropdownItemBorder,
+                  ]}
                 >
                   <Text
                     style={[
@@ -1020,6 +1132,9 @@ export default function TradeScreen() {
                   >
                     {cat}
                   </Text>
+                  {offerCategoryFilter === cat && (
+                    <Ionicons name="checkmark" size={14} color={NAVY} />
+                  )}
                 </TouchableOpacity>
               ))}
             </View>
@@ -1165,8 +1280,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     paddingVertical: 7,
     borderRadius: 8,
+    gap: 4,
   },
-  smallText: { fontSize: 13, color: "#444", marginLeft: 6 },
+  smallText: { fontSize: 13, color: "#444", marginLeft: 2 },
 
   selectToolbar: {
     flexDirection: "row",
@@ -1215,7 +1331,17 @@ const styles = StyleSheet.create({
     overflow: "hidden",
     marginBottom: 10,
   },
-  dropdownItem: { paddingVertical: 12, paddingHorizontal: 15 },
+  dropdownItem: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingVertical: 12,
+    paddingHorizontal: 15,
+  },
+  dropdownItemBorder: {
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: "#EEEEEE",
+  },
   dropdownText: { fontSize: 13, color: "#333" },
   dropdownTextActive: { fontWeight: "700", color: NAVY },
 

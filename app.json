@@ -48,6 +48,8 @@
       "expo-image",
       "expo-font",
       "expo-video",
+
+      
       [
         "expo-splash-screen",
         {

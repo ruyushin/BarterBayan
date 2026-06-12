@@ -318,7 +318,7 @@ export default function LoginScreen() {
         </View>
 
         <View style={styles.header}>
-          <Text style={styles.headerText}>Welcome Back!</Text>
+          <Text style={styles.headerText}>Start Trading!</Text>
         </View>
 
         <View

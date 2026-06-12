@@ -17,6 +17,7 @@ import {
 } from "react-native";
 import { TradeChatModal } from "../../components/TradeChatModal";
 import { auth } from "../../firebaseConfig";
+import { getUserInfo } from "../../services/itemService";
 import {
   TradeOffer,
   cancelTradeOffer,
@@ -50,9 +51,40 @@ const STATUS_FILTER_TABS: {
   { key: "cancelled", label: "Cancelled", icon: "ban-outline" },
 ];
 
-// ── Offer Detail Bottom Sheet ────────────────────────────────────────────────
+// ─── Owner info resolved from Firestore ───────────────────────────────────────
+interface OwnerInfo {
+  name: string;
+  avatar: string | null;
+}
+
+// Resolve the best display name + avatar out of a raw Firestore user doc.
+// Falls back gracefully so the UI is never blank.
+function resolveOwnerInfo(raw: any): OwnerInfo {
+  const name =
+    raw?.username?.trim() ||
+    raw?.displayName?.trim() ||
+    raw?.name?.trim() ||
+    "Item Owner";
+  const avatarUrl =
+    raw?.avatarUrl ||
+    raw?.photoURL ||
+    raw?.profileImage ||
+    raw?.avatar ||
+    raw?.profilePicture ||
+    raw?.photo ||
+    raw?.picture ||
+    null;
+  const avatar =
+    avatarUrl && typeof avatarUrl === "string" && avatarUrl.startsWith("http")
+      ? avatarUrl
+      : null;
+  return { name, avatar };
+}
+
+// ── Offer Detail Bottom Sheet ─────────────────────────────────────────────────
 function OfferDetailSheet({
   offer,
+  ownerInfo,
   visible,
   onClose,
   onMessage,
@@ -63,6 +95,7 @@ function OfferDetailSheet({
   cancellingId,
 }: {
   offer: TradeOffer | null;
+  ownerInfo: OwnerInfo;
   visible: boolean;
   onClose: () => void;
   onMessage: () => void;
@@ -123,6 +156,15 @@ function OfferDetailSheet({
   const isCompleted = offer.status === "completed";
   const isCompleting = completingId === offer.id;
   const isCancelling = cancellingId === offer.id;
+
+  // Prefer live-fetched owner info; fall back to whatever was stored on the offer
+  const displayName =
+    ownerInfo.name !== "Item Owner"
+      ? ownerInfo.name
+      : (offer.ownerName || "Item Owner");
+  const displayAvatar =
+    ownerInfo.avatar ??
+    (offer.ownerAvatar || null);
 
   return (
     <Modal
@@ -186,7 +228,7 @@ function OfferDetailSheet({
             )}
           </View>
 
-          {/* PATCH: show category badges if present */}
+          {/* Category badges */}
           {(offer.offeredItemCategory || offer.requestedItemCategory) && (
             <View style={sheetStyles.categoryRow}>
               {offer.offeredItemCategory && (
@@ -249,21 +291,33 @@ function OfferDetailSheet({
             </View>
           </View>
 
-          {/* Owner profile card */}
+          {/* ── Owner profile card — wired to live Firestore data ── */}
           <TouchableOpacity
             style={sheetStyles.ownerCard}
             onPress={onViewProfile}
             activeOpacity={0.8}
           >
-            <Image
-              source={{
-                uri: offer.ownerAvatar || "https://i.pravatar.cc/150?img=5",
-              }}
-              style={sheetStyles.ownerAvatar}
-            />
+            {displayAvatar ? (
+              <Image
+                source={{ uri: displayAvatar }}
+                style={sheetStyles.ownerAvatar}
+              />
+            ) : (
+              // Letter-avatar fallback when no photo is available
+              <View
+                style={[
+                  sheetStyles.ownerAvatar,
+                  sheetStyles.ownerAvatarFallback,
+                ]}
+              >
+                <Text style={sheetStyles.ownerAvatarInitial}>
+                  {displayName.charAt(0).toUpperCase()}
+                </Text>
+              </View>
+            )}
             <View style={{ flex: 1 }}>
               <Text style={sheetStyles.ownerName} numberOfLines={1}>
-                {offer.ownerName || "Item Owner"}
+                {displayName}
               </Text>
               <Text style={sheetStyles.ownerSub}>Tap to view profile</Text>
             </View>
@@ -286,7 +340,7 @@ function OfferDetailSheet({
             </View>
           )}
 
-          {/* PATCH: decline reason (visible to offerer after decline) */}
+          {/* Decline reason */}
           {offer.status === "declined" && (offer as any).declineReason && (
             <View style={sheetStyles.declineReasonBox}>
               <Ionicons
@@ -447,7 +501,7 @@ function OfferDetailSheet({
   );
 }
 
-// ── Main Screen ──────────────────────────────────────────────────────────────
+// ── Main Screen ───────────────────────────────────────────────────────────────
 export default function SentOffersScreen() {
   const { offeredItemId, offeredItemTitle, offeredItemImage } =
     useLocalSearchParams<{
@@ -460,9 +514,14 @@ export default function SentOffersScreen() {
   const [allOffers, setAllOffers] = useState<TradeOffer[]>([]);
   const [offersLoading, setOffersLoading] = useState(true);
 
-  // ── PATCH: two independent filter axes ───────────────────────────────────
-  // statusFilter: which trade statuses to show (the original tab row)
-  // categoryFilter: which category to show (new chip row, derived from data)
+  // ── Live owner info map ─────────────────────────────────────────────────
+  // Keyed by ownerId. Populated once allOffers loads; refreshed whenever
+  // the set of unique ownerIds changes (e.g. new offer arrives).
+  const [ownerInfoMap, setOwnerInfoMap] = useState<Record<string, OwnerInfo>>(
+    {},
+  );
+  const [ownerInfoLoading, setOwnerInfoLoading] = useState(false);
+
   const [statusFilter, setStatusFilter] = useState<
     TradeOffer["status"] | "all"
   >("all");
@@ -477,6 +536,7 @@ export default function SentOffersScreen() {
 
   const unsubRef = useRef<(() => void) | null>(null);
 
+  // ── Subscribe to sent offers ────────────────────────────────────────────
   useEffect(() => {
     const uid = auth.currentUser?.uid;
     if (!uid || !offeredItemId) return;
@@ -496,9 +556,46 @@ export default function SentOffersScreen() {
     };
   }, [offeredItemId]);
 
-  // ── PATCH: derive the unique category list from live offer data ──────────
-  // We check both offeredItemCategory and requestedItemCategory so the filter
-  // catches offers where only one side has a category stored.
+  // ── Fetch live owner info for every unique ownerId in the offer list ────
+  // Runs whenever allOffers changes. Only fetches IDs not yet in the map
+  // to avoid redundant network calls.
+  useEffect(() => {
+    if (allOffers.length === 0) return;
+
+    const missingIds = [
+      ...new Set(
+        allOffers
+          .map((o) => (o as any).ownerId as string | undefined)
+          .filter((id): id is string => !!id && !ownerInfoMap[id]),
+      ),
+    ];
+
+    if (missingIds.length === 0) return;
+
+    setOwnerInfoLoading(true);
+    Promise.all(
+      missingIds.map(async (id) => {
+        try {
+          const raw = await getUserInfo(id);
+          return [id, resolveOwnerInfo(raw)] as [string, OwnerInfo];
+        } catch {
+          // getUserInfo failed — keep whatever was on the offer doc
+          return [id, { name: "Item Owner", avatar: null }] as [
+            string,
+            OwnerInfo,
+          ];
+        }
+      }),
+    ).then((entries) => {
+      setOwnerInfoMap((prev) => ({
+        ...prev,
+        ...Object.fromEntries(entries),
+      }));
+      setOwnerInfoLoading(false);
+    });
+  }, [allOffers]);
+
+  // ── Category chips derived from live data ───────────────────────────────
   const availableCategories = useMemo<string[]>(() => {
     const set = new Set<string>();
     for (const o of allOffers) {
@@ -508,8 +605,6 @@ export default function SentOffersScreen() {
     return Array.from(set).sort();
   }, [allOffers]);
 
-  // Reset category filter whenever the offer list changes and the previously
-  // selected category no longer exists (e.g. after a cancel).
   useEffect(() => {
     if (
       categoryFilter !== "All" &&
@@ -519,6 +614,23 @@ export default function SentOffersScreen() {
     }
   }, [availableCategories]);
 
+  // ── Helper: get resolved owner info for an offer ────────────────────────
+  const getOwnerInfo = (offer: TradeOffer): OwnerInfo => {
+    const id = (offer as any).ownerId as string | undefined;
+    if (id && ownerInfoMap[id]) return ownerInfoMap[id];
+    // Fallback to data embedded in the offer doc (may be stale but better than blank)
+    return {
+      name: offer.ownerName || "Item Owner",
+      avatar:
+        offer.ownerAvatar &&
+        typeof offer.ownerAvatar === "string" &&
+        offer.ownerAvatar.startsWith("http")
+          ? offer.ownerAvatar
+          : null,
+    };
+  };
+
+  // ── Detail sheet ────────────────────────────────────────────────────────
   const openDetail = (offer: TradeOffer) => {
     setSelectedOffer(offer);
     setSheetVisible(true);
@@ -529,6 +641,7 @@ export default function SentOffersScreen() {
     setTimeout(() => setSelectedOffer(null), 300);
   };
 
+  // ── Actions ─────────────────────────────────────────────────────────────
   const handleCancel = async (offer: TradeOffer) => {
     if (cancellingId != null) return;
     setCancellingId(offer.id);
@@ -555,14 +668,18 @@ export default function SentOffersScreen() {
     }
   };
 
+  // FIX: was pushing to `/profile/${ownerId}` which doesn't exist.
+  // All other screens in the codebase use /user-profile + userId param.
   const handleViewProfile = (offer: TradeOffer) => {
-    const ownerId = (offer as any).ownerId;
+    const ownerId = (offer as any).ownerId as string | undefined;
     if (!ownerId) return;
     closeDetail();
-    setTimeout(() => router.push(`/profile/${ownerId}`), 250);
+    setTimeout(() => {
+      router.push({ pathname: "/user-profile", params: { userId: ownerId } });
+    }, 250);
   };
 
-  // ── PATCH: apply both status AND category filters ────────────────────────
+  // ── Filtering ────────────────────────────────────────────────────────────
   const filteredOffers = useMemo(() => {
     return allOffers.filter((o) => {
       const matchStatus = statusFilter === "all" || o.status === statusFilter;
@@ -689,11 +806,7 @@ export default function SentOffersScreen() {
         })}
       </ScrollView>
 
-      {/* ── PATCH: Category Filter Chips ────────────────────────────────────
-           Only rendered when at least one offer has a category stored.
-           Chips are derived live from the offer data so they're always
-           accurate — no hardcoded list needed.
-      ──────────────────────────────────────────────────────────────────── */}
+      {/* ── Category Filter Chips ── */}
       {availableCategories.length > 0 && (
         <ScrollView
           horizontal
@@ -749,7 +862,6 @@ export default function SentOffersScreen() {
               ? "Try clearing a filter to see more offers."
               : "Offers you send using this item will appear here."}
           </Text>
-          {/* Quick-clear button when filters are active */}
           {(statusFilter !== "all" || categoryFilter !== "All") && (
             <TouchableOpacity
               style={styles.clearFiltersBtn}
@@ -773,12 +885,14 @@ export default function SentOffersScreen() {
             <SentOfferCard
               key={offer.id}
               offer={offer}
+              ownerInfo={getOwnerInfo(offer)}
               cancellingId={cancellingId}
               completingId={completingId}
               onCancel={() => handleCancel(offer)}
               onComplete={() => handleComplete(offer)}
               onMessage={() => setChatTrade(offer)}
               onPress={() => openDetail(offer)}
+              onViewProfile={() => handleViewProfile(offer)}
             />
           ))}
         </ScrollView>
@@ -787,6 +901,7 @@ export default function SentOffersScreen() {
       {/* ── Detail Bottom Sheet ── */}
       <OfferDetailSheet
         offer={selectedOffer}
+        ownerInfo={selectedOffer ? getOwnerInfo(selectedOffer) : { name: "Item Owner", avatar: null }}
         visible={sheetVisible}
         onClose={closeDetail}
         onMessage={() => {
@@ -812,23 +927,27 @@ export default function SentOffersScreen() {
   );
 }
 
-// ── Individual sent-offer card ────────────────────────────────────────────────
+// ── Individual sent-offer card ─────────────────────────────────────────────────
 function SentOfferCard({
   offer,
+  ownerInfo,
   cancellingId,
   completingId,
   onCancel,
   onComplete,
   onMessage,
   onPress,
+  onViewProfile,
 }: {
   offer: TradeOffer;
+  ownerInfo: OwnerInfo;
   cancellingId: string | null;
   completingId: string | null;
   onCancel: () => void;
   onComplete: () => void;
   onMessage: () => void;
   onPress: () => void;
+  onViewProfile: () => void;
 }) {
   const isCancelling = cancellingId === offer.id;
   const isCompleting = completingId === offer.id;
@@ -852,7 +971,7 @@ function SentOfferCard({
       onPress={onPress}
       activeOpacity={0.85}
     >
-      {/* Status pill */}
+      {/* Status pill + category badge */}
       <View style={styles.cardTopRow}>
         <View
           style={[styles.cardStatusPill, { backgroundColor: statusStyle.bg }]}
@@ -868,7 +987,6 @@ function SentOfferCard({
           </Text>
         </View>
 
-        {/* PATCH: inline category badge on the card */}
         {(offer.offeredItemCategory || offer.requestedItemCategory) && (
           <View style={styles.cardCategoryPill}>
             <Ionicons name="pricetag-outline" size={10} color={NAVY} />
@@ -879,17 +997,27 @@ function SentOfferCard({
         )}
       </View>
 
-      {/* Owner row */}
-      <View style={styles.ownerRow}>
-        <Image
-          source={{
-            uri: offer.ownerAvatar || "https://i.pravatar.cc/150?img=5",
-          }}
-          style={styles.ownerAvatar}
-        />
+      {/* ── Owner row — tappable, wired to live owner info ── */}
+      <TouchableOpacity
+        style={styles.ownerRow}
+        onPress={onViewProfile}
+        activeOpacity={0.75}
+      >
+        {ownerInfo.avatar ? (
+          <Image
+            source={{ uri: ownerInfo.avatar }}
+            style={styles.ownerAvatar}
+          />
+        ) : (
+          <View style={[styles.ownerAvatar, styles.ownerAvatarFallback]}>
+            <Text style={styles.ownerAvatarInitial}>
+              {ownerInfo.name.charAt(0).toUpperCase()}
+            </Text>
+          </View>
+        )}
         <View style={{ flex: 1 }}>
           <Text style={styles.ownerName} numberOfLines={1}>
-            {offer.ownerName || "Item Owner"}
+            {ownerInfo.name}
           </Text>
           {offer.createdAt?.toDate && (
             <Text style={styles.offerDate}>
@@ -902,10 +1030,10 @@ function SentOfferCard({
           )}
         </View>
         <View style={styles.detailHint}>
-          <Text style={styles.detailHintText}>Details</Text>
+          <Text style={styles.detailHintText}>Profile</Text>
           <Ionicons name="chevron-forward" size={12} color={NAVY} />
         </View>
-      </View>
+      </TouchableOpacity>
 
       {/* Items swap row */}
       <View style={styles.swapRow}>
@@ -940,7 +1068,7 @@ function SentOfferCard({
         </View>
       )}
 
-      {/* PATCH: decline reason inline on the card (visible only to offerer) */}
+      {/* Decline reason */}
       {offer.status === "declined" && (offer as any).declineReason && (
         <View style={styles.declineReasonBox}>
           <Ionicons
@@ -1033,7 +1161,7 @@ function SentOfferCard({
   );
 }
 
-// ── Sheet styles ─────────────────────────────────────────────────────────────
+// ── Sheet styles ───────────────────────────────────────────────────────────────
 const sheetStyles = StyleSheet.create({
   backdrop: {
     ...StyleSheet.absoluteFillObject,
@@ -1095,7 +1223,6 @@ const sheetStyles = StyleSheet.create({
   statusDot: { width: 7, height: 7, borderRadius: 4 },
   statusText: { fontSize: 12, fontWeight: "700" },
   dateText: { fontSize: 12, color: "#9CA3AF" },
-  // PATCH: category badges in detail sheet
   categoryRow: {
     flexDirection: "row",
     flexWrap: "wrap",
@@ -1112,7 +1239,6 @@ const sheetStyles = StyleSheet.create({
     borderRadius: 20,
   },
   categoryPillText: { fontSize: 11, fontWeight: "600", color: NAVY },
-  // PATCH: decline reason in detail sheet
   declineReasonBox: {
     flexDirection: "row",
     alignItems: "flex-start",
@@ -1188,6 +1314,16 @@ const sheetStyles = StyleSheet.create({
     height: 46,
     borderRadius: 23,
     backgroundColor: "#E5E7EB",
+  },
+  ownerAvatarFallback: {
+    backgroundColor: NAVY,
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  ownerAvatarInitial: {
+    color: "#fff",
+    fontSize: 18,
+    fontWeight: "700",
   },
   ownerName: { fontSize: 15, fontWeight: "700", color: "#111827" },
   ownerSub: { fontSize: 12, color: "#9CA3AF", marginTop: 2 },
@@ -1284,7 +1420,7 @@ const sheetStyles = StyleSheet.create({
   completedBadgeText: { fontSize: 14, fontWeight: "700", color: "#16A34A" },
 });
 
-// ── Main screen styles ────────────────────────────────────────────────────────
+// ── Main screen styles ─────────────────────────────────────────────────────────
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#F8F9FF" },
   header: {
@@ -1377,8 +1513,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 3,
   },
   filterBadgeText: { fontSize: 9, fontWeight: "800" },
-
-  // PATCH: category chip row
   categoryBar: { maxHeight: 44, marginBottom: 4 },
   categoryBarContent: {
     paddingHorizontal: 16,
@@ -1397,13 +1531,9 @@ const styles = StyleSheet.create({
     backgroundColor: "#fff",
     flexShrink: 0,
   },
-  categoryChipActive: {
-    backgroundColor: NAVY,
-    borderColor: NAVY,
-  },
+  categoryChipActive: { backgroundColor: NAVY, borderColor: NAVY },
   categoryChipText: { fontSize: 11, fontWeight: "700", color: NAVY },
   categoryChipTextActive: { color: "#fff" },
-
   listContent: { paddingHorizontal: 16, paddingTop: 12, paddingBottom: 100 },
   card: {
     backgroundColor: "#fff",
@@ -1418,7 +1548,6 @@ const styles = StyleSheet.create({
     elevation: 1,
     gap: 10,
   },
-  // PATCH: row that holds status pill + category badge side by side
   cardTopRow: {
     flexDirection: "row",
     alignItems: "center",
@@ -1436,7 +1565,6 @@ const styles = StyleSheet.create({
   },
   cardStatusDot: { width: 6, height: 6, borderRadius: 3 },
   cardStatusText: { fontSize: 11, fontWeight: "700" },
-  // PATCH: category on the card itself
   cardCategoryPill: {
     flexDirection: "row",
     alignItems: "center",
@@ -1447,13 +1575,26 @@ const styles = StyleSheet.create({
     borderRadius: 20,
   },
   cardCategoryText: { fontSize: 10, fontWeight: "600", color: NAVY },
-  ownerRow: { flexDirection: "row", alignItems: "center", gap: 10 },
+  ownerRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    backgroundColor: "#F8F9FF",
+    borderRadius: 10,
+    padding: 8,
+  },
   ownerAvatar: {
     width: 36,
     height: 36,
     borderRadius: 18,
     backgroundColor: "#E5E7EB",
   },
+  ownerAvatarFallback: {
+    backgroundColor: NAVY,
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  ownerAvatarInitial: { color: "#fff", fontSize: 14, fontWeight: "700" },
   ownerName: { fontSize: 14, fontWeight: "700", color: "#111827" },
   offerDate: { fontSize: 11, color: "#AAAAAA", marginTop: 1 },
   detailHint: {
@@ -1508,7 +1649,6 @@ const styles = StyleSheet.create({
     flex: 1,
     lineHeight: 17,
   },
-  // PATCH: decline reason on the card
   declineReasonBox: {
     flexDirection: "row",
     alignItems: "flex-start",

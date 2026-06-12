@@ -220,7 +220,7 @@ export default function SignUpScreen() {
     }
 
     showSuccessAndReset(
-      "Account created successfully! We've sent a verification link to your Gmail. Please verify your email before logging in.",
+      "Account created successfully! We've sent a verification link to your e-mail. Please verify your email before logging in.",
       "verify",
     );
     setIsSubmitting(false);
@@ -259,7 +259,7 @@ export default function SignUpScreen() {
             />
             <TextInput
               style={[styles.input, { color: textColor }]}
-              placeholder="Gmail Address"
+              placeholder="E-mail Address"
               autoCapitalize="none"
               keyboardType="email-address"
               placeholderTextColor="#999999"

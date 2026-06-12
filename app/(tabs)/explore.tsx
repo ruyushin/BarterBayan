@@ -22,7 +22,7 @@ import {
   TextInput,
   TouchableOpacity,
   useWindowDimensions,
-  View
+  View,
 } from "react-native";
 import { ProposeTradeModal } from "../../components/ProposeTradeModal";
 import { auth } from "../../firebaseConfig";
@@ -32,6 +32,7 @@ import {
   deleteComment,
   deleteItem,
   getAllItems,
+  getUserInfo,
   getUserSavedItems,
   updateCommentLike,
   updateItemLikes,
@@ -82,6 +83,32 @@ function safeUri(uri: any): string {
 function safeUriList(images: any): string[] {
   const raw = Array.isArray(images) ? images : [];
   return raw.map(safeUri).filter((u) => u !== PLACEHOLDER);
+}
+
+// ── Display name resolver (fallback only – used before owner info loads) ──────
+function resolveDisplayName(obj: any): string {
+  return (
+    obj?.displayName?.trim() ||
+    obj?.name?.trim() ||
+    obj?.fullName?.trim() ||
+    obj?.userName?.trim() ||
+    ""
+  );
+}
+
+// ── Build the best display name from a getUserInfo result ─────────────────────
+function buildOwnerDisplayName(info: any, fallback: string): string {
+  if (info?.firstName && info?.lastName)
+    return `${info.firstName.trim()} ${info.lastName.trim()}`;
+  return (
+    info?.displayName?.trim() ||
+    info?.name?.trim() ||
+    info?.fullName?.trim() ||
+    info?.username?.trim() ||
+    info?.userName?.trim() ||
+    fallback ||
+    "Unknown User"
+  );
 }
 
 // ── Date formatter ────────────────────────────────────────────────────────────
@@ -165,7 +192,9 @@ export default function Screen() {
             ...enrichMap[item.id],
             ...item,
             userName:
-              enrichMap[item.id]?.userName || item.userName || "Unknown User",
+              resolveDisplayName(enrichMap[item.id]) ||
+              resolveDisplayName(item) ||
+              "Unknown User",
             userAvatar: enrichMap[item.id]?.userAvatar || item.userAvatar || "",
           }));
         } else if (typeFilter === "personalized") {
@@ -176,7 +205,9 @@ export default function Screen() {
             ...enrichMap[item.id],
             ...item,
             userName:
-              enrichMap[item.id]?.userName || item.userName || "Unknown User",
+              resolveDisplayName(enrichMap[item.id]) ||
+              resolveDisplayName(item) ||
+              "Unknown User",
             userAvatar: enrichMap[item.id]?.userAvatar || item.userAvatar || "",
           }));
         } else {
@@ -505,13 +536,34 @@ function ItemCard({ item, onCommentAdded, onDelete }: any) {
 
   const currentUser = auth.currentUser?.uid;
   const currentUserName =
-    auth.currentUser?.displayName ||
+    auth.currentUser?.displayName?.trim() ||
     (auth.currentUser?.email
       ? auth.currentUser.email.split("@")[0]
       : `User_${auth.currentUser?.uid?.slice(0, 5) ?? ""}`);
   const currentUserPhotoURL =
     auth.currentUser?.photoURL || "https://i.pravatar.cc/150?img=1";
   const isOwnItem = !!currentUser && currentUser === item?.ownerId;
+
+  // ── Owner display name – fetched from Firestore, same logic as ProductDetailModal
+  const [ownerDisplayName, setOwnerDisplayName] = useState<string>(
+    resolveDisplayName(item) || "Unknown User",
+  );
+
+  useEffect(() => {
+    if (!item?.ownerId) return;
+    let cancelled = false;
+    getUserInfo(item.ownerId)
+      .then((info) => {
+        if (cancelled || !info) return;
+        setOwnerDisplayName(
+          buildOwnerDisplayName(info, resolveDisplayName(item)),
+        );
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [item?.ownerId]);
 
   // ── Like state ──────────────────────────────────────────────────────────────
   const _cached = getLikeState(item.id);
@@ -557,10 +609,6 @@ function ItemCard({ item, onCommentAdded, onDelete }: any) {
   const imageUrl = imagesList[0];
   const resolvedAvatar = safeUri(item?.userAvatar);
   const hasAvatar = resolvedAvatar !== PLACEHOLDER;
-  const resolvedName =
-    item?.userName && item.userName.trim().length > 0
-      ? item.userName
-      : "Unknown User";
   const postDate = formatPostDate(item?.createdAt || item?.date);
 
   useEffect(() => {
@@ -847,6 +895,19 @@ function ItemCard({ item, onCommentAdded, onDelete }: any) {
       params: { itemId: item.id, item: JSON.stringify(item) },
     });
 
+  // Resolve comment author display name
+  const resolveCommentName = (comment: any): string => {
+    if (comment?.firstName && comment?.lastName)
+      return `${comment.firstName.trim()} ${comment.lastName.trim()}`;
+    return (
+      comment?.displayName?.trim() ||
+      comment?.name?.trim() ||
+      comment?.userName?.trim() ||
+      comment?.username?.trim() ||
+      "User"
+    );
+  };
+
   return (
     <View style={styles.card}>
       <ProposeTradeModal
@@ -873,12 +934,12 @@ function ItemCard({ item, onCommentAdded, onDelete }: any) {
           ) : (
             <View style={[styles.avatar, styles.avatarFallback]}>
               <Text style={styles.avatarInitial}>
-                {resolvedName[0].toUpperCase()}
+                {(ownerDisplayName || "?")[0].toUpperCase()}
               </Text>
             </View>
           )}
           <View style={styles.userDetails}>
-            <Text style={styles.username}>{resolvedName}</Text>
+            <Text style={styles.username}>{ownerDisplayName}</Text>
             {!!postDate && <Text style={styles.date}>{postDate}</Text>}
           </View>
         </TouchableOpacity>
@@ -1092,6 +1153,7 @@ function ItemCard({ item, onCommentAdded, onDelete }: any) {
             const isCommentLiked = (comment.likedBy || []).includes(
               currentUser,
             );
+            const commentAuthorName = resolveCommentName(comment);
             return (
               <View key={comment.id} style={styles.commentItem}>
                 <TouchableOpacity
@@ -1124,7 +1186,7 @@ function ItemCard({ item, onCommentAdded, onDelete }: any) {
                       }
                     >
                       <Text style={styles.commentUserName}>
-                        {comment.userName?.trim() || "User"}
+                        {commentAuthorName}
                       </Text>
                     </TouchableOpacity>
                     <Text style={styles.commentText}>{comment.text}</Text>
@@ -1191,24 +1253,34 @@ function ItemCard({ item, onCommentAdded, onDelete }: any) {
                   {/* Replies */}
                   {comment.replies && comment.replies.length > 0 && (
                     <View style={styles.repliesContainer}>
-                      {comment.replies.map((reply: any) => (
-                        <View key={reply.id} style={styles.replyItem}>
-                          <Image
-                            source={{
-                              uri:
-                                reply.userAvatar ||
-                                "https://i.pravatar.cc/150?img=1",
-                            }}
-                            style={styles.replyAvatar}
-                          />
-                          <View style={styles.replyBubble}>
-                            <Text style={styles.replyUserName}>
-                              {reply.userName?.trim() || "User"}
-                            </Text>
-                            <Text style={styles.replyText}>{reply.text}</Text>
+                      {comment.replies.map((reply: any) => {
+                        const replyAuthorName =
+                          reply?.firstName && reply?.lastName
+                            ? `${reply.firstName.trim()} ${reply.lastName.trim()}`
+                            : reply?.displayName?.trim() ||
+                              reply?.name?.trim() ||
+                              reply?.userName?.trim() ||
+                              reply?.username?.trim() ||
+                              "User";
+                        return (
+                          <View key={reply.id} style={styles.replyItem}>
+                            <Image
+                              source={{
+                                uri:
+                                  reply.userAvatar ||
+                                  "https://i.pravatar.cc/150?img=1",
+                              }}
+                              style={styles.replyAvatar}
+                            />
+                            <View style={styles.replyBubble}>
+                              <Text style={styles.replyUserName}>
+                                {replyAuthorName}
+                              </Text>
+                              <Text style={styles.replyText}>{reply.text}</Text>
+                            </View>
                           </View>
-                        </View>
-                      ))}
+                        );
+                      })}
                     </View>
                   )}
 
@@ -1217,7 +1289,7 @@ function ItemCard({ item, onCommentAdded, onDelete }: any) {
                     <View style={styles.replyInputRow}>
                       <TextInput
                         style={styles.replyInput}
-                        placeholder={`Reply to ${comment.userName?.trim() || "User"}…`}
+                        placeholder={`Reply to ${commentAuthorName}…`}
                         placeholderTextColor="#aaa"
                         value={replyText}
                         onChangeText={setReplyText}
@@ -1322,7 +1394,7 @@ function ItemCard({ item, onCommentAdded, onDelete }: any) {
                   <View>
                     <Text style={styles.optionLabel}>Report User</Text>
                     <Text style={styles.optionSub}>
-                      Report {resolvedName}'s account
+                      Report {ownerDisplayName}'s account
                     </Text>
                   </View>
                 </TouchableOpacity>
@@ -1348,7 +1420,7 @@ function ItemCard({ item, onCommentAdded, onDelete }: any) {
             <Text style={styles.reportSub}>
               {reportTarget === "post"
                 ? "Why are you reporting this listing?"
-                : `Why are you reporting ${resolvedName}?`}
+                : `Why are you reporting ${ownerDisplayName}?`}
             </Text>
             {REPORT_REASONS.map((reason) => (
               <TouchableOpacity
@@ -1666,7 +1738,7 @@ const styles = StyleSheet.create({
   },
   ownItemText: { fontSize: 12, color: "#AAAAAA", fontWeight: "500" },
 
-  // Footer stats (bigger buttons)
+  // Footer stats
   cardFooter: {
     flexDirection: "row",
     paddingHorizontal: 8,

@@ -10,6 +10,7 @@ import {
   collection,
   doc,
   getDocs,
+  onSnapshot,
   orderBy,
   query,
   serverTimestamp,
@@ -118,6 +119,50 @@ export async function getNotifications(userId: string): Promise<any[]> {
     }
     throw err;
   }
+}
+
+// ─── Realtime subscription ─────────────────────────────────────────────────────
+
+/**
+ * Subscribes to realtime updates for a user's notifications, newest first.
+ *
+ * Calls `callback` immediately with the current snapshot and again on every
+ * subsequent change (new notification, read-state change, deletion, etc.)
+ * without requiring a manual refresh.
+ *
+ * Returns an unsubscribe function — call it on cleanup (e.g. in a
+ * useEffect's return) to detach the listener.
+ *
+ * NOTE: This query requires the same composite index as `getNotifications`
+ * (userId ASC/== + createdAt DESC). Unlike `getDocs`, `onSnapshot` will not
+ * retry or fall back if the index is missing — it will emit a permanent
+ * "failed-precondition" error via the `onError` callback. Create the index
+ * via the link in that error, or Firebase Console → Firestore → Indexes.
+ */
+export function subscribeToNotifications(
+  userId: string,
+  callback: (notifications: any[]) => void,
+  onError?: (err: any) => void,
+): () => void {
+  const q = query(
+    collection(db, NOTIF_COLLECTION),
+    where("userId", "==", userId),
+    orderBy("createdAt", "desc"),
+  );
+
+  const unsubscribe = onSnapshot(
+    q,
+    (snapshot) => {
+      const notifs = snapshot.docs.map((d) => ({ id: d.id, ...d.data() }));
+      callback(notifs);
+    },
+    (err) => {
+      console.error("subscribeToNotifications error:", err);
+      onError?.(err);
+    },
+  );
+
+  return unsubscribe;
 }
 
 // ─── Mark read ────────────────────────────────────────────────────────────────

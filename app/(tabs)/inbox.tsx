@@ -1,5 +1,6 @@
 import { Ionicons } from "@expo/vector-icons";
 import { useFocusEffect } from "@react-navigation/native";
+import * as Notifications from "expo-notifications";
 import { useRouter } from "expo-router";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
@@ -16,6 +17,7 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
+import { TradeChatModal } from "../../components/TradeChatModal";
 import { auth } from "../../firebaseConfig";
 import { badgeStore } from "../../services/badgeStore";
 import { getUserInfo } from "../../services/itemService";
@@ -36,27 +38,25 @@ import {
   getNotifications,
   markAllNotificationsRead,
 } from "../../services/notificationService";
-// ── NEW: needed to fetch the trade and open TradeChatModal ──
-import { TradeChatModal } from "../../components/TradeChatModal";
-import { TradeOffer, getTradeOffer } from "../../services/tradeService";
-// ── NEW: push notifications ──
-import * as Notifications from "expo-notifications";
 import {
   addNotificationListeners,
   registerForPushNotificationsAsync,
 } from "../../services/pushNotificationService";
+import { TradeOffer, getTradeOffer } from "../../services/tradeService";
+
 // ─── Constants
 const NAVY = "#2e2d7c";
 const ACCENT = "#f5c518";
 const PAGE_SIZE = 10;
+
 // ─── Types
-// CHANGED: added "trade_message" so inbox knows how to route it
 type NotifType =
   | "trade_offer"
   | "trade_accepted"
   | "trade_message"
   | "message"
   | "generic";
+
 interface Notification {
   id: string;
   type: NotifType;
@@ -69,12 +69,14 @@ interface Notification {
   conversationId?: string;
   otherUserId?: string;
 }
+
 interface SheetOption {
   label: string;
   icon: string;
   destructive?: boolean;
   onPress: () => void;
 }
+
 // ─── Helpers
 const tsToDate = (timestamp: any): Date => {
   if (!timestamp) return new Date(0);
@@ -85,6 +87,7 @@ const tsToDate = (timestamp: any): Date => {
   const parsed = new Date(timestamp);
   return isNaN(parsed.getTime()) ? new Date(0) : parsed;
 };
+
 const formatTime = (timestamp: any): string => {
   try {
     const date = tsToDate(timestamp);
@@ -103,6 +106,7 @@ const formatTime = (timestamp: any): string => {
     return "";
   }
 };
+
 const AVATAR_COLORS = [
   "#e05c5c",
   "#e07a5c",
@@ -111,11 +115,12 @@ const AVATAR_COLORS = [
   "#7a5ce0",
   "#5ce07a",
 ];
+
 const letterAvatarColor = (name: string): string => {
   const index = (name?.charCodeAt(0) ?? 0) % AVATAR_COLORS.length;
   return AVATAR_COLORS[index];
 };
-// CHANGED: added trade_message icon
+
 const notifIcon = (type: NotifType): any => {
   switch (type) {
     case "trade_offer":
@@ -130,6 +135,7 @@ const notifIcon = (type: NotifType): any => {
       return "notifications";
   }
 };
+
 const resolveAvatar = (info: any): string | null => {
   const url =
     info?.avatarUrl ||
@@ -143,6 +149,18 @@ const resolveAvatar = (info: any): string | null => {
   if (url && typeof url === "string" && url.startsWith("http")) return url;
   return null;
 };
+
+// Prioritises the human-readable profile name over the @username handle.
+const resolveDisplayName = (info: any): string => {
+  return (
+    info?.displayName?.trim() ||
+    info?.name?.trim() ||
+    info?.fullName?.trim() ||
+    info?.username?.trim() ||
+    ""
+  );
+};
+
 function AvatarWithFallback({
   uri,
   name,
@@ -194,6 +212,7 @@ function AvatarWithFallback({
     </View>
   );
 }
+
 function NotifAvatarWithFallback({
   uri,
   title,
@@ -224,6 +243,7 @@ function NotifAvatarWithFallback({
     </View>
   );
 }
+
 function BottomSheet({
   visible,
   title,
@@ -286,6 +306,7 @@ function BottomSheet({
     </Modal>
   );
 }
+
 const sheet = StyleSheet.create({
   overlay: {
     flex: 1,
@@ -318,11 +339,13 @@ const sheet = StyleSheet.create({
   },
   cancelLabel: { fontSize: 16, fontWeight: "600", color: "#333" },
 });
+
 // ─── Main Component
 export default function InboxScreen() {
   const [activeTab, setActiveTab] = useState<
     "messages" | "archived" | "notifications"
   >("messages");
+
   // ── Messages state
   const [conversations, setConversations] = useState<any[]>([]);
   const [archivedConversations, setArchivedConversations] = useState<any[]>([]);
@@ -331,35 +354,42 @@ export default function InboxScreen() {
     [key: string]: Date;
   }>({});
   const [searchQuery, setSearchQuery] = useState<string>("");
+
   // ── Bottom sheet
   const [sheetVisible, setSheetVisible] = useState(false);
   const [sheetOptions, setSheetOptions] = useState<SheetOption[]>([]);
   const [sheetTitle, setSheetTitle] = useState<string | undefined>();
+
   // ── Delete confirmation modal
   const [deleteModalVisible, setDeleteModalVisible] = useState(false);
   const [conversationToDelete, setConversationToDelete] = useState<any>(null);
+
   // ── Notifications state
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
   const [notifLoading, setNotifLoading] = useState(false);
   const [markingRead, setMarkingRead] = useState(false);
+
   // ── Selection mode
   const [selectionMode, setSelectionMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
-  // ── NEW: TradeChatModal state — opened when a trade_message notif is tapped
+
+  // ── TradeChatModal state
   const [tradeChatVisible, setTradeChatVisible] = useState(false);
   const [tradeChatOffer, setTradeChatOffer] = useState<TradeOffer | null>(null);
   const [tradeChatLoading, setTradeChatLoading] = useState(false);
+
   const router = useRouter();
   const currentUserId = auth.currentUser?.uid;
   const conversationUnsubscribeRef = useRef<(() => void) | null>(null);
-  // ── NEW: cleanup ref for push notification listeners
   const notificationListenerCleanup = useRef<(() => void) | null>(null);
+
   const openSheet = (title: string | undefined, options: SheetOption[]) => {
     setSheetTitle(title);
     setSheetOptions(options);
     setSheetVisible(true);
   };
+
   // ─── Data loaders ─────────────────────────────────────────────────────────
   useFocusEffect(
     useCallback(() => {
@@ -369,6 +399,7 @@ export default function InboxScreen() {
       }
     }, [currentUserId]),
   );
+
   const loadConversations = useCallback(async () => {
     try {
       setConvLoading(true);
@@ -391,7 +422,8 @@ export default function InboxScreen() {
               () => null,
             );
             const avatarUri = resolveAvatar(userInfo);
-            // Get unread message count for this conversation
+            // Use display name from profile, not the @username handle
+            const displayName = resolveDisplayName(userInfo) || "User";
             const unreadCount = await getUnreadMessageCount(
               conv.id,
               currentUserId!,
@@ -399,7 +431,7 @@ export default function InboxScreen() {
             return {
               ...conv,
               otherUserId,
-              userName: userInfo?.username || userInfo?.displayName || "User",
+              userName: displayName,
               userAvatar: avatarUri,
               unreadCount,
             };
@@ -440,6 +472,7 @@ export default function InboxScreen() {
       setConvLoading(false);
     }
   }, [currentUserId]);
+
   const loadNotifications = useCallback(async () => {
     try {
       setNotifLoading(true);
@@ -452,6 +485,7 @@ export default function InboxScreen() {
       setNotifLoading(false);
     }
   }, [currentUserId]);
+
   // ─── Mark all read
   const handleMarkAllRead = async () => {
     if (markingRead) return;
@@ -467,9 +501,8 @@ export default function InboxScreen() {
       setMarkingRead(false);
     }
   };
-  // ─── Notification press
-  // CHANGED: trade_message opens TradeChatModal instead of the regular chat
-  // ── Shared helper: fetch a trade by ID and open TradeChatModal
+
+  // ─── Open trade chat helper
   const openTradeChat = async (tradeId: string) => {
     setTradeChatLoading(true);
     try {
@@ -487,13 +520,14 @@ export default function InboxScreen() {
       setTradeChatLoading(false);
     }
   };
+
+  // ─── Notification press
   const handleNotifPress = async (item: Notification) => {
     console.log("NOTIF TAPPED type=" + item.type + " tradeId=" + item.tradeId);
     if (selectionMode) {
       toggleSelect(item.id);
       return;
     }
-    // Mark as read
     if (!item.read) {
       const { markNotificationRead } =
         await import("../../services/notificationService");
@@ -502,8 +536,6 @@ export default function InboxScreen() {
         prev.map((n) => (n.id === item.id ? { ...n, read: true } : n)),
       );
     }
-    // If ANY notification carries a tradeId open trade chat —
-    // covers both "trade_message" and legacy "message" typed notifications.
     if (item.tradeId) {
       await openTradeChat(item.tradeId);
       return;
@@ -523,10 +555,12 @@ export default function InboxScreen() {
         break;
     }
   };
+
   const handleNotifLongPress = (id: string) => {
     setSelectionMode(true);
     setSelectedIds(new Set([id]));
   };
+
   const toggleSelect = (id: string) => {
     setSelectedIds((prev) => {
       const next = new Set(prev);
@@ -536,13 +570,16 @@ export default function InboxScreen() {
       return next;
     });
   };
+
   const cancelSelection = () => {
     setSelectionMode(false);
     setSelectedIds(new Set());
   };
+
   const handleDeleteSelected = () => {
     setDeleteModalVisible(true);
   };
+
   const confirmDeleteSelected = async () => {
     try {
       await deleteNotifications([...selectedIds]);
@@ -554,6 +591,7 @@ export default function InboxScreen() {
       setDeleteModalVisible(false);
     }
   };
+
   // ─── Conversation menu
   const handleConversationMenu = (item: any) => {
     const isMuted = mutedConversations[item.id];
@@ -642,6 +680,7 @@ export default function InboxScreen() {
     });
     openSheet(item.userName, options);
   };
+
   const confirmDeleteConversation = async () => {
     if (!conversationToDelete) return;
     try {
@@ -655,6 +694,7 @@ export default function InboxScreen() {
       setConversationToDelete(null);
     }
   };
+
   const openMuteSheet = (item: any) => {
     const mute = async (ms: number) => {
       const muteUntil = new Date(Date.now() + ms);
@@ -693,6 +733,7 @@ export default function InboxScreen() {
       },
     ]);
   };
+
   // ─── Search filtering
   const filteredConversations = conversations.filter(
     (conv) =>
@@ -704,12 +745,12 @@ export default function InboxScreen() {
       conv.userName?.toLowerCase().includes(searchQuery.toLowerCase()) ||
       conv.lastMessage?.toLowerCase().includes(searchQuery.toLowerCase()),
   );
+
   // ─── Pagination
   const visibleNotifs = notifications.slice(0, visibleCount);
   const hasMore = notifications.length > visibleCount;
   const loadMore = () => setVisibleCount((c) => c + PAGE_SIZE);
 
-  // Count unique unread conversations in notifications (deduplicate messages + reactions)
   const unreadNotificationConversations = new Set(
     notifications
       .filter((n) => !n.read)
@@ -719,34 +760,26 @@ export default function InboxScreen() {
   const unreadNotificationBadge =
     unreadCount > 99 ? "99+" : unreadCount.toString();
 
-  // Calculate unread conversations based on ACTUAL unread messages (not conversation read state)
-  // Count conversations with unreadCount > 0 to match the badge display
   const unreadConversationsCount = conversations.filter(
     (conv) => (conv.unreadCount || 0) > 0,
   ).length;
-  // Keep tab bar badge in sync
+
   useEffect(() => {
     const total = unreadConversationsCount + unreadCount;
     badgeStore.setCount(total);
-    // NEW: keep the OS app icon badge in sync too
     Notifications.setBadgeCountAsync(total).catch(() => {});
   }, [unreadConversationsCount, unreadCount]);
 
-  // ── NEW: register for push notifications and listen for incoming/tapped notifications
   useEffect(() => {
     if (!currentUserId) return;
-
     registerForPushNotificationsAsync(currentUserId).catch((err) =>
       console.error("Push registration failed:", err),
     );
-
     notificationListenerCleanup.current = addNotificationListeners(
       () => {
-        // App in foreground received a push — refresh the in-app list
         loadNotifications();
       },
       (response) => {
-        // User tapped a system notification
         const data: any = response?.notification?.request?.content?.data ?? {};
         if (data.tradeId) {
           openTradeChat(data.tradeId);
@@ -763,7 +796,6 @@ export default function InboxScreen() {
         }
       },
     );
-
     return () => {
       notificationListenerCleanup.current?.();
       notificationListenerCleanup.current = null;
@@ -772,11 +804,11 @@ export default function InboxScreen() {
 
   const totalUnreadBadge =
     unreadConversationsCount > 99 ? "99+" : unreadConversationsCount.toString();
+
   // ─── Renders
   const renderMessage = ({ item }: any) => {
     const isMuted = mutedConversations[item.id];
     const isMutedActive = isMuted && new Date() < isMuted;
-    // Determine read state based on actual unread message count
     const isRead = (item.unreadCount || 0) === 0;
     const name = item.userName || "User";
     const timeStr = item.lastMessageTime
@@ -785,7 +817,6 @@ export default function InboxScreen() {
     const lastLine = timeStr
       ? `${item.lastMessage || "No messages"} · ${timeStr}`
       : item.lastMessage || "No messages";
-    // Get actual unread message count and format for display (capped at 99+)
     const unreadCount = item.unreadCount || 0;
     const unreadBadgeText = unreadCount > 99 ? "99+" : unreadCount.toString();
     return (
@@ -803,7 +834,6 @@ export default function InboxScreen() {
             }
             activeOpacity={0.75}
           >
-            {/* FIX #3: AvatarWithFallback replaces the bare <Image> */}
             <View style={styles.avatarWrap}>
               <AvatarWithFallback
                 uri={item.userAvatar}
@@ -865,6 +895,7 @@ export default function InboxScreen() {
       </View>
     );
   };
+
   const renderNotification = ({ item }: { item: Notification }) => {
     const isSelected = selectedIds.has(item.id);
     return (
@@ -906,6 +937,7 @@ export default function InboxScreen() {
       </TouchableOpacity>
     );
   };
+
   const renderNotifFooter = () => {
     if (!hasMore) return null;
     return (
@@ -917,6 +949,7 @@ export default function InboxScreen() {
       </TouchableOpacity>
     );
   };
+
   // ─── UI
   return (
     <SafeAreaView style={styles.container}>
@@ -983,6 +1016,7 @@ export default function InboxScreen() {
             </Pressable>
           </Pressable>
         </Modal>
+
         {/* Sidebar */}
         <View style={styles.sidebar}>
           <TouchableOpacity
@@ -1046,6 +1080,7 @@ export default function InboxScreen() {
             )}
           </TouchableOpacity>
         </View>
+
         {/* Main content */}
         <View style={styles.content}>
           {activeTab === "messages" || activeTab === "archived" ? (
@@ -1170,7 +1205,6 @@ export default function InboxScreen() {
               {!selectionMode && notifications.length > 0 && (
                 <Text style={styles.hintText}>Hold to select &amp; delete</Text>
               )}
-              {/* Loading spinner for trade chat fetch */}
               {tradeChatLoading && (
                 <View style={styles.tradeChatLoader}>
                   <ActivityIndicator size="small" color={NAVY} />
@@ -1202,7 +1236,8 @@ export default function InboxScreen() {
           )}
         </View>
       </View>
-      {/* NEW: TradeChatModal — opened when a trade_message notification is tapped */}
+
+      {/* TradeChatModal */}
       <TradeChatModal
         visible={tradeChatVisible}
         trade={tradeChatOffer}
@@ -1223,6 +1258,7 @@ export default function InboxScreen() {
     </SafeAreaView>
   );
 }
+
 // ─── Styles
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#e8e8f0" },
@@ -1418,7 +1454,6 @@ const styles = StyleSheet.create({
   deleteBtnDisabled: { opacity: 0.4 },
   deleteBtnText: { color: "#fff", fontSize: 13, fontWeight: "700" },
   hintText: { fontSize: 11, color: "#aaa", marginBottom: 10, marginTop: 2 },
-  // NEW: small inline loader while fetching trade for chat
   tradeChatLoader: {
     flexDirection: "row",
     alignItems: "center",

@@ -412,35 +412,99 @@ const eh = StyleSheet.create({
   closeLabel: { fontSize: 15, fontWeight: "600", color: "#333" },
 });
 
-// ─── EditMessageModal ─────────────────────────────────────────────────────────
-function EditMessageModal({ visible, initialText, onSave, onCancel }: {
-  visible: boolean; initialText: string; onSave: (text: string) => void; onCancel: () => void;
+// ─── EditMessageModal — Android keyboard fix ──────────────────────────────────
+function EditMessageModal({
+  visible,
+  initialText,
+  onSave,
+  onCancel,
+}: {
+  visible: boolean;
+  initialText: string;
+  onSave: (text: string) => void;
+  onCancel: () => void;
 }) {
   const [text, setText] = useState(initialText);
-  useEffect(() => { if (visible) setText(initialText); }, [visible, initialText]);
+
+  // ── Android keyboard fix (same technique as TradeChatModal) ──────────────
+  const [androidKeyboardHeight, setAndroidKeyboardHeight] = useState(0);
+
+  useEffect(() => {
+    if (Platform.OS !== "android") return;
+    const show = Keyboard.addListener("keyboardDidShow", (e) => {
+      setAndroidKeyboardHeight(e.endCoordinates.height);
+    });
+    const hide = Keyboard.addListener("keyboardDidHide", () => {
+      setAndroidKeyboardHeight(0);
+    });
+    return () => {
+      show.remove();
+      hide.remove();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (visible) setText(initialText);
+  }, [visible, initialText]);
+
+  const panelContent = (
+    <>
+      <Text style={editModal.heading}>Edit Message</Text>
+      <TextInput
+        style={editModal.input}
+        value={text}
+        onChangeText={setText}
+        multiline
+        autoFocus
+        placeholder="Edit your message..."
+        placeholderTextColor="#aaa"
+      />
+      <View style={editModal.row}>
+        <TouchableOpacity style={editModal.cancelBtn} onPress={onCancel}>
+          <Text style={editModal.cancelLabel}>Cancel</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[editModal.saveBtn, !text.trim() && { opacity: 0.4 }]}
+          onPress={() => text.trim() && onSave(text.trim())}
+          disabled={!text.trim()}
+        >
+          <Text style={editModal.saveLabel}>Save</Text>
+        </TouchableOpacity>
+      </View>
+    </>
+  );
+
   return (
-    <Modal visible={visible} transparent animationType="slide" onRequestClose={onCancel}>
-      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : "height"} keyboardVerticalOffset={0}>
+    <Modal
+      visible={visible}
+      transparent
+      animationType="slide"
+      onRequestClose={onCancel}
+    >
+      {Platform.OS === "ios" ? (
+        <KeyboardAvoidingView
+          style={{ flex: 1 }}
+          behavior="padding"
+          keyboardVerticalOffset={0}
+        >
+          <Pressable style={editModal.overlay} onPress={onCancel}>
+            <Pressable style={editModal.panel}>{panelContent}</Pressable>
+          </Pressable>
+        </KeyboardAvoidingView>
+      ) : (
         <Pressable style={editModal.overlay} onPress={onCancel}>
-          <Pressable style={editModal.panel}>
-            <Text style={editModal.heading}>Edit Message</Text>
-            <TextInput
-              style={editModal.input} value={text} onChangeText={setText}
-              multiline autoFocus placeholder="Edit your message..." placeholderTextColor="#aaa"
-            />
-            <View style={editModal.row}>
-              <TouchableOpacity style={editModal.cancelBtn} onPress={onCancel}>
-                <Text style={editModal.cancelLabel}>Cancel</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[editModal.saveBtn, !text.trim() && { opacity: 0.4 }]}
-                onPress={() => text.trim() && onSave(text.trim())} disabled={!text.trim()}>
-                <Text style={editModal.saveLabel}>Save</Text>
-              </TouchableOpacity>
-            </View>
+          <Pressable
+            style={[
+              editModal.panel,
+              androidKeyboardHeight > 0
+                ? { marginBottom: androidKeyboardHeight }
+                : undefined,
+            ]}
+          >
+            {panelContent}
           </Pressable>
         </Pressable>
-      </KeyboardAvoidingView>
+      )}
     </Modal>
   );
 }
