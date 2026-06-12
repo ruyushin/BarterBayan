@@ -23,6 +23,8 @@ export interface TrendingItem {
   views?: number;
   viewedBy?: string[];
   trendingScore?: number;
+  isTraded?: boolean;
+  isDeleted?: boolean;
 }
 
 export interface UserActivity {
@@ -73,7 +75,8 @@ export const calculateTrendingScore = (item: TrendingItem): number => {
 };
 
 /**
- * Get trending items sorted by trending score
+ * Get trending items sorted by trending score.
+ * Excludes items that have been traded or soft-deleted, matching getAllItems().
  */
 export const getTrendingItems = async (
   limit_: number = 20,
@@ -82,24 +85,28 @@ export const getTrendingItems = async (
     const itemsRef = collection(db, "items");
     const snapshot = await getDocs(itemsRef);
 
-    const items = snapshot.docs.map((doc) => {
-      const data = doc.data();
-      return {
-        id: doc.id,
-        title: data.title,
-        category: data.category,
-        condition: data.condition,
-        description: data.description,
-        images: data.images,
-        image: data.image,
-        ownerId: data.ownerId,
-        likes: data.likes || 0,
-        likedBy: data.likedBy || [],
-        createdAt: data.createdAt,
-        views: data.views || 0,
-        viewedBy: data.viewedBy || [],
-      } as TrendingItem;
-    });
+    const items = snapshot.docs
+      .map((doc) => {
+        const data = doc.data();
+        return {
+          id: doc.id,
+          title: data.title,
+          category: data.category,
+          condition: data.condition,
+          description: data.description,
+          images: data.images,
+          image: data.image,
+          ownerId: data.ownerId,
+          likes: data.likes || 0,
+          likedBy: data.likedBy || [],
+          createdAt: data.createdAt,
+          views: data.views || 0,
+          viewedBy: data.viewedBy || [],
+          isTraded: !!data.isTraded,
+          isDeleted: !!data.isDeleted,
+        } as TrendingItem;
+      })
+      .filter((item) => !item.isTraded && !item.isDeleted);
 
     const itemsWithScores = items.map((item) => ({
       ...item,
@@ -186,7 +193,8 @@ export const trackUserActivity = async (
 };
 
 /**
- * Get personalized suggestions based on user activity
+ * Get personalized suggestions based on user activity.
+ * Excludes items that have been traded or soft-deleted, matching getAllItems().
  */
 export const getPersonalizedSuggestions = async (
   userId: string,
@@ -208,24 +216,28 @@ export const getPersonalizedSuggestions = async (
     const itemsRef = collection(db, "items");
     const snapshot = await getDocs(itemsRef);
 
-    const allItems = snapshot.docs.map((doc) => {
-      const data = doc.data();
-      return {
-        id: doc.id,
-        title: data.title,
-        category: data.category,
-        condition: data.condition,
-        description: data.description,
-        images: data.images,
-        image: data.image,
-        ownerId: data.ownerId,
-        likes: data.likes || 0,
-        likedBy: data.likedBy || [],
-        createdAt: data.createdAt,
-        views: data.views || 0,
-        viewedBy: data.viewedBy || [],
-      } as TrendingItem;
-    });
+    const allItems = snapshot.docs
+      .map((doc) => {
+        const data = doc.data();
+        return {
+          id: doc.id,
+          title: data.title,
+          category: data.category,
+          condition: data.condition,
+          description: data.description,
+          images: data.images,
+          image: data.image,
+          ownerId: data.ownerId,
+          likes: data.likes || 0,
+          likedBy: data.likedBy || [],
+          createdAt: data.createdAt,
+          views: data.views || 0,
+          viewedBy: data.viewedBy || [],
+          isTraded: !!data.isTraded,
+          isDeleted: !!data.isDeleted,
+        } as TrendingItem;
+      })
+      .filter((item) => !item.isTraded && !item.isDeleted);
 
     const unseenItems = allItems.filter(
       (item) => !likedItems.includes(item.id) && !viewedItems.includes(item.id),
@@ -265,7 +277,8 @@ export const getPersonalizedSuggestions = async (
 };
 
 /**
- * Get similar items based on a specific item
+ * Get similar items based on a specific item.
+ * Excludes items that have been traded or soft-deleted, matching getAllItems().
  */
 export const getSimilarItems = async (
   itemId: string,
@@ -288,7 +301,12 @@ export const getSimilarItems = async (
     const similarItems = snapshot.docs
       .filter((doc) => {
         const data = doc.data();
-        return data.category === baseCategory && doc.id !== itemId;
+        return (
+          data.category === baseCategory &&
+          doc.id !== itemId &&
+          !data.isTraded &&
+          !data.isDeleted
+        );
       })
       .map((doc) => {
         const data = doc.data();
@@ -306,6 +324,8 @@ export const getSimilarItems = async (
           createdAt: data.createdAt,
           views: data.views || 0,
           viewedBy: data.viewedBy || [],
+          isTraded: !!data.isTraded,
+          isDeleted: !!data.isDeleted,
           trendingScore: calculateTrendingScore({
             id: doc.id,
             title: data.title,

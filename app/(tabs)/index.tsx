@@ -85,18 +85,31 @@ export default function HomeScreen() {
     }
   }, [fetchUserItems, refetch]);
 
+  const tradedItemIds = React.useMemo(
+    () =>
+      new Set(
+        userPostedItems.filter((i: any) => i.isTraded).map((i: any) => i.id),
+      ),
+    [userPostedItems],
+  );
+
+  const isItemTraded = (item: any) =>
+    !!item.isTraded || !!item.traded || tradedItemIds.has(item.id);
+
   const query = searchQuery.toLowerCase().trim();
   const filteredResults = query
-    ? items.filter(
-        (item) =>
-          item.title.toLowerCase().includes(query) ||
-          item.category.toLowerCase().includes(query),
-      )
+    ? items
+        .filter((item: any) => !isItemTraded(item))
+        .filter(
+          (item) =>
+            item.title.toLowerCase().includes(query) ||
+            item.category.toLowerCase().includes(query),
+        )
     : [];
   const searchResults = filteredResults.slice(0, 5);
   const totalResults = filteredResults.length;
 
-  const displayItems = items;
+  const displayItems = (items || []).filter((item: any) => !isItemTraded(item));
 
   const handleSearchResultPress = (itemTitle: string) => {
     router.push(`/explore?search=${encodeURIComponent(itemTitle)}`);
