@@ -1,5 +1,6 @@
 // profile.tsx — patched: added follower/following counts + navigation to followers screen
 // All original functionality preserved. Follow counts are real-time via onSnapshot.
+// FIX: savedCount now reflects only items that still exist (deleted posts no longer counted).
 
 import { Ionicons } from "@expo/vector-icons";
 import * as ImagePicker from "expo-image-picker";
@@ -40,6 +41,7 @@ import {
   View,
 } from "react-native";
 import { auth, db } from "../../firebaseConfig";
+import { getUserSavedItems } from "../../services/itemService"; // ← FIX: import for real count
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 const DARK_BLUE = "#2f2f6f";
@@ -754,7 +756,6 @@ function ReportModal({
   const [uploading, setUploading] = useState(false);
   const [showValidation, setShowValidation] = useState(false);
 
-  // Stores size-type fingerprints for duplicate detection (works on web + native)
   const photoFingerprints = useRef<string[]>([]);
 
   const MAX_CHARS = 300;
@@ -800,7 +801,6 @@ function ReportModal({
     if (!result.canceled && result.assets.length > 0) {
       const newUri = result.assets[0].uri;
       try {
-        // Fetch as blob and fingerprint by size+type — works on both web and native
         const blob = await fetch(newUri).then((r) => r.blob());
         const fingerprint = `${blob.size}-${blob.type}`;
         if (photoFingerprints.current.includes(fingerprint)) {
@@ -810,7 +810,6 @@ function ReportModal({
         photoFingerprints.current.push(fingerprint);
         setPhotos((prev) => [...prev, newUri]);
       } catch {
-        // Fallback: add without duplicate check if blob fetch fails
         setPhotos((prev) => [...prev, newUri]);
       }
     }
@@ -818,8 +817,6 @@ function ReportModal({
 
   const uploadToCloudinary = async (uri: string): Promise<string> => {
     const formData = new FormData();
-
-    // Web needs a real Blob; native uses the { uri, type, name } object
     if (typeof document !== "undefined") {
       const blob = await fetch(uri).then((r) => r.blob());
       formData.append("file", blob, "photo.jpg");
@@ -830,16 +827,12 @@ function ReportModal({
         name: uri.split("/").pop() ?? "photo.jpg",
       } as any);
     }
-
     formData.append("upload_preset", CLOUDINARY_UPLOAD_PRESET);
-    // Folder is configured inside the Cloudinary preset, not sent here
-
     const res = await fetch(
       `https://api.cloudinary.com/v1_1/${CLOUDINARY_CLOUD_NAME}/image/upload`,
       { method: "POST", body: formData },
     );
     const data = await res.json();
-    console.log("Cloudinary response:", JSON.stringify(data, null, 2));
     if (!data.secure_url) {
       throw new Error(data?.error?.message ?? "Cloudinary upload failed");
     }
@@ -854,14 +847,11 @@ function ReportModal({
     setShowValidation(false);
     setUploading(true);
     try {
-      // Upload all photos to Cloudinary
       const uploadedUrls: string[] = [];
       for (const uri of photos) {
         const url = await uploadToCloudinary(uri);
         uploadedUrls.push(url);
       }
-
-      // Build a human-readable timestamp: "June 12, 2026 · 3:45 PM"
       const now = new Date();
       const readableDate = now.toLocaleDateString("en-PH", {
         month: "long",
@@ -874,8 +864,6 @@ function ReportModal({
         hour12: true,
       });
       const readableCreatedAt = `${readableDate} · ${readableTime}`;
-
-      // Save report to Firestore
       const currentUser = auth.currentUser;
       await addDoc(collection(db, "reports"), {
         userId: currentUser?.uid ?? null,
@@ -884,11 +872,10 @@ function ReportModal({
         category: selectedCategory,
         details: details.trim(),
         photoUrls: uploadedUrls,
-        createdAt: serverTimestamp(),       // Firestore Timestamp for queries/ordering
-        createdAtReadable: readableCreatedAt, // Human-readable string e.g. "June 12, 2026 · 3:45 PM"
+        createdAt: serverTimestamp(),
+        createdAtReadable: readableCreatedAt,
         status: "open",
       });
-
       setSubmitted(true);
       setTimeout(() => {
         reset();
@@ -930,7 +917,6 @@ function ReportModal({
               </View>
             ) : (
               <>
-                {/* Category section label */}
                 <Text
                   style={[
                     reportStyles.sectionLabel,
@@ -940,7 +926,6 @@ function ReportModal({
                   Reason <Text style={{ color: ACCENT_RED }}>*</Text>
                 </Text>
 
-                {/* Category Pills */}
                 <View style={reportStyles.categoryGrid}>
                   {REPORT_CATEGORIES.map((label) => {
                     const isSelected = selectedCategory === label;
@@ -970,7 +955,6 @@ function ReportModal({
                   })}
                 </View>
 
-                {/* Inline validation message */}
                 {showValidation && !selectedCategory && (
                   <View style={reportStyles.validationRow}>
                     <Ionicons name="alert-circle" size={14} color={ACCENT_RED} />
@@ -980,7 +964,6 @@ function ReportModal({
                   </View>
                 )}
 
-                {/* Details input with 300 char limit */}
                 <TextInput
                   style={modalStyles.input}
                   placeholder="Add more details (optional)..."
@@ -1003,7 +986,6 @@ function ReportModal({
                   {details.length}/{MAX_CHARS}
                 </Text>
 
-                {/* Photo attachment */}
                 <Text style={reportStyles.photoLabel}>
                   Attach Photos{" "}
                   <Text style={reportStyles.photoLabelHint}>
@@ -1037,7 +1019,6 @@ function ReportModal({
                   )}
                 </View>
 
-                {/* Submit button */}
                 <TouchableOpacity
                   style={[modalStyles.submitBtnR, uploading && { opacity: 0.6 }]}
                   onPress={handleSubmit}
@@ -1220,6 +1201,10 @@ export default function ProfileScreen() {
   ]);
   const [showLogoutModal, setShowLogoutModal] = useState(false);
   const [loggingOut, setLoggingOut] = useState(false);
+
+  // ── FIX: real saved count (excludes deleted posts) ──────────────────────────
+  const [realSavedCount, setRealSavedCount] = useState<number>(0);
+
   const router = useRouter();
 
   const fadeAnim = useRef(new Animated.Value(0)).current;
@@ -1253,7 +1238,6 @@ export default function ProfileScreen() {
         (snap) => {
           if (snap.exists()) {
             const data = snap.data();
-            const savedItems = data.savedItems ?? [];
             setUserData({
               ...data,
               rating:
@@ -1268,7 +1252,7 @@ export default function ProfileScreen() {
                 typeof data.exchangedCount === "number"
                   ? data.exchangedCount
                   : 0,
-              savedCount: Array.isArray(savedItems) ? savedItems.length : 0,
+              // ── savedCount intentionally omitted here; realSavedCount is used instead ──
               followerCount:
                 typeof data.followerCount === "number" ? data.followerCount : 0,
               followingCount:
@@ -1285,7 +1269,6 @@ export default function ProfileScreen() {
               ratingCount: 0,
               tradesCount: 0,
               exchangedCount: 0,
-              savedCount: 0,
               followerCount: 0,
               followingCount: 0,
             });
@@ -1309,7 +1292,6 @@ export default function ProfileScreen() {
             ratingCount: 0,
             tradesCount: 0,
             exchangedCount: 0,
-            savedCount: 0,
             followerCount: 0,
             followingCount: 0,
           });
@@ -1321,6 +1303,17 @@ export default function ProfileScreen() {
     });
     return () => unsubAuth();
   }, [router, animateIn]);
+
+  // ── FIX: fetch real saved count whenever userId is known ───────────────────
+  // getUserSavedItems resolves each saved ID against the items collection, so
+  // IDs whose documents have been deleted simply come back empty and are
+  // excluded — giving us the true count.
+  useEffect(() => {
+    if (!userId) return;
+    getUserSavedItems(userId)
+      .then((items) => setRealSavedCount(items.length))
+      .catch(() => setRealSavedCount(0));
+  }, [userId]);
 
   useEffect(() => {
     if (!userId) return;
@@ -1587,10 +1580,11 @@ export default function ProfileScreen() {
               count={userData?.exchangedCount ?? 0}
             />
             <View style={styles.statDivider} />
+            {/* ── FIX: use realSavedCount instead of userData.savedCount ── */}
             <StatCard
               iconName="bookmark"
               label="Saved"
-              count={userData?.savedCount ?? 0}
+              count={realSavedCount}
               onPress={() => router.push("/saved-posts" as any)}
             />
           </View>
@@ -1634,8 +1628,6 @@ export default function ProfileScreen() {
               onPress={() => setShowLogoutModal(true)}
             />
           </View>
-
-
         </Animated.View>
       </ScrollView>
     </View>
@@ -1773,8 +1765,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     fontStyle: "italic",
   },
-
-  // ── Follower / Following counts ──
   followCountsRow: {
     flexDirection: "row",
     alignItems: "center",
@@ -1802,7 +1792,6 @@ const styles = StyleSheet.create({
     textTransform: "uppercase",
   },
   followCountDivider: { width: 1, height: 36, backgroundColor: "#ececec" },
-
   overviewBadge: {
     flexDirection: "row",
     alignItems: "center",
@@ -2035,9 +2024,7 @@ const reportStyles = StyleSheet.create({
     color: "#1A1A2E",
     marginBottom: 10,
   },
-  sectionLabelError: {
-    color: ACCENT_RED,
-  },
+  sectionLabelError: { color: ACCENT_RED },
   validationRow: {
     flexDirection: "row",
     alignItems: "center",
@@ -2045,11 +2032,7 @@ const reportStyles = StyleSheet.create({
     marginTop: -10,
     marginBottom: 12,
   },
-  validationText: {
-    fontSize: 12,
-    color: ACCENT_RED,
-    fontWeight: "600",
-  },
+  validationText: { fontSize: 12, color: ACCENT_RED, fontWeight: "600" },
   categoryGrid: {
     flexDirection: "row",
     flexWrap: "wrap",
@@ -2074,10 +2057,7 @@ const reportStyles = StyleSheet.create({
     marginBottom: 16,
     marginTop: 2,
   },
-  charCountLimit: {
-    color: ACCENT_RED,
-    fontWeight: "700",
-  },
+  charCountLimit: { color: ACCENT_RED, fontWeight: "700" },
   photoLabel: {
     fontSize: 13,
     fontWeight: "700",

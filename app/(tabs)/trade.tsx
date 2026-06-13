@@ -882,7 +882,7 @@ export default function TradeScreen() {
               activeTab === "trades" ? styles.activeText : styles.inactiveText
             }
           >
-            Your Posts
+            Your Lists
           </Text>
         </TouchableOpacity>
 

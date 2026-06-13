@@ -2,24 +2,26 @@ import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import { onAuthStateChanged, User } from "firebase/auth";
 import {
-    collection,
-    limit,
-    onSnapshot,
-    orderBy,
-    query,
-    where,
+  collection,
+  doc,
+  getDoc,
+  limit,
+  onSnapshot,
+  orderBy,
+  query,
+  where,
 } from "firebase/firestore";
 import React, { useEffect, useRef, useState } from "react";
 import {
-    ActivityIndicator,
-    Animated,
-    Linking,
-    RefreshControl,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TouchableOpacity,
-    View,
+  ActivityIndicator,
+  Animated,
+  Linking,
+  RefreshControl,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
 } from "react-native";
 import { auth, db } from "../firebaseConfig.ts";
 
@@ -31,7 +33,6 @@ const ACCENT_RED = "#C0392B";
 const GOLD = "#C9A227";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
-// FIX: added "accepted" — tradeService.ts writes this status when a trade is accepted
 export type TradeStatus =
   | "pending"
   | "accepted"
@@ -65,7 +66,6 @@ const FILTER_TABS: { key: FilterTab; label: string }[] = [
 ];
 
 // ─── Status config ────────────────────────────────────────────────────────────
-// FIX: "accepted" entry added so STATUS_CONFIG[trade.status] is never undefined
 const STATUS_CONFIG: Record<
   TradeStatus,
   { label: string; color: string; bg: string; icon: string }
@@ -102,7 +102,6 @@ const STATUS_CONFIG: Record<
   },
 };
 
-// FIX: fallback config used when a trade carries an unrecognised status string
 const FALLBACK_STATUS_CONFIG = {
   label: "Unknown",
   color: "#6B7280",
@@ -126,16 +125,32 @@ function formatDate(date: Date): string {
   });
 }
 
-function avatarInitial(name: string): string {
-  return (name ?? "U")[0].toUpperCase();
+function avatarInitial(name: unknown): string {
+  const s = typeof name === "string" ? name : "";
+  return (s || "?")[0].toUpperCase();
 }
 
 // ─── Trade Card ───────────────────────────────────────────────────────────────
-function TradeCard({ trade }: { trade: TradeRecord }) {
+function TradeCard({
+  trade,
+  resolvedNames,
+}: {
+  trade: TradeRecord;
+  resolvedNames: Record<string, string>;
+}) {
   const scale = useRef(new Animated.Value(1)).current;
 
-  // FIX: fall back to FALLBACK_STATUS_CONFIG so .bg / .color never throw
   const cfg = STATUS_CONFIG[trade.status] ?? FALLBACK_STATUS_CONFIG;
+
+  // Use the resolved name from the users collection if available
+  // resolvedNames is always populated from the users collection.
+  // "" means lookup ran but found nothing — show "?" rather than the
+  // stale Google name that may be embedded in the trade document.
+  const resolved = resolvedNames[trade.counterpartUid];
+  const displayName =
+    resolved !== undefined
+      ? resolved || "?"
+      : trade.counterpartUsername || "?";
 
   const handlePressIn = () =>
     Animated.spring(scale, { toValue: 0.97, useNativeDriver: true }).start();
@@ -154,7 +169,7 @@ function TradeCard({ trade }: { trade: TradeRecord }) {
         <View style={cardStyles.avatarWrapper}>
           <View style={cardStyles.avatarCircle}>
             <Text style={cardStyles.avatarText}>
-              {avatarInitial(trade.counterpartUsername)}
+              {avatarInitial(displayName)}
             </Text>
           </View>
           <View
@@ -173,7 +188,7 @@ function TradeCard({ trade }: { trade: TradeRecord }) {
         <View style={cardStyles.info}>
           <View style={cardStyles.nameRow}>
             <Text style={cardStyles.counterpart} numberOfLines={1}>
-              {trade.counterpartUsername}
+              {displayName}
             </Text>
             <Text style={cardStyles.dateText}>
               {formatDate(trade.createdAt)}
@@ -262,7 +277,6 @@ function EmptyState({ filter }: { filter: FilterTab }) {
 
 // ─── Summary Bar ─────────────────────────────────────────────────────────────
 function SummaryBar({ trades }: { trades: TradeRecord[] }) {
-  // FIX: count "accepted" as completed-equivalent for the summary
   const completed = trades.filter(
     (t) => t.status === "completed" || t.status === "accepted",
   ).length;
@@ -302,6 +316,10 @@ export default function TradeHistoryScreen() {
   const [error, setError] = useState<string | null>(null);
   const [activeFilter, setActiveFilter] = useState<FilterTab>("all");
   const [currentUser, setCurrentUser] = useState<User | null>(null);
+  // ── Resolved names fetched from the users collection ──────────────────────
+  const [resolvedNames, setResolvedNames] = useState<Record<string, string>>(
+    {},
+  );
 
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const slideAnim = useRef(new Animated.Value(24)).current;
@@ -366,26 +384,31 @@ export default function TradeHistoryScreen() {
         const fetched: TradeRecord[] = snapshot.docs.map((docSnap) => {
           const d = docSnap.data();
 
-          // FIX: resolve counterpart name + uid from tradeService fields
-          // tradeService stores: offererId, ownerId, offererName
-          // we derive counterpart from whichever side is NOT the current user
           const isOfferer = d.offererId === currentUser.uid;
           const counterpartUid = isOfferer ? d.ownerId : d.offererId;
+
+          // Widen the field name search before falling back to "Unknown"
           const counterpartUsername = isOfferer
-            ? (d.ownerName ?? d.counterpartUsername ?? "Unknown")
-            : (d.offererName ?? d.counterpartUsername ?? "Unknown");
+            ? (d.ownerName ??
+               d.ownerUsername ??
+               d.ownerDisplayName ??
+               d.counterpartUsername ??
+               null)
+            : (d.offererName ??
+               d.offererUsername ??
+               d.offererDisplayName ??
+               d.counterpartUsername ??
+               null);
+
           const counterpartAvatarUrl = isOfferer
             ? (d.ownerAvatar ?? d.counterpartAvatarUrl)
             : (d.offererAvatar ?? d.counterpartAvatarUrl);
 
-          // FIX: map tradeService field names → TradeRecord field names
           const offeredItemTitle =
             d.offeredItemTitle ?? d.offeredItem ?? "Unknown item";
           const requestedItemTitle =
             d.requestedItemTitle ?? d.requestedItem ?? "Unknown item";
 
-          // FIX: coerce unrecognised status strings to "pending" so the
-          //      fallback config handles them gracefully rather than crashing
           const rawStatus = d.status ?? "pending";
           const knownStatuses: TradeStatus[] = [
             "pending",
@@ -401,7 +424,8 @@ export default function TradeHistoryScreen() {
           return {
             id: docSnap.id,
             counterpartUid,
-            counterpartUsername,
+            // Store null so the users-collection lookup below can fill it in
+            counterpartUsername: counterpartUsername ?? "",
             counterpartAvatarUrl,
             offeredItemTitle,
             requestedItemTitle,
@@ -459,6 +483,52 @@ export default function TradeHistoryScreen() {
 
     return () => unsubscribeTrades();
   }, [currentUser]);
+
+  // ── Always resolve counterpart usernames from the users collection ─────────
+  // The trade document may store a stale Google display name — the users
+  // collection's `username` field is the authoritative app-level username.
+  useEffect(() => {
+    if (trades.length === 0) return;
+
+    // Look up every unique counterpart UID not yet in the resolved map
+    // (resolved map stores "" for users with no username field, so !== undefined)
+    const needsLookup = [
+      ...new Set(trades.map((t) => t.counterpartUid).filter(Boolean)),
+    ].filter((uid) => resolvedNames[uid] === undefined);
+
+    if (needsLookup.length === 0) return;
+
+    Promise.all(
+      needsLookup.map(async (uid) => {
+        try {
+          const snap = await getDoc(doc(db, "users", uid));
+          if (snap.exists()) {
+            const d = snap.data();
+            // Try every field the profile-setup screen might have written
+            const name =
+              d.username ??
+              d.userName ??
+              d.displayName ??
+              d.name ??
+              null;
+            // Always store a result so we don't re-fetch; store empty string
+            // if nothing found (TradeCard will show "?" via avatarInitial)
+            return [uid, name ?? ""] as [string, string];
+          }
+        } catch {
+          // silently ignore per-uid failures
+        }
+        return null; // lookup failed entirely — don't cache, retry next time
+      }),
+    ).then((pairs) => {
+      const valid = (pairs.filter((p) => p !== null) as [string, string][]);
+      if (valid.length === 0) return;
+      setResolvedNames((prev) => ({
+        ...prev,
+        ...Object.fromEntries(valid),
+      }));
+    });
+  }, [trades]);
 
   // ── Filtered list ──────────────────────────────────────────────────────────
   const filteredTrades =
@@ -610,7 +680,11 @@ export default function TradeHistoryScreen() {
               </View>
 
               {filteredTrades.map((trade) => (
-                <TradeCard key={trade.id} trade={trade} />
+                <TradeCard
+                  key={trade.id}
+                  trade={trade}
+                  resolvedNames={resolvedNames}
+                />
               ))}
             </View>
           )}

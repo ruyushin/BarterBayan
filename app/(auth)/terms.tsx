@@ -116,6 +116,12 @@ export default function TermsAndConditionsScreen() {
 
         {/* Terms content */}
         <View style={styles.termsContainer}>
+
+          {/* ── Terms of Use ──────────────────────────────────────── */}
+          <Text style={[styles.sectionTitle, { marginTop: 0, fontSize: 17 }]}>
+            Terms of Use
+          </Text>
+
           <Text style={styles.sectionTitle}>1. Use License</Text>
           <Text style={styles.sectionContent}>
             Permission is granted to temporarily download one copy of the materials on
@@ -161,6 +167,106 @@ export default function TermsAndConditionsScreen() {
             jurisdiction, and you irrevocably submit to the exclusive jurisdiction of the courts
             in that location.
           </Text>
+
+          {/* ── Privacy Policy ────────────────────────────────────── */}
+          <Text style={[styles.sectionTitle, { marginTop: 32, fontSize: 17 }]}>
+            Privacy Policy
+          </Text>
+          <Text style={styles.sectionContent}>
+            Your privacy is important to us. This Privacy Policy explains how BarterBayan
+            collects, uses, stores, and protects your personal information when you use our
+            platform.
+          </Text>
+
+          <Text style={styles.sectionTitle}>7. Information We Collect</Text>
+          <Text style={styles.sectionContent}>
+            We may collect the following types of personal information:
+          </Text>
+          <Text style={styles.bullet}>• Full name and profile photo</Text>
+          <Text style={styles.bullet}>• Email address and contact number</Text>
+          <Text style={styles.bullet}>• Device information and IP address</Text>
+          <Text style={styles.bullet}>• Location data (only when permitted by you)</Text>
+          <Text style={styles.bullet}>• Transaction and barter activity history</Text>
+
+          <Text style={styles.sectionTitle}>8. How We Use Your Information</Text>
+          <Text style={styles.sectionContent}>
+            The personal data we collect is used solely for the following purposes:
+          </Text>
+          <Text style={styles.bullet}>• To create and manage your BarterBayan account</Text>
+          <Text style={styles.bullet}>• To facilitate barter and trade transactions between users</Text>
+          <Text style={styles.bullet}>• To improve app features and user experience</Text>
+          <Text style={styles.bullet}>• To send important service notifications</Text>
+          <Text style={styles.bullet}>• To comply with applicable laws and regulations</Text>
+
+          <Text style={styles.sectionTitle}>9. Data Sharing & Disclosure</Text>
+          <Text style={styles.sectionContent}>
+            BarterBayan does not sell, rent, or trade your personal information to third parties.
+            We may share data only with trusted service providers (e.g. Firebase/Google) strictly
+            necessary to operate the platform, or when required by law or court order.
+          </Text>
+
+          <Text style={styles.sectionTitle}>10. Data Retention</Text>
+          <Text style={styles.sectionContent}>
+            We retain your personal data only for as long as necessary to fulfill the purposes
+            outlined in this policy, or as required by applicable law. You may request deletion
+            of your account and associated data at any time by contacting us.
+          </Text>
+
+          <Text style={styles.sectionTitle}>11. Your Rights as a Data Subject</Text>
+          <Text style={styles.sectionContent}>
+            Under the Data Privacy Act of 2012 (Republic Act No. 10173) of the Philippines,
+            you have the following rights regarding your personal data:
+          </Text>
+          <Text style={styles.bullet}>• Right to be informed — know how your data is collected and used</Text>
+          <Text style={styles.bullet}>• Right to access — request a copy of your personal data we hold</Text>
+          <Text style={styles.bullet}>• Right to rectification — correct inaccurate or outdated data</Text>
+          <Text style={styles.bullet}>• Right to erasure — request deletion of your personal data</Text>
+          <Text style={styles.bullet}>• Right to object — opt out of certain data processing activities</Text>
+          <Text style={styles.bullet}>• Right to data portability — receive your data in a usable format</Text>
+          <Text style={styles.bullet}>• Right to lodge a complaint — file a complaint with the National Privacy Commission (NPC)</Text>
+
+          <Text style={styles.sectionTitle}>12. Data Privacy Act of 2012 (RA 10173)</Text>
+          <Text style={styles.sectionContent}>
+            BarterBayan is committed to full compliance with Republic Act No. 10173, known as
+            the Data Privacy Act of 2012, and its Implementing Rules and Regulations. We process
+            personal data only on lawful grounds, with your consent, and take reasonable
+            technical and organizational measures to protect your information from unauthorized
+            access, disclosure, alteration, or destruction.
+          </Text>
+          <Text style={styles.sectionContent}>
+            If you believe your data privacy rights have been violated, you may contact the
+            National Privacy Commission (NPC) at{' '}
+            <Text style={{ color: PRIMARY }}>privacy.gov.ph</Text>.
+          </Text>
+
+          <Text style={styles.sectionTitle}>13. Cookies & Analytics</Text>
+          <Text style={styles.sectionContent}>
+            We may use analytics tools to understand app usage patterns. No personally
+            identifiable information is shared through analytics. You may opt out through
+            your device settings.
+          </Text>
+
+          <Text style={styles.sectionTitle}>14. Security</Text>
+          <Text style={styles.sectionContent}>
+            We implement industry-standard security measures including encrypted data
+            transmission (HTTPS/TLS), secure authentication via Firebase, and access controls
+            to protect your personal information. No method of transmission over the internet
+            is 100% secure, and we cannot guarantee absolute security.
+          </Text>
+
+          <Text style={styles.sectionTitle}>15. Changes to This Privacy Policy</Text>
+          <Text style={styles.sectionContent}>
+            We may update this Privacy Policy from time to time. We will notify you of
+            significant changes via the app or email. Continued use of BarterBayan after
+            changes take effect constitutes your acceptance of the updated policy.
+          </Text>
+
+          <Text style={styles.sectionTitle}>16. Contact Us</Text>
+          <Text style={styles.sectionContent}>
+            For any privacy-related concerns, data requests, or questions about these terms,
+            please reach out to us through the BarterBayan support channel within the app.
+          </Text>
+
         </View>
       </ScrollView>
 
@@ -176,7 +282,7 @@ export default function TermsAndConditionsScreen() {
               {agreeToTerms && <MaterialIcons name="check" size={16} color="#FFF" />}
             </View>
             <Text style={styles.checkboxLabel}>
-              I have read and agree to the Terms & Conditions
+              I have read and agree to the Terms & Conditions and Privacy Policy
             </Text>
           </TouchableOpacity>
         </Animated.View>
@@ -224,7 +330,8 @@ export default function TermsAndConditionsScreen() {
 
             <Text style={styles.modalTitle}>Decline Terms & Conditions?</Text>
             <Text style={styles.modalBody}>
-              Accepting our Terms & Conditions is required to use BarterBayan. If you decline:
+              Accepting our Terms & Conditions and Privacy Policy is required to use BarterBayan.
+              If you decline:
             </Text>
 
             {/* Consequences */}

@@ -7,6 +7,7 @@ import {
   Dimensions,
   FlatList,
   Image,
+  Pressable,
   SafeAreaView,
   StyleSheet,
   Text,
@@ -356,98 +357,136 @@ export default function SavedPostsScreen() {
     <SafeAreaView style={styles.container}>
       <Header />
 
-      {/* ── Sort / Filter bar ── */}
-      <View style={styles.controlRow}>
-        {/* Sort dropdown */}
-        <View style={styles.dropdownWrapper}>
-          <TouchableOpacity
-            style={styles.smallButton}
-            onPress={() => {
-              setIsSortOpen((p) => !p);
-              setIsFilterOpen(false);
-            }}
+      {/* ── Sort / Filter bar (trade.tsx style) ── */}
+      <View style={styles.filterRow}>
+        {/* Sort button */}
+        <Pressable
+          style={[styles.filterBtn, sortType !== "None" && styles.filterBtnActive]}
+          onPress={() => {
+            setIsSortOpen((p) => !p);
+            setIsFilterOpen(false);
+          }}
+        >
+          <Ionicons
+            name="swap-vertical"
+            size={13}
+            color={sortType !== "None" ? "#fff" : NAVY}
+          />
+          <Text
+            style={[
+              styles.filterText,
+              sortType !== "None" && styles.filterTextActive,
+            ]}
           >
-            <Ionicons name="swap-vertical" size={14} color="#333" />
-            <Text style={styles.smallText}>Sort ({sortType})</Text>
-            <Ionicons
-              name={isSortOpen ? "chevron-up" : "chevron-down"}
-              size={12}
-              color="#555"
-            />
-          </TouchableOpacity>
-          {isSortOpen && (
-            <View style={styles.dropdown}>
-              {SORT_OPTIONS.map((opt) => (
-                <TouchableOpacity
-                  key={opt}
-                  style={styles.dropdownItem}
-                  onPress={() => {
-                    setSortType(opt);
-                    setIsSortOpen(false);
-                  }}
-                >
-                  <Text
-                    style={[
-                      styles.dropdownText,
-                      sortType === opt && styles.dropdownTextActive,
-                    ]}
-                  >
-                    {opt}
-                  </Text>
-                  {sortType === opt && (
-                    <Ionicons name="checkmark" size={13} color="#5E3EA1" />
-                  )}
-                </TouchableOpacity>
-              ))}
-            </View>
-          )}
-        </View>
+            {sortType === "None" ? "Sort" : sortType}
+          </Text>
+          <Ionicons
+            name={isSortOpen ? "chevron-up" : "chevron-down"}
+            size={13}
+            color={sortType !== "None" ? "#fff" : NAVY}
+          />
+        </Pressable>
 
-        {/* Filter dropdown */}
-        <View style={styles.dropdownWrapper}>
-          <TouchableOpacity
-            style={styles.smallButton}
-            onPress={() => {
-              setIsFilterOpen((p) => !p);
-              setIsSortOpen(false);
-            }}
+        {/* Filter button */}
+        <Pressable
+          style={[styles.filterBtn, filterCategory !== "All" && styles.filterBtnActive]}
+          onPress={() => {
+            setIsFilterOpen((p) => !p);
+            setIsSortOpen(false);
+          }}
+        >
+          <Ionicons
+            name="options-outline"
+            size={13}
+            color={filterCategory !== "All" ? "#fff" : NAVY}
+          />
+          <Text
+            style={[
+              styles.filterText,
+              filterCategory !== "All" && styles.filterTextActive,
+            ]}
           >
-            <Ionicons name="funnel" size={14} color="#333" />
-            <Text style={styles.smallText}>Filter ({filterCategory})</Text>
-            <Ionicons
-              name={isFilterOpen ? "chevron-up" : "chevron-down"}
-              size={12}
-              color="#555"
-            />
-          </TouchableOpacity>
-          {isFilterOpen && (
-            <View style={styles.dropdown}>
-              {FILTER_CATEGORIES.map((cat) => (
-                <TouchableOpacity
-                  key={cat}
-                  style={styles.dropdownItem}
-                  onPress={() => {
-                    setFilterCategory(cat);
-                    setIsFilterOpen(false);
-                  }}
-                >
-                  <Text
-                    style={[
-                      styles.dropdownText,
-                      filterCategory === cat && styles.dropdownTextActive,
-                    ]}
-                  >
-                    {cat}
-                  </Text>
-                  {filterCategory === cat && (
-                    <Ionicons name="checkmark" size={13} color="#5E3EA1" />
-                  )}
-                </TouchableOpacity>
-              ))}
-            </View>
-          )}
-        </View>
+            {filterCategory}
+          </Text>
+          <Ionicons
+            name={isFilterOpen ? "chevron-up" : "chevron-down"}
+            size={13}
+            color={filterCategory !== "All" ? "#fff" : NAVY}
+          />
+        </Pressable>
       </View>
+
+      {/* Sort dropdown list */}
+      {isSortOpen && (
+        <View style={styles.filterDropdown}>
+          {SORT_OPTIONS.map((opt) => (
+            <Pressable
+              key={opt}
+              style={[
+                styles.dropdownItem,
+                sortType === opt && styles.dropdownItemActive,
+              ]}
+              onPress={() => {
+                setSortType(opt);
+                setIsSortOpen(false);
+              }}
+            >
+              {sortType === opt && (
+                <Ionicons
+                  name="checkmark"
+                  size={14}
+                  color={NAVY}
+                  style={{ marginRight: 6 }}
+                />
+              )}
+              <Text
+                style={[
+                  styles.dropdownText,
+                  sortType === opt && styles.dropdownTextActive,
+                ]}
+              >
+                {opt}
+              </Text>
+            </Pressable>
+          ))}
+        </View>
+      )}
+
+      {/* Category dropdown list */}
+      {isFilterOpen && (
+        <View style={styles.filterDropdown}>
+          {FILTER_CATEGORIES.map((cat) => (
+            <Pressable
+              key={cat}
+              style={[
+                styles.dropdownItem,
+                filterCategory === cat && styles.dropdownItemActive,
+              ]}
+              onPress={() => {
+                setFilterCategory(cat);
+                setIsFilterOpen(false);
+              }}
+            >
+              {filterCategory === cat && (
+                <Ionicons
+                  name="checkmark"
+                  size={14}
+                  color={NAVY}
+                  style={{ marginRight: 6 }}
+                />
+              )}
+              <Text
+                style={[
+                  styles.dropdownText,
+                  filterCategory === cat && styles.dropdownTextActive,
+                ]}
+              >
+                {cat}
+              </Text>
+            </Pressable>
+          ))}
+        </View>
+      )}
 
       <FlatList
         data={rows}
@@ -552,58 +591,55 @@ const styles = StyleSheet.create({
   },
   primaryBtnText: { color: "#fff", fontWeight: "700", fontSize: 14 },
 
-  // ── Sort / Filter bar ──
-  controlRow: {
+  // ── Trade-style filter bar ──────────────────────────────────────────────────
+  filterRow: {
     flexDirection: "row",
-    paddingHorizontal: 16,
-    paddingTop: 12,
-    paddingBottom: 4,
+    marginHorizontal: 16,
+    marginTop: 12,
+    marginBottom: 6,
     gap: 8,
-    zIndex: 20,
   },
-  dropdownWrapper: {
-    position: "relative",
-    zIndex: 20,
-  },
-  smallButton: {
+  filterBtn: {
     flexDirection: "row",
     alignItems: "center",
-    backgroundColor: "#d0d0d0",
-    paddingHorizontal: 12,
-    paddingVertical: 7,
-    borderRadius: 8,
-    gap: 5,
-  },
-  smallText: { fontSize: 13, color: "#444" },
-  dropdown: {
-    position: "absolute",
-    top: 38,
-    left: 0,
     backgroundColor: "#fff",
+    paddingHorizontal: 12,
+    paddingVertical: 8,
     borderRadius: 10,
+    gap: 5,
     borderWidth: 1,
-    borderColor: "#DDD",
+    borderColor: "#E0E0E0",
+  },
+  filterBtnActive: { backgroundColor: NAVY, borderColor: NAVY },
+  filterText: { fontSize: 13, fontWeight: "600", color: NAVY },
+  filterTextActive: { color: "#fff" },
+  filterDropdown: {
+    marginHorizontal: 16,
+    backgroundColor: "#fff",
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: "#E5E7EB",
     overflow: "hidden",
-    minWidth: 160,
+    marginBottom: 8,
     shadowColor: "#000",
-    shadowOpacity: 0.1,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.07,
     shadowRadius: 8,
-    shadowOffset: { width: 0, height: 3 },
-    elevation: 10,
-    zIndex: 999,
+    elevation: 3,
   },
   dropdownItem: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    paddingVertical: 12,
-    paddingHorizontal: 15,
+    paddingVertical: 13,
+    paddingHorizontal: 16,
     borderBottomWidth: 1,
-    borderBottomColor: "#F0F0F0",
+    borderBottomColor: "#F3F4F6",
+    flexDirection: "row",
+    alignItems: "center",
   },
-  dropdownText: { fontSize: 13, color: "#333" },
-  dropdownTextActive: { fontWeight: "700", color: "#2f2f6f" },
+  dropdownItemActive: { backgroundColor: "#F0F0FF" },
+  dropdownText: { fontSize: 14, color: "#333" },
+  dropdownTextActive: { fontWeight: "700", color: NAVY },
 
+  // ── List ────────────────────────────────────────────────────────────────────
   listContent: { padding: 16, paddingBottom: 100 },
   countLabel: {
     fontSize: 12,

@@ -37,6 +37,7 @@ import {
   getNotifications,
   markAllNotificationsRead,
 } from "../../services/notificationService";
+import { PresenceData, subscribeToPresence } from "../../services/presenceService";
 import {
   addNotificationListeners,
   registerForPushNotificationsAsync,
@@ -377,6 +378,8 @@ export default function InboxScreen() {
     "messages" | "archived" | "notifications"
   >("messages");
 
+const [presenceMap, setPresenceMap] = useState<Record<string, PresenceData | null>>({});
+
   // ── Messages state
   const [conversations, setConversations] = useState<any[]>([]);
   const [archivedConversations, setArchivedConversations] = useState<any[]>([]);
@@ -500,6 +503,23 @@ export default function InboxScreen() {
       setConvLoading(false);
     }
   }, [currentUserId]);
+
+  useEffect(() => {
+  const allConvs = [...conversations, ...archivedConversations];
+  const otherUserIds = Array.from(
+    new Set(allConvs.map((c) => c.otherUserId).filter(Boolean)),
+  );
+
+  const unsubscribers = otherUserIds.map((uid) =>
+    subscribeToPresence(uid, (presence) => {
+      setPresenceMap((prev) => ({ ...prev, [uid]: presence }));
+    }),
+  );
+
+  return () => {
+    unsubscribers.forEach((unsub) => unsub());
+  };
+}, [conversations, archivedConversations]);
 
   /**
    * Load notifications, then for each one that has a senderId / otherUserId,
@@ -905,7 +925,16 @@ export default function InboxScreen() {
                 size={50}
                 fallbackFontSize={20}
               />
-              <View style={[styles.statusDot, { backgroundColor: "#aaa" }]} />
+              <View
+                style={[
+                  styles.statusDot,
+                  {
+                    backgroundColor: presenceMap[item.otherUserId]?.isOnline
+                      ? "#4CAF50"
+                      : "#aaa",
+                  },
+                ]}
+              />
               {unreadCount > 0 && (
                 <View style={styles.unreadBadgeMessage}>
                   <Text style={styles.unreadBadgeMessageText}>
@@ -914,7 +943,7 @@ export default function InboxScreen() {
                 </View>
               )}
             </View>
-            <View style={styles.messageInfo}>
+             <View style={styles.messageInfo}>
               <View style={styles.messageNameRow}>
                 <Text
                   style={[

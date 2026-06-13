@@ -44,6 +44,7 @@ import {
   unmuteConversation,
   uploadToCloudinary,
 } from "../services/messagingService";
+import { PresenceData, subscribeToPresence } from "../services/presenceService";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 const NAVY = "#2f2f6f";
@@ -896,6 +897,7 @@ const vm = StyleSheet.create({
 
 // ─── Main Screen ──────────────────────────────────────────────────────────────
 export default function ChatScreen() {
+  const [presence, setPresence] = useState<PresenceData | null>(null);
   const router = useRouter();
   const { ownerUserId, itemId, itemTitle, itemImage } = useLocalSearchParams();
   const insets = useSafeAreaInsets();
@@ -962,6 +964,13 @@ export default function ChatScreen() {
     return raw.includes("@") ? "User" : raw || "User";
   }, [ownerInfo]);
 
+  const presenceStatusText = presence?.isOnline
+  ? "Active"
+  : presence?.lastSeen
+    ? formatLastSeen(presence.lastSeen)
+    : "Offline";
+
+  const presenceDotColor = presence?.isOnline ? "#4CAF50" : "#9aa";
   const ownerFirstName = useMemo(() => ownerName.split(" ")[0], [ownerName]);
 
   const avatarUri = resolveAvatar(ownerInfo);
@@ -1011,6 +1020,11 @@ export default function ChatScreen() {
     }, [currentUserId, ownerUserId, conversationId]),
   );
 
+  useEffect(() => {
+  if (!ownerUserId) return;
+  const unsub = subscribeToPresence(ownerUserId as string, setPresence);
+  return () => unsub();
+  }, [ownerUserId]);
   // ── Keyboard listener ──
   useEffect(() => {
     if (Platform.OS === "web") return;
@@ -1617,7 +1631,12 @@ export default function ChatScreen() {
                   </View>
                 )}
               </View>
-              <Text style={styles.headerStatus}>Active</Text>
+              <View style={styles.headerStatusRow}>
+                <View style={[styles.headerStatusDot, { backgroundColor: presenceDotColor }]} />
+                <Text style={styles.headerStatus} numberOfLines={1}>
+                  {presenceStatusText}
+                </Text>
+              </View>
             </View>
           </TouchableOpacity>
           <TouchableOpacity onPress={handleMenu} hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}>
@@ -1805,4 +1824,6 @@ const styles = StyleSheet.create({
   input: { flex: 1, borderWidth: 1, borderColor: "#ddd", borderRadius: 24, paddingHorizontal: 16, paddingVertical: 10, fontSize: 14, backgroundColor: "#f5f5f5", maxHeight: 100 },
   sendBtn: { backgroundColor: NAVY, width: 42, height: 42, borderRadius: 21, justifyContent: "center", alignItems: "center" },
   sendBtnDisabled: { opacity: 0.4 },
+  headerStatusRow: { flexDirection: "row", alignItems: "center", gap: 5, marginTop: 1 },
+  headerStatusDot: { width: 7, height: 7, borderRadius: 3.5 },
 });

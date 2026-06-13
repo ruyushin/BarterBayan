@@ -4,6 +4,7 @@ import { onAuthStateChanged } from "firebase/auth";
 import React, { useEffect, useState } from "react";
 import { Platform, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { startPresenceHeartbeat } from "../../services/presenceService";
 
 import { HapticTab } from "@/components/haptic-tab";
 import { Colors } from "@/constants/theme";
@@ -81,6 +82,21 @@ export default function TabLayout() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const [inboxBadge, setInboxBadge] = useState<number>(badgeStore.getCount());
+
+  useEffect(() => {
+  let cleanup: (() => void) | null = null;
+  const unsub = onAuthStateChanged(auth, (user) => {
+    cleanup?.();
+    cleanup = null;
+    if (user) {
+      cleanup = startPresenceHeartbeat(user.uid);
+    }
+  });
+  return () => {
+    cleanup?.();
+    unsub();
+  };
+}, []);
 
   useEffect(() => {
     const unsub = badgeStore.subscribe(setInboxBadge);

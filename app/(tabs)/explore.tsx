@@ -1,5 +1,5 @@
 import { FontAwesome, Ionicons } from "@expo/vector-icons";
-import { useFocusEffect, useRouter } from "expo-router";
+import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 import { onAuthStateChanged } from "firebase/auth";
 import {
   addDoc,
@@ -198,6 +198,12 @@ function formatPostDate(timestamp: any): string {
 // ── Main Screen ───────────────────────────────────────────────────────────────
 export default function Screen() {
   const router = useRouter();
+  const params = useLocalSearchParams<{
+    search?: string;
+    filter?: string;
+    type?: string;
+  }>();
+
   const [search, setSearch] = useState("");
   const [sortType, setSortType] = useState<"none" | "likes" | "name" | "recent">("none");
   const [filter, setFilter] = useState("All");
@@ -223,6 +229,38 @@ export default function Screen() {
     useCallback(() => {
       setRefreshKey((k) => k + 1);
     }, []),
+  );
+
+  // ── Sync incoming navigation params (from Home search / category / type links) ──
+  useFocusEffect(
+    useCallback(() => {
+      let didConsume = false;
+
+      if (typeof params.search === "string" && params.search.length > 0) {
+        setSearch(params.search);
+        setSearchPopupVisible(false);
+        didConsume = true;
+      }
+
+      if (typeof params.filter === "string" && params.filter.length > 0) {
+        setFilter(params.filter);
+        didConsume = true;
+      }
+
+      if (params.type === "trending" || params.type === "personalized") {
+        setTypeFilter(params.type);
+        didConsume = true;
+      } else if (params.type === "all") {
+        setTypeFilter("all");
+        didConsume = true;
+      }
+
+      // Clear the params so re-focusing this tab later doesn't re-apply stale values
+      if (didConsume) {
+        router.setParams({ search: undefined, filter: undefined, type: undefined } as any);
+      }
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [params.search, params.filter, params.type]),
   );
 
   const fetchItems = useCallback(
@@ -698,6 +736,7 @@ function ItemCard({ item, onCommentAdded, onDelete }: any) {
   const [selectedReason, setSelectedReason] = useState("");
   const [otherText, setOtherText] = useState("");
   const [reportSubmitting, setReportSubmitting] = useState(false);
+  const [reportSuccessVisible, setReportSuccessVisible] = useState(false);
 
   const imagesList = (() => {
     const safe = safeUriList(item?.images);
@@ -972,19 +1011,27 @@ function ItemCard({ item, onCommentAdded, onDelete }: any) {
     }
     try {
       setReportSubmitting(true);
-      await addDoc(collection(db, "reports"), {
-        type: reportTarget,
-        targetId: reportTarget === "post" ? item.id : item.ownerId,
-        itemId: item.id,
-        reportedBy: currentUser,
-        reason: selectedReason === "Other" ? `Other: ${otherText.trim()}` : selectedReason,
-        createdAt: serverTimestamp(),
-      });
+
+      if (reportTarget === "post") {
+        await addDoc(collection(db, "postReports"), {
+          postId: item.id,
+          postOwnerId: item.ownerId,
+          reportedBy: currentUser,
+          reason: selectedReason === "Other" ? `Other: ${otherText.trim()}` : selectedReason,
+          createdAt: serverTimestamp(),
+        });
+      } else {
+        await addDoc(collection(db, "userReports"), {
+          reportedUserId: item.ownerId,
+          relatedItemId: item.id,
+          reportedBy: currentUser,
+          reason: selectedReason === "Other" ? `Other: ${otherText.trim()}` : selectedReason,
+          createdAt: serverTimestamp(),
+        });
+      }
+
       setShowReportModal(false);
-      Alert.alert(
-        "Report submitted",
-        "Thank you. Our team will review this shortly.",
-      );
+      setReportSuccessVisible(true);
     } catch {
       Alert.alert("Error", "Failed to submit report. Please try again.");
     } finally {
@@ -1622,6 +1669,33 @@ function ItemCard({ item, onCommentAdded, onDelete }: any) {
           </View>
         </KeyboardAvoidingView>
       </Modal>
+
+      {/* ── REPORT SUCCESS MODAL ── */}
+      <Modal
+        visible={reportSuccessVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setReportSuccessVisible(false)}
+      >
+        <View style={styles.successOverlay}>
+          <View style={styles.successPanel}>
+            <View style={styles.successIconWrap}>
+              <Ionicons name="checkmark-circle" size={48} color={NAVY} />
+            </View>
+            <Text style={styles.successTitle}>Report Submitted</Text>
+            <Text style={styles.successBody}>
+              Thank you for letting us know. Our team will review this shortly.
+            </Text>
+            <TouchableOpacity
+              style={styles.successBtn}
+              onPress={() => setReportSuccessVisible(false)}
+              activeOpacity={0.8}
+            >
+              <Text style={styles.successBtnText}>Done</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -2177,6 +2251,55 @@ const styles = StyleSheet.create({
     color: "#999",
     textAlign: "right",
     marginTop: 6,
+  },
+
+  successOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.45)",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  successPanel: {
+    backgroundColor: "#fff",
+    borderRadius: 20,
+    padding: 24,
+    width: "80%",
+    alignItems: "center",
+  },
+  successIconWrap: {
+    width: 72,
+    height: 72,
+    borderRadius: 36,
+    backgroundColor: "#EFF1FF",
+    justifyContent: "center",
+    alignItems: "center",
+    marginBottom: 14,
+  },
+  successTitle: {
+    fontSize: 17,
+    fontWeight: "700",
+    color: "#111",
+    marginBottom: 8,
+    textAlign: "center",
+  },
+  successBody: {
+    fontSize: 14,
+    color: "#666",
+    textAlign: "center",
+    lineHeight: 20,
+    marginBottom: 20,
+  },
+  successBtn: {
+    backgroundColor: NAVY,
+    borderRadius: 12,
+    paddingVertical: 13,
+    paddingHorizontal: 36,
+    alignItems: "center",
+  },
+  successBtnText: {
+    fontSize: 15,
+    fontWeight: "700",
+    color: "#fff",
   },
 
   loaderContainer: { flex: 1, justifyContent: "center", alignItems: "center" },
