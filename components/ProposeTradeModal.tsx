@@ -1,22 +1,26 @@
 import { Ionicons } from "@expo/vector-icons";
 import React, { useEffect, useState } from "react";
 import {
-    ActivityIndicator,
-    Alert,
-    FlatList,
-    Image,
-    KeyboardAvoidingView,
-    Modal,
-    Platform,
-    StyleSheet,
-    Text,
-    TextInput,
-    TouchableOpacity,
-    View,
+  ActivityIndicator,
+  Alert,
+  FlatList,
+  Image,
+  KeyboardAvoidingView,
+  Modal,
+  Platform,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
 } from "react-native";
 import { auth } from "../firebaseConfig";
 import { getUserPostedItems } from "../services/itemService";
-import { getOffersForItem, proposeTrade } from "../services/tradeService";
+import {
+  getOffersByUser,
+  getOffersForItem,
+  proposeTrade,
+} from "../services/tradeService";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 const NAVY = "#2f2f6f";
@@ -40,6 +44,7 @@ interface OwnItem {
   image?: string;
   category?: string;
   description?: string;
+  isTraded?: boolean;
 }
 
 interface ProposeTradeModalProps {
@@ -98,8 +103,30 @@ export const ProposeTradeModal: React.FC<ProposeTradeModalProps> = ({
     }
 
     setLoadingItems(true);
-    getUserPostedItems(uid)
-      .then((items) => setOwnItems(items as OwnItem[]))
+    Promise.all([
+      getUserPostedItems(uid) as Promise<OwnItem[]>,
+      // PATCH: fetch this user's own trade offers so we can exclude items
+      // that have already been part of a completed trade.
+      getOffersByUser(uid).catch(() => []),
+    ])
+      .then(([items, sentOffers]) => {
+        const completedOfferedItemIds = new Set(
+          sentOffers
+            .filter((o) => o.status === "completed")
+            .map((o) => o.offeredItemId)
+            .filter(Boolean),
+        );
+
+        // PATCH: remove items that are already marked as traded, or that
+        // were offered in a now-completed trade — these are no longer
+        // available to offer and showing them would be misleading.
+        const availableItems = items.filter(
+          (item) =>
+            !item.isTraded && !completedOfferedItemIds.has(item.id),
+        );
+
+        setOwnItems(availableItems);
+      })
       .catch(() => setOwnItems([]))
       .finally(() => setLoadingItems(false));
   }, [visible]);
@@ -295,10 +322,10 @@ export const ProposeTradeModal: React.FC<ProposeTradeModalProps> = ({
               ) : ownItems.length === 0 ? (
                 <View style={styles.emptyBox}>
                   <Ionicons name="cube-outline" size={36} color="#CCCCCC" />
-                  <Text style={styles.emptyTitle}>No items listed</Text>
+                  <Text style={styles.emptyTitle}>No items available</Text>
                   <Text style={styles.emptyText}>
-                    Add items in the Trade tab first before you can propose a
-                    trade.
+                    Add new items in the Trade tab, or wait — items already
+                    traded away can't be offered again.
                   </Text>
                 </View>
               ) : (

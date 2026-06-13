@@ -12,13 +12,14 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
+import { RatingModal } from "../../components/RatingModal";
 import { auth } from "../../firebaseConfig";
 import { getItemById, getUserInfo } from "../../services/itemService";
 import {
   TradeOffer,
   completeTrade,
   subscribeToOffersForItem,
-  updateTradeStatus
+  updateTradeStatus,
 } from "../../services/tradeService";
 
 const NAVY = "#2e2d7c";
@@ -100,6 +101,23 @@ function getTabBg(key: TradeOffer["status"] | "all"): string {
   return STATUS_COLORS[key]?.bg ?? "#F3F4F6";
 }
 
+// ── Figure out who "the other party" is for a given offer ─────────────────────
+function getOtherParticipant(
+  offer: TradeOffer,
+  myUid: string,
+): { uid: string; name: string } {
+  const uid =
+    (offer as any).participants?.find((p: string) => p !== myUid) ??
+    offer.offererId ??
+    (offer as any).ownerId ??
+    "";
+  const name =
+    uid === offer.offererId
+      ? offer.offererName?.trim() || "Trader"
+      : "Item Owner";
+  return { uid, name };
+}
+
 // ── MiniAvatar ────────────────────────────────────────────────────────────────
 function MiniAvatar({
   uri,
@@ -163,6 +181,9 @@ export default function TradeOffersScreen() {
     null,
   );
 
+  // ── Rating modal state ────────────────────────────────────────────────────
+  const [ratingOffer, setRatingOffer] = useState<TradeOffer | null>(null);
+
   const unsubRef = useRef<(() => void) | null>(null);
 
   // Load the item details
@@ -194,6 +215,14 @@ export default function TradeOffersScreen() {
       unsubRef.current = null;
     };
   }, [itemId]);
+
+  // Keep the rating modal in sync with live updates — if the offer being
+  // rated disappears or changes id out from under us, close the sheet.
+  useEffect(() => {
+    if (!ratingOffer) return;
+    const stillExists = offers.find((o) => o.id === ratingOffer.id);
+    if (!stillExists) setRatingOffer(null);
+  }, [offers, ratingOffer]);
 
   const handleRespond = async (
     offer: TradeOffer,
@@ -236,6 +265,11 @@ export default function TradeOffersScreen() {
     item && Array.isArray(item.images) && item.images.length > 0
       ? item.images[0]
       : item?.image || "https://via.placeholder.com/200";
+
+  const myUid = auth.currentUser?.uid ?? "";
+  const ratingTarget = ratingOffer
+    ? getOtherParticipant(ratingOffer, myUid)
+    : null;
 
   return (
     <SafeAreaView style={styles.container}>
@@ -385,6 +419,7 @@ export default function TradeOffersScreen() {
                 });
               }}
               onComplete={() => handleComplete(offer)}
+              onRate={() => setRatingOffer(offer)}
               onPressUser={() =>
                 offer.offererId &&
                 router.push({
@@ -396,6 +431,17 @@ export default function TradeOffersScreen() {
           ))}
         </ScrollView>
       )}
+
+      {/* ── Rate trade partner sheet ── */}
+      <RatingModal
+        visible={!!ratingOffer && !!ratingTarget}
+        tradeId={ratingOffer?.id ?? ""}
+        currentUserUid={myUid}
+        otherUserUid={ratingTarget?.uid ?? ""}
+        otherUserName={ratingTarget?.name ?? ""}
+        onClose={() => setRatingOffer(null)}
+        onSubmitted={() => setRatingOffer(null)}
+      />
     </SafeAreaView>
   );
 }
@@ -409,6 +455,7 @@ function OfferCard({
   onDecline,
   onMessage,
   onComplete,
+  onRate,
   onPressUser,
 }: {
   offer: TradeOffer;
@@ -418,6 +465,7 @@ function OfferCard({
   onDecline: () => void;
   onMessage: () => void;
   onComplete: () => void;
+  onRate: () => void;
   onPressUser: () => void;
 }) {
   const isUpdating = updatingId === offer.id;
@@ -436,6 +484,9 @@ function OfferCard({
     "";
   const otherHasConfirmed =
     completedBy.includes(otherParticipantUid) && !iHaveConfirmed;
+
+  // Has the current user already left a review for this trade?
+  const hasReviewed = !!(offer as any).reviews?.[myUid];
 
   const [offererName, setOffererName] = useState<string>(
     offer.offererName?.trim() || "Trader",
@@ -620,10 +671,23 @@ function OfferCard({
         )}
 
         {isCompleted && (
-          <View style={[styles.acceptedBadge, { backgroundColor: "#E8F5E9" }]}>
-            <Ionicons name="trophy" size={14} color="#16A34A" />
-            <Text style={styles.acceptedBadgeText}>Completed</Text>
-          </View>
+          <>
+            <View style={styles.completedBadge}>
+              <Ionicons name="trophy" size={14} color="#16A34A" />
+              <Text style={styles.completedBadgeText}>Completed</Text>
+            </View>
+
+            {!hasReviewed && (
+              <TouchableOpacity
+                style={styles.rateBtn}
+                onPress={onRate}
+                activeOpacity={0.85}
+              >
+                <Ionicons name="star" size={14} color="#FFB800" />
+                <Text style={styles.rateBtnText}>Rate</Text>
+              </TouchableOpacity>
+            )}
+          </>
         )}
       </View>
     </View>
@@ -834,7 +898,7 @@ const styles = StyleSheet.create({
   },
 
   // ── Actions ───────────────────────────────────────────────────────────────
-  actions: { flexDirection: "row", gap: 8, alignItems: "center" },
+  actions: { flexDirection: "row", gap: 8, alignItems: "center", flexWrap: "wrap" },
   declineBtn: {
     flex: 1,
     alignItems: "center",
@@ -869,17 +933,6 @@ const styles = StyleSheet.create({
     backgroundColor: "#ECEDF8",
   },
   messageBtnText: { fontSize: 12, fontWeight: "700", color: NAVY },
-  acceptedBadge: {
-    flex: 1,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 5,
-    paddingVertical: 9,
-    borderRadius: 10,
-    backgroundColor: "#F0FDF4",
-  },
-  acceptedBadgeText: { fontSize: 12, fontWeight: "700", color: "#16A34A" },
 
   // ── Complete button ───────────────────────────────────────────────────────
   completeBtn: {
@@ -895,6 +948,32 @@ const styles = StyleSheet.create({
   completeBtnWaiting: { backgroundColor: "#6B7280" },
   completeBtnHighlight: { backgroundColor: "#0F9D58" },
   completeBtnText: { fontSize: 12, fontWeight: "700", color: "#fff" },
+
+  // ── Completed badge + Rate button (matches sent-offers) ──────────────────
+  completedBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 5,
+    paddingVertical: 9,
+    paddingHorizontal: 12,
+    borderRadius: 10,
+    backgroundColor: "#F0FDF4",
+  },
+  completedBadgeText: { fontSize: 12, fontWeight: "700", color: "#16A34A" },
+  rateBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 5,
+    paddingVertical: 9,
+    paddingHorizontal: 14,
+    borderRadius: 10,
+    borderWidth: 1.5,
+    borderColor: "#FCD34D",
+    backgroundColor: "#FFFBEB",
+  },
+  rateBtnText: { fontSize: 12, fontWeight: "700", color: "#B45309" },
 
   // ── States ────────────────────────────────────────────────────────────────
   centered: {

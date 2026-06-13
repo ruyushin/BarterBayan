@@ -613,15 +613,15 @@ export const completeTrade = async (
 
     await Promise.all([
       updateDoc(doc(db, "users", data.offererId), {
-        tradesCount: increment(1),
+        tradeCount: increment(1),
         exchangedCount: increment(1),
       }),
       updateDoc(doc(db, "users", data.ownerId), {
-        tradesCount: increment(1),
+        tradeCount: increment(1),
         exchangedCount: increment(1),
       }),
     ]).catch((e) =>
-      console.warn("Could not update tradesCount (non-fatal):", e),
+      console.warn("Could not update tradeCount (non-fatal):", e),
     );
 
     await createNotification({

@@ -1,5 +1,6 @@
 import { Ionicons } from "@expo/vector-icons";
 import { Audio } from "expo-av";
+import { BlurView } from "expo-blur";
 import * as Clipboard from "expo-clipboard";
 import * as FileSystem from "expo-file-system/legacy";
 import * as ImagePicker from "expo-image-picker";
@@ -52,9 +53,19 @@ const EDIT_WINDOW_MS = 10 * 60 * 1000;
 const DELETE_WINDOW_MS = 15 * 60 * 1000;
 const { height: SCREEN_HEIGHT, width: SCREEN_WIDTH } = Dimensions.get("window");
 const TIME_CLUSTER_MINUTES = 5;
-const MEDIA_BUBBLE_WIDTH = Math.min(240, SCREEN_WIDTH * 0.65);
-const MEDIA_BUBBLE_MAX_HEIGHT = MEDIA_BUBBLE_WIDTH * 1.4;
+
+// Media bubbles: sized to roughly match the look of native chat apps —
+// wide enough to read clearly, capped on height so very tall/wide images
+// don't dominate the screen. Aspect ratio is always preserved (see
+// PhotoBubble / VideoBubble), nothing is cropped/cover-cropped.
+const MEDIA_BUBBLE_WIDTH = Math.min(280, SCREEN_WIDTH * 0.72);
+const MEDIA_BUBBLE_MAX_HEIGHT = MEDIA_BUBBLE_WIDTH * 1.6;
 const MEDIA_BUBBLE_MIN_HEIGHT = MEDIA_BUBBLE_WIDTH * 0.6;
+
+// Approximate rendered height of the floating header (incl. status-bar
+// padding). Used to push list content below it since the header is now
+// absolutely positioned (FB Marketplace style floating header).
+const FLOATING_HEADER_HEIGHT = 96;
 
 const SUGGESTED_MESSAGES = [
   "Is this still available?",
@@ -81,6 +92,13 @@ type ListItem =
   | { type: "dateSeparator"; id: string; date: string }
   | { type: "timeSeparator"; id: string; time: string }
   | { type: "message"; id: string; [key: string]: any };
+
+type MediaDraft = {
+  uri: string;
+  type: "photo" | "video";
+  caption: string;
+  file?: File; // web only — original File object for upload
+};
 
 // ─── Utility functions ────────────────────────────────────────────────────────
 const toDate = (timestamp: any): Date => {
@@ -139,6 +157,21 @@ const formatDuration = (seconds: number): string => {
   const m = Math.floor(seconds / 60);
   const s = Math.floor(seconds % 60);
   return `${m}:${s.toString().padStart(2, "0")}`;
+};
+
+const formatLastSeen = (timestamp: any): string => {
+  const date = toDate(timestamp);
+  if (date.getTime() === 0) return "Offline";
+  const diffMs = Date.now() - date.getTime();
+  const diffMin = Math.floor(diffMs / 60000);
+  if (diffMin < 1) return "Last seen just now";
+  if (diffMin < 60) return `Last seen ${diffMin}m ago`;
+  const diffHr = Math.floor(diffMin / 60);
+  if (diffHr < 24) return `Last seen ${diffHr}h ago`;
+  const diffDays = Math.floor(diffHr / 24);
+  if (diffDays === 1) return "Last seen yesterday";
+  if (diffDays < 7) return `Last seen ${diffDays}d ago`;
+  return `Last seen ${date.toLocaleDateString([], { month: "short", day: "numeric" })}`;
 };
 
 // ─── AvatarWithFallback ───────────────────────────────────────────────────────
@@ -692,9 +725,117 @@ const vr = StyleSheet.create({
   sendBtn: { backgroundColor: NAVY, width: 44, height: 44, borderRadius: 22, justifyContent: "center", alignItems: "center" },
 });
 
+// ─── MediaDraftsModal ─────────────────────────────────────────────────────────
+// Lets the user preview picked photos/videos, add a caption to each, remove
+// items, add more, and either send everything at once or send a single item.
+// Nothing uploads until the user explicitly taps a send action.
+function MediaDraftsModal({
+  visible, drafts, onClose, onRemove, onCaptionChange, onAddMore, onSendAll, onSendOne, sending,
+}: {
+  visible: boolean;
+  drafts: MediaDraft[];
+  onClose: () => void;
+  onRemove: (index: number) => void;
+  onCaptionChange: (index: number, text: string) => void;
+  onAddMore: () => void;
+  onSendAll: () => void;
+  onSendOne: (index: number) => void;
+  sending: boolean;
+}) {
+  if (drafts.length === 0) return null;
+
+  return (
+    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
+      <Pressable style={draftStyles.overlay} onPress={onClose}>
+        <Pressable style={draftStyles.panel} onStartShouldSetResponder={() => true}>
+          <View style={draftStyles.headerRow}>
+            <Text style={draftStyles.heading}>
+              {drafts.length > 1 ? `${drafts.length} items selected` : "Preview"}
+            </Text>
+            <TouchableOpacity onPress={onClose} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+              <Ionicons name="close" size={24} color="#333" />
+            </TouchableOpacity>
+          </View>
+
+          <ScrollView style={draftStyles.list} keyboardShouldPersistTaps="handled">
+            {drafts.map((draft, i) => (
+              <View key={`${draft.uri}-${i}`} style={draftStyles.item}>
+                <View style={draftStyles.thumbWrap}>
+                  {draft.type === "photo" ? (
+                    <Image source={{ uri: draft.uri }} style={draftStyles.thumb} resizeMode="cover" />
+                  ) : (
+                    <View style={[draftStyles.thumb, draftStyles.videoThumb]}>
+                      <Ionicons name="videocam" size={22} color="#fff" />
+                    </View>
+                  )}
+                  <TouchableOpacity style={draftStyles.removeBtn} onPress={() => onRemove(i)} hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}>
+                    <Ionicons name="close-circle" size={20} color="#ef4444" />
+                  </TouchableOpacity>
+                </View>
+                <TextInput
+                  style={draftStyles.captionInput}
+                  placeholder="Add a caption..."
+                  placeholderTextColor="#aaa"
+                  value={draft.caption}
+                  onChangeText={(text) => onCaptionChange(i, text)}
+                  multiline
+                />
+                <TouchableOpacity
+                  style={[draftStyles.sendOneBtn, sending && { opacity: 0.4 }]}
+                  onPress={() => onSendOne(i)}
+                  disabled={sending}
+                  hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
+                >
+                  <Ionicons name="send" size={16} color={NAVY} />
+                </TouchableOpacity>
+              </View>
+            ))}
+          </ScrollView>
+
+          <View style={draftStyles.footer}>
+            <TouchableOpacity style={[draftStyles.addMoreBtn, sending && { opacity: 0.5 }]} onPress={onAddMore} disabled={sending}>
+              <Ionicons name="add" size={18} color={NAVY} />
+              <Text style={draftStyles.addMoreLabel}>Add more</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={[draftStyles.sendAllBtn, sending && { opacity: 0.5 }]} onPress={onSendAll} disabled={sending}>
+              {sending ? <ActivityIndicator color="#fff" size="small" /> : (
+                <Text style={draftStyles.sendAllLabel}>
+                  {drafts.length > 1 ? `Send All (${drafts.length})` : "Send"}
+                </Text>
+              )}
+            </TouchableOpacity>
+          </View>
+        </Pressable>
+      </Pressable>
+    </Modal>
+  );
+}
+
+const draftStyles = StyleSheet.create({
+  overlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.4)", justifyContent: "flex-end" },
+  panel: { backgroundColor: "#fff", borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 16, paddingBottom: 24, maxHeight: "78%" },
+  headerRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 12 },
+  heading: { fontSize: 16, fontWeight: "700", color: "#111" },
+  list: { maxHeight: 420 },
+  item: { flexDirection: "row", alignItems: "center", gap: 10, marginBottom: 12 },
+  thumbWrap: { position: "relative" },
+  thumb: { width: 60, height: 60, borderRadius: 10, backgroundColor: "#eee" },
+  videoThumb: { justifyContent: "center", alignItems: "center", backgroundColor: "#111" },
+  removeBtn: { position: "absolute", top: -6, right: -6, backgroundColor: "#fff", borderRadius: 10 },
+  captionInput: { flex: 1, borderWidth: 1, borderColor: "#ddd", borderRadius: 10, paddingHorizontal: 12, paddingVertical: 8, fontSize: 13, backgroundColor: "#f9f9f9", maxHeight: 60, color: "#111" },
+  sendOneBtn: { width: 36, height: 36, borderRadius: 18, backgroundColor: "#eef0fb", justifyContent: "center", alignItems: "center" },
+  footer: { flexDirection: "row", gap: 10, marginTop: 10 },
+  addMoreBtn: { flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 4, backgroundColor: "#f2f2f7", borderRadius: 12, paddingVertical: 12 },
+  addMoreLabel: { color: NAVY, fontWeight: "600", fontSize: 14 },
+  sendAllBtn: { flex: 2, backgroundColor: NAVY, borderRadius: 12, paddingVertical: 12, alignItems: "center" },
+  sendAllLabel: { color: "#fff", fontWeight: "700", fontSize: 14 },
+});
+
 // ─── PhotoBubble ──────────────────────────────────────────────────────────────
-// Preserves the photo's natural aspect ratio (no longer forces a square crop),
-// clamped between a min/max height so very tall or wide images stay readable.
+// Preserves the photo's natural aspect ratio (never crops the image). The
+// bubble height is computed from the real width/height of the image and
+// clamped between a min/max so very tall or very wide images stay readable,
+// while resizeMode="contain" guarantees nothing is ever cut off.
 function PhotoBubble({ uri, isMe }: { uri: string; isMe: boolean }) {
   const [fullscreen, setFullscreen] = useState(false);
   const [bubbleHeight, setBubbleHeight] = useState(MEDIA_BUBBLE_WIDTH);
@@ -722,7 +863,7 @@ function PhotoBubble({ uri, isMe }: { uri: string; isMe: boolean }) {
           isMe ? mediaBubble.wrapRight : mediaBubble.wrapLeft,
           { height: bubbleHeight },
         ]}>
-        <Image source={{ uri }} style={mediaBubble.img} resizeMode="cover" />
+        <Image source={{ uri }} style={mediaBubble.img} resizeMode="contain" />
       </TouchableOpacity>
       <Modal visible={fullscreen} transparent animationType="fade" onRequestClose={() => setFullscreen(false)}>
         <View style={mediaBubble.fullOverlay}>
@@ -809,7 +950,7 @@ function VideoBubble({ uri, isMe }: { uri: string; isMe: boolean }) {
 }
 
 const mediaBubble = StyleSheet.create({
-  wrap: { borderRadius: 14, overflow: "hidden", width: MEDIA_BUBBLE_WIDTH },
+  wrap: { borderRadius: 14, overflow: "hidden", width: MEDIA_BUBBLE_WIDTH, backgroundColor: "#0009" },
   wrapRight: { borderBottomRightRadius: 4 },
   wrapLeft: { borderBottomLeftRadius: 4 },
   img: { width: "100%", height: "100%" },
@@ -940,6 +1081,10 @@ export default function ChatScreen() {
   const [voiceDraftUri, setVoiceDraftUri] = useState<string | null>(null);
   const recordingRef = useRef<Audio.Recording | null>(null);
   const recordTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // ── Media drafts (photo/video) — staged before send, supports multi-send ──
+  const [mediaDrafts, setMediaDrafts] = useState<MediaDraft[]>([]);
+  const [draftsModalVisible, setDraftsModalVisible] = useState(false);
 
   const currentUserId = auth.currentUser?.uid;
   const flatListRef = useRef<FlatList>(null);
@@ -1165,19 +1310,29 @@ export default function ChatScreen() {
     } finally { setSending(false); setUploadLabel(""); }
   };
 
-  // ── Media picker ──
+  // ── Media picker — stages drafts instead of sending immediately ──
+  // Supports picking multiple photos at once (multi-send). The user previews
+  // everything in MediaDraftsModal, can add captions, remove items, add more,
+  // and only then sends (all at once or one at a time).
   const handleMediaAttach = () => {
     if (Platform.OS === "web") {
-      const input = document.createElement("input");
-      input.type = "file";
-      input.accept = "image/*,video/*";
-      input.onchange = async (e: any) => {
-        const file = e.target.files?.[0];
-        if (!file) return;
-        const isVideo = file.type.startsWith("video/");
-        await sendMediaMessageWeb(file, isVideo ? "video" : "photo");
+      const fileInput = document.createElement("input");
+      fileInput.type = "file";
+      fileInput.accept = "image/*,video/*";
+      fileInput.multiple = true;
+      fileInput.onchange = (e: any) => {
+        const files: File[] = Array.from(e.target.files ?? []);
+        if (!files.length) return;
+        const newDrafts: MediaDraft[] = files.map((file) => ({
+          uri: URL.createObjectURL(file),
+          type: file.type.startsWith("video/") ? "video" : "photo",
+          caption: "",
+          file,
+        }));
+        setMediaDrafts((prev) => [...prev, ...newDrafts]);
+        setDraftsModalVisible(true);
       };
-      input.click();
+      fileInput.click();
       return;
     }
 
@@ -1188,40 +1343,6 @@ export default function ChatScreen() {
       { text: "Video Library", onPress: () => pickMedia("library", "video") },
       { text: "Cancel", style: "cancel" },
     ]);
-  };
-
-  const sendMediaMessageWeb = async (file: File, mediaType: "photo" | "video") => {
-    if (!currentUserId || !ownerUserId) return;
-    setShowSuggested(false);
-    try {
-      setSending(true);
-      setUploadLabel(mediaType === "photo" ? "Uploading photo…" : "Uploading video…");
-      const cloudResource = mediaType === "photo" ? "image" : "video";
-      const formData = new FormData();
-      formData.append("file", file);
-      formData.append("upload_preset", "chat_media");
-      formData.append("folder", "chat_media");
-      const res = await fetch(
-        `https://api.cloudinary.com/v1_1/dh97c25iz/${cloudResource}/upload`,
-        { method: "POST", body: formData },
-      );
-      if (!res.ok) {
-        const errText = await res.text();
-        throw new Error(`Cloudinary upload failed (${res.status}): ${errText}`);
-      }
-      const data = await res.json();
-      const mediaUrl = data.secure_url;
-      await sendMessage(
-        currentUserId, ownerUserId as string, "",
-        itemId as string | undefined,
-        replyTo ? { id: replyTo.id, text: replyTo.text, senderId: replyTo.senderId } : undefined,
-        { type: mediaType, mediaUrl },
-      );
-      setReplyTo(null);
-    } catch (err) {
-      console.error("Media send error:", err);
-      Alert.alert("Error", `Failed to send ${mediaType}.`);
-    } finally { setSending(false); setUploadLabel(""); }
   };
 
   const pickMedia = async (source: "camera" | "library", mediaType: "photo" | "video") => {
@@ -1240,10 +1361,19 @@ export default function ChatScreen() {
         result = await ImagePicker.launchImageLibraryAsync({
           mediaTypes: mediaType === "photo" ? ImagePicker.MediaTypeOptions.Images : ImagePicker.MediaTypeOptions.Videos,
           quality: 0.85, videoMaxDuration: 60,
+          // Multi-select only makes sense for photo library picks
+          allowsMultipleSelection: source === "library" && mediaType === "photo",
+          selectionLimit: 10,
         });
       }
-      if (!result.canceled && result.assets[0]?.uri) {
-        await sendMediaMessage(result.assets[0].uri, mediaType);
+      if (!result.canceled && result.assets?.length) {
+        const newDrafts: MediaDraft[] = result.assets.map((asset) => ({
+          uri: asset.uri,
+          type: (asset.type === "video" ? "video" : mediaType) as "photo" | "video",
+          caption: "",
+        }));
+        setMediaDrafts((prev) => [...prev, ...newDrafts]);
+        setDraftsModalVisible(true);
       }
     } catch (err) {
       console.error("Media picker error:", err);
@@ -1251,25 +1381,113 @@ export default function ChatScreen() {
     }
   };
 
-  const sendMediaMessage = async (localUri: string, mediaType: "photo" | "video") => {
+  // ── Upload + send a single media draft ──
+  const sendSingleMediaDraft = async (draft: MediaDraft) => {
     if (!currentUserId || !ownerUserId) return;
-    setShowSuggested(false);
+    setUploadLabel(draft.type === "photo" ? "Uploading photo…" : "Uploading video…");
     try {
-      setSending(true);
-      setUploadLabel(mediaType === "photo" ? "Uploading photo…" : "Uploading video…");
-      const cloudResource = mediaType === "photo" ? "image" : "video";
-      const mediaUrl = await uploadToCloudinary(localUri, cloudResource);
+      let mediaUrl: string;
+
+      if (Platform.OS === "web" && draft.file) {
+        const cloudResource = draft.type === "photo" ? "image" : "video";
+        const formData = new FormData();
+        formData.append("file", draft.file);
+        formData.append("upload_preset", "chat_media");
+        formData.append("folder", "chat_media");
+        const res = await fetch(
+          `https://api.cloudinary.com/v1_1/dh97c25iz/${cloudResource}/upload`,
+          { method: "POST", body: formData },
+        );
+        if (!res.ok) {
+          const errText = await res.text();
+          throw new Error(`Cloudinary upload failed (${res.status}): ${errText}`);
+        }
+        const data = await res.json();
+        mediaUrl = data.secure_url;
+      } else {
+        mediaUrl = await uploadToCloudinary(draft.uri, draft.type === "photo" ? "image" : "video");
+      }
+
       await sendMessage(
-        currentUserId, ownerUserId as string, "",
+        currentUserId, ownerUserId as string, draft.caption.trim(),
         itemId as string | undefined,
         replyTo ? { id: replyTo.id, text: replyTo.text, senderId: replyTo.senderId } : undefined,
-        { type: mediaType, mediaUrl },
+        { type: draft.type, mediaUrl },
       );
-      setReplyTo(null);
     } catch (err) {
       console.error("Media send error:", err);
-      Alert.alert("Error", `Failed to send ${mediaType}.`);
-    } finally { setSending(false); setUploadLabel(""); }
+      throw err;
+    }
+  };
+
+  // ── Send all staged drafts, one by one ──
+  const handleSendAllDrafts = async () => {
+    if (mediaDrafts.length === 0) return;
+    const items = [...mediaDrafts];
+    setMediaDrafts([]);
+    setDraftsModalVisible(false);
+    setShowSuggested(false);
+    setSending(true);
+
+    let failures = 0;
+    for (let i = 0; i < items.length; i++) {
+      setUploadLabel(items.length > 1 ? `Sending ${i + 1} of ${items.length}…` : (items[i].type === "photo" ? "Uploading photo…" : "Uploading video…"));
+      try {
+        await sendSingleMediaDraft(items[i]);
+      } catch {
+        failures++;
+      }
+    }
+
+    setReplyTo(null);
+    setSending(false);
+    setUploadLabel("");
+    if (failures > 0) {
+      Alert.alert("Error", failures === items.length
+        ? "Failed to send media."
+        : `${failures} of ${items.length} item(s) failed to send.`);
+    }
+  };
+
+  // ── Send a single draft, leaving the rest staged ──
+  const handleSendOneDraft = async (index: number) => {
+    const draft = mediaDrafts[index];
+    if (!draft) return;
+    setMediaDrafts((prev) => prev.filter((_, i) => i !== index));
+    setShowSuggested(false);
+    setSending(true);
+    try {
+      await sendSingleMediaDraft(draft);
+      setReplyTo(null);
+    } catch {
+      Alert.alert("Error", `Failed to send ${draft.type}.`);
+    } finally {
+      setSending(false);
+      setUploadLabel("");
+      // Close the modal if nothing's left to preview
+      setMediaDrafts((prev) => {
+        if (prev.length === 0) setDraftsModalVisible(false);
+        return prev;
+      });
+    }
+  };
+
+  const handleRemoveDraft = (index: number) => {
+    setMediaDrafts((prev) => {
+      const next = prev.filter((_, i) => i !== index);
+      if (next.length === 0) setDraftsModalVisible(false);
+      return next;
+    });
+  };
+
+  const handleCaptionChange = (index: number, text: string) => {
+    setMediaDrafts((prev) => prev.map((d, i) => (i === index ? { ...d, caption: text } : d)));
+  };
+
+  const handleAddMoreDrafts = () => {
+    setDraftsModalVisible(false);
+    // Re-open the picker; results get appended to existing drafts
+    setTimeout(() => handleMediaAttach(), 250);
   };
 
   // ── Save media to device ──
@@ -1486,11 +1704,25 @@ export default function ChatScreen() {
               <Pressable onLongPress={(e) => handleLongPress(item, e.nativeEvent.pageY)}
                 onPress={() => multiSelect && toggleSelect(item.id)} delayLongPress={350}>
                 <PhotoBubble uri={item.mediaUrl} isMe={isMe} />
+                {!!item.text && (
+                  <View style={[styles.mediaCaptionWrap, isMe ? styles.mediaCaptionRight : styles.mediaCaptionLeft]}>
+                    <Text style={[styles.mediaCaptionText, isMe ? styles.myBubbleText : styles.theirBubbleText]}>
+                      {item.text}
+                    </Text>
+                  </View>
+                )}
               </Pressable>
             ) : isVideo ? (
               <Pressable onLongPress={(e) => handleLongPress(item, e.nativeEvent.pageY)}
                 onPress={() => multiSelect && toggleSelect(item.id)} delayLongPress={350}>
                 <VideoBubble uri={item.mediaUrl} isMe={isMe} />
+                {!!item.text && (
+                  <View style={[styles.mediaCaptionWrap, isMe ? styles.mediaCaptionRight : styles.mediaCaptionLeft]}>
+                    <Text style={[styles.mediaCaptionText, isMe ? styles.myBubbleText : styles.theirBubbleText]}>
+                      {item.text}
+                    </Text>
+                  </View>
+                )}
               </Pressable>
             ) : isVoice ? (
               <Pressable onLongPress={(e) => handleLongPress(item, e.nativeEvent.pageY)}
@@ -1550,7 +1782,7 @@ export default function ChatScreen() {
   if (loading) {
     return (
       <SafeAreaView style={styles.container}>
-        <View style={styles.header}>
+        <View style={[styles.header, styles.headerStatic]}>
           <TouchableOpacity onPress={handleBack} style={styles.backBtn}>
             <Ionicons name="chevron-back" size={24} color="white" />
           </TouchableOpacity>
@@ -1571,10 +1803,22 @@ export default function ChatScreen() {
 
   // ── Render ──
   return (
-    <SafeAreaView style={styles.container} edges={["top", "left", "right"]}>
+    <SafeAreaView style={styles.container} edges={["left", "right"]}>
       <BottomSheet visible={sheetVisible} title={sheetTitle} options={sheetOptions} onClose={() => setSheetVisible(false)} />
       <DeleteConversationModal visible={deleteConvModalVisible} onCancel={() => setDeleteConvModalVisible(false)} onConfirm={confirmDeleteConversation} />
       <UploadProgressModal visible={!!uploadLabel} label={uploadLabel} />
+
+      <MediaDraftsModal
+        visible={draftsModalVisible}
+        drafts={mediaDrafts}
+        onClose={() => setDraftsModalVisible(false)}
+        onRemove={handleRemoveDraft}
+        onCaptionChange={handleCaptionChange}
+        onAddMore={handleAddMoreDrafts}
+        onSendAll={handleSendAllDrafts}
+        onSendOne={handleSendOneDraft}
+        sending={sending}
+      />
 
       <ReactionsModal
         visible={reactionsModalVisible} emoji={reactionsModalEmoji}
@@ -1607,54 +1851,12 @@ export default function ChatScreen() {
           onCancel={() => setEditingMessage(null)} />
       )}
 
-      {/* Header */}
-      {multiSelect ? (
-        <MultiSelectBar count={selectedIds.size}
-          onCancel={() => { setMultiSelect(false); setSelectedIds(new Set()); }}
-          onDeleteForMe={handleMultiDeleteForMe} onDeleteForEveryone={handleMultiDeleteForEveryone} />
-      ) : (
-        <View style={styles.header}>
-          <TouchableOpacity onPress={handleBack} style={styles.backBtn}>
-            <Ionicons name="chevron-back" size={24} color="white" />
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.headerContent}
-            onPress={() => router.push({ pathname: "/user-profile", params: { userId: ownerUserId as string } })}
-            activeOpacity={0.85}>
-            <AvatarWithFallback uri={avatarUri} name={ownerName} size={40} style={styles.headerAvatar} fallbackFontSize={18} />
-            <View style={styles.headerInfo}>
-              <View style={styles.headerNameRow}>
-                <Text style={styles.headerName} numberOfLines={1}>{ownerName}</Text>
-                {isMuted && (
-                  <View style={styles.mutedBadge}>
-                    <Ionicons name="notifications-off" size={11} color="#fff" />
-                    <Text style={styles.mutedBadgeText}>Muted</Text>
-                  </View>
-                )}
-              </View>
-              <View style={styles.headerStatusRow}>
-                <View style={[styles.headerStatusDot, { backgroundColor: presenceDotColor }]} />
-                <Text style={styles.headerStatus} numberOfLines={1}>
-                  {presenceStatusText}
-                </Text>
-              </View>
-            </View>
-          </TouchableOpacity>
-          <TouchableOpacity onPress={handleMenu} hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}>
-            <Ionicons name="ellipsis-vertical" size={20} color="white" />
-          </TouchableOpacity>
-        </View>
-      )}
-
-      {/* Marketplace listing card — shown when arriving from a trade offer / listing chat */}
-      {itemTitle && !multiSelect && (
-        <View style={styles.offerCard}>
-          {itemImage ? (
-            <Image source={{ uri: itemImage as string }} style={styles.offerImage} resizeMode="cover" />
-          ) : null}
-          <View style={styles.offerTextWrap}>
-            <Text style={styles.offerLabel}>Marketplace listing</Text>
-            <Text style={styles.offerTitle} numberOfLines={2}>{itemTitle as string}</Text>
-          </View>
+      {/* Multi-select bar replaces the floating header entirely while active */}
+      {multiSelect && (
+        <View style={[styles.multiSelectWrap, { paddingTop: insets.top }]}>
+          <MultiSelectBar count={selectedIds.size}
+            onCancel={() => { setMultiSelect(false); setSelectedIds(new Set()); }}
+            onDeleteForMe={handleMultiDeleteForMe} onDeleteForEveryone={handleMultiDeleteForEveryone} />
         </View>
       )}
 
@@ -1669,6 +1871,7 @@ export default function ChatScreen() {
           keyExtractor={(item) => item.id}
           contentContainerStyle={[
             styles.messagesList,
+            { paddingTop: multiSelect ? 12 : FLOATING_HEADER_HEIGHT + (itemTitle ? 64 : 0) },
             Platform.OS === "android" && keyboardHeight > 0 ? { paddingBottom: keyboardHeight - 10 } : {},
           ]}
           showsVerticalScrollIndicator={false}
@@ -1702,6 +1905,16 @@ export default function ChatScreen() {
 
         {replyTo && !multiSelect && (
           <ReplyBanner message={replyTo} ownerName={ownerFirstName} onCancel={() => setReplyTo(null)} />
+        )}
+
+        {!multiSelect && mediaDrafts.length > 0 && !draftsModalVisible && (
+          <TouchableOpacity style={styles.draftsPill} onPress={() => setDraftsModalVisible(true)} activeOpacity={0.8}>
+            <Ionicons name="images-outline" size={16} color={NAVY} />
+            <Text style={styles.draftsPillText}>
+              {mediaDrafts.length} item{mediaDrafts.length > 1 ? "s" : ""} ready to send
+            </Text>
+            <Ionicons name="chevron-up" size={14} color={NAVY} />
+          </TouchableOpacity>
         )}
 
         {!multiSelect && showVoiceBar && (
@@ -1746,6 +1959,58 @@ export default function ChatScreen() {
           </View>
         )}
       </KeyboardAvoidingView>
+
+      {/* ── Floating header (FB Marketplace style) ──
+          Absolutely positioned over the message list with a translucent blur
+          so messages scroll underneath it. Hidden while multi-select is active. */}
+      {!multiSelect && (
+        <View style={[styles.floatingHeaderWrap, { paddingTop: insets.top }]} pointerEvents="box-none">
+          <BlurView intensity={45} tint="dark" style={StyleSheet.absoluteFill} />
+          <View style={[styles.header, styles.floatingHeaderInner]}>
+            <TouchableOpacity onPress={handleBack} style={styles.backBtn}>
+              <Ionicons name="chevron-back" size={24} color="white" />
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.headerContent}
+              onPress={() => router.push({ pathname: "/user-profile", params: { userId: ownerUserId as string } })}
+              activeOpacity={0.85}>
+              <AvatarWithFallback uri={avatarUri} name={ownerName} size={40} style={styles.headerAvatar} fallbackFontSize={18} />
+              <View style={styles.headerInfo}>
+                <View style={styles.headerNameRow}>
+                  <Text style={styles.headerName} numberOfLines={1}>{ownerName}</Text>
+                  {isMuted && (
+                    <View style={styles.mutedBadge}>
+                      <Ionicons name="notifications-off" size={11} color="#fff" />
+                      <Text style={styles.mutedBadgeText}>Muted</Text>
+                    </View>
+                  )}
+                </View>
+                <View style={styles.headerStatusRow}>
+                  <View style={[styles.headerStatusDot, { backgroundColor: presenceDotColor }]} />
+                  <Text style={styles.headerStatus} numberOfLines={1}>
+                    {presenceStatusText}
+                  </Text>
+                </View>
+              </View>
+            </TouchableOpacity>
+            <TouchableOpacity onPress={handleMenu} hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}>
+              <Ionicons name="ellipsis-vertical" size={20} color="white" />
+            </TouchableOpacity>
+          </View>
+
+          {/* Marketplace listing card — shown when arriving from a trade offer / listing chat */}
+          {itemTitle && (
+            <View style={styles.offerCard}>
+              {itemImage ? (
+                <Image source={{ uri: itemImage as string }} style={styles.offerImage} resizeMode="cover" />
+              ) : null}
+              <View style={styles.offerTextWrap}>
+                <Text style={styles.offerLabel}>Marketplace listing</Text>
+                <Text style={styles.offerTitle} numberOfLines={2}>{itemTitle as string}</Text>
+              </View>
+            </View>
+          )}
+        </View>
+      )}
     </SafeAreaView>
   );
 }
@@ -1754,7 +2019,22 @@ export default function ChatScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#f5f5f7" },
   centered: { flex: 1, justifyContent: "center", alignItems: "center" },
-  header: { flexDirection: "row", alignItems: "center", backgroundColor: NAVY, paddingHorizontal: 14, paddingVertical: 10, paddingTop: 32, gap: 10 },
+
+  // Base header layout — reused by both the floating header and the
+  // static loading-state header.
+  header: { flexDirection: "row", alignItems: "center", backgroundColor: NAVY, paddingHorizontal: 14, paddingVertical: 10, gap: 10 },
+  headerStatic: { paddingTop: 32 },
+
+  // Floating header (FB Marketplace style): absolutely positioned over the
+  // FlatList with a blurred translucent background. The inner header row
+  // keeps a semi-transparent navy tint so it stays legible over any content.
+  floatingHeaderWrap: {
+    position: "absolute", top: 0, left: 0, right: 0, zIndex: 20, overflow: "hidden",
+  },
+  floatingHeaderInner: { backgroundColor: "rgba(47,47,111,0.55)" },
+
+  multiSelectWrap: { backgroundColor: NAVY },
+
   backBtn: { padding: 2 },
   headerContent: { flex: 1, flexDirection: "row", alignItems: "center", gap: 10 },
   headerAvatar: {},
@@ -1764,7 +2044,7 @@ const styles = StyleSheet.create({
   headerStatus: { color: "#ccc", fontSize: 11, marginTop: 1 },
   mutedBadge: { flexDirection: "row", alignItems: "center", backgroundColor: "rgba(255,255,255,0.2)", borderRadius: 10, paddingHorizontal: 6, paddingVertical: 2, gap: 3 },
   mutedBadgeText: { color: "#fff", fontSize: 10, fontWeight: "600" },
-  offerCard: { flexDirection: "row", alignItems: "center", paddingHorizontal: 16, paddingVertical: 10, backgroundColor: "#fff", borderBottomWidth: 1, borderBottomColor: "#eee", gap: 10 },
+  offerCard: { flexDirection: "row", alignItems: "center", paddingHorizontal: 16, paddingVertical: 10, backgroundColor: "rgba(255,255,255,0.92)", borderBottomWidth: 1, borderBottomColor: "#eee", gap: 10 },
   offerImage: { width: 44, height: 44, borderRadius: 8, backgroundColor: "#eee" },
   offerTextWrap: { flex: 1 },
   offerLabel: { fontSize: 11, color: "#999", marginBottom: 2 },
@@ -1802,6 +2082,11 @@ const styles = StyleSheet.create({
   theirBubbleText: { color: "#111" },
   deletedText: { color: "#8e8e93", fontStyle: "italic" },
   editedLabel: { fontSize: 10, marginTop: 2 },
+  // Captions shown under photo/video bubbles
+  mediaCaptionWrap: { marginTop: 4, paddingHorizontal: 4, maxWidth: MEDIA_BUBBLE_WIDTH },
+  mediaCaptionRight: { alignSelf: "flex-end" },
+  mediaCaptionLeft: { alignSelf: "flex-start" },
+  mediaCaptionText: { fontSize: 13, lineHeight: 18, color: "#333" },
   reactionsRow: { flexDirection: "row", flexWrap: "wrap", gap: 4, marginTop: 3 },
   reactionsRight: { justifyContent: "flex-end" },
   reactionsLeft: { justifyContent: "flex-start" },
@@ -1819,6 +2104,9 @@ const styles = StyleSheet.create({
   suggestedButtons: { gap: 6 },
   suggestedButton: { backgroundColor: "white", paddingHorizontal: 14, paddingVertical: 10, borderRadius: 10, borderWidth: 1, borderColor: "#e5e7eb" },
   suggestedButtonText: { fontSize: 13, fontWeight: "500", color: NAVY },
+  // Pending media-drafts pill above the input bar
+  draftsPill: { flexDirection: "row", alignItems: "center", gap: 6, backgroundColor: "#eef0fb", paddingHorizontal: 12, paddingVertical: 8, borderRadius: 16, alignSelf: "flex-start", marginHorizontal: 12, marginBottom: 6, borderWidth: 1, borderColor: "#dde0f7" },
+  draftsPillText: { color: NAVY, fontSize: 12, fontWeight: "600" },
   inputBar: { flexDirection: "row", alignItems: "center", paddingHorizontal: 12, paddingTop: 10, backgroundColor: "white", borderTopWidth: 1, borderTopColor: "#eee", gap: 8 },
   attachBtn: { padding: 2 },
   input: { flex: 1, borderWidth: 1, borderColor: "#ddd", borderRadius: 24, paddingHorizontal: 16, paddingVertical: 10, fontSize: 14, backgroundColor: "#f5f5f5", maxHeight: 100 },

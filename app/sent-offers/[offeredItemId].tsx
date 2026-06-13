@@ -15,7 +15,10 @@ import {
   TouchableWithoutFeedback,
   View,
 } from "react-native";
-import { TradeChatModal } from "../../components/TradeChatModal";
+import {
+  RatingModal,
+  TradeChatModal,
+} from "../../components/RatingModal";
 import { auth } from "../../firebaseConfig";
 import { getUserInfo } from "../../services/itemService";
 import {
@@ -51,27 +54,20 @@ const STATUS_FILTER_TABS: {
   { key: "cancelled", label: "Cancelled", icon: "ban-outline" },
 ];
 
-// ─── Owner info resolved from Firestore ───────────────────────────────────────
 interface OwnerInfo {
   name: string;
   avatar: string | null;
 }
 
-// A value that looks like an email shouldn't be shown as a display name
 function isEmailLike(value?: string | null): boolean {
   return !!value && /\S+@\S+\.\S+/.test(value);
 }
 
-// Resolve the best display name + avatar out of a raw Firestore user doc.
-// Falls back gracefully so the UI is never blank, and never shows an email
-// address as the "display name" (e.g. when username/displayName was seeded
-// with the user's gmail).
 function resolveOwnerInfo(raw: any): OwnerInfo {
   const fullName =
     raw?.firstName?.trim() && raw?.lastName?.trim()
       ? `${raw.firstName.trim()} ${raw.lastName.trim()}`
       : null;
-
   const candidates = [
     fullName,
     raw?.displayName,
@@ -80,12 +76,10 @@ function resolveOwnerInfo(raw: any): OwnerInfo {
     raw?.username,
     raw?.userName,
   ];
-
   const name =
     candidates
       .map((c) => (typeof c === "string" ? c.trim() : ""))
       .find((c) => c.length > 0 && !isEmailLike(c)) || "Item Owner";
-
   const avatarUrl =
     raw?.avatarUrl ||
     raw?.photoURL ||
@@ -112,6 +106,7 @@ function OfferDetailSheet({
   onViewProfile,
   onComplete,
   onCancel,
+  onRate,
   completingId,
   cancellingId,
 }: {
@@ -123,6 +118,7 @@ function OfferDetailSheet({
   onViewProfile: () => void;
   onComplete: () => void;
   onCancel: () => void;
+  onRate: () => void;
   completingId: string | null;
   cancellingId: string | null;
 }) {
@@ -171,6 +167,10 @@ function OfferDetailSheet({
     "";
   const otherHasConfirmed = completedBy.includes(otherUid) && !iHaveConfirmed;
 
+  // Has this user already reviewed this trade?
+  const reviews: Record<string, any> = (offer as any).reviews ?? {};
+  const alreadyReviewed = !!reviews[myUid];
+
   const statusStyle = STATUS_COLORS[offer.status] ?? STATUS_COLORS.pending;
   const isPending = offer.status === "pending";
   const isAccepted = offer.status === "accepted";
@@ -178,19 +178,13 @@ function OfferDetailSheet({
   const isCompleting = completingId === offer.id;
   const isCancelling = cancellingId === offer.id;
 
-  // Prefer live-fetched owner info; fall back to whatever was stored on the
-  // offer, but never show an email address as the name.
   const offerOwnerName = (offer as any).ownerName as string | undefined;
   const offerOwnerAvatar = (offer as any).ownerAvatar as string | undefined;
   const fallbackOfferName =
-    offerOwnerName && !isEmailLike(offerOwnerName)
-      ? offerOwnerName
-      : "Item Owner";
+    offerOwnerName && !isEmailLike(offerOwnerName) ? offerOwnerName : "Item Owner";
   const displayName =
     ownerInfo.name !== "Item Owner" ? ownerInfo.name : fallbackOfferName;
-  const displayAvatar =
-    ownerInfo.avatar ??
-    (offerOwnerAvatar || null);
+  const displayAvatar = ownerInfo.avatar ?? (offerOwnerAvatar || null);
 
   return (
     <Modal
@@ -225,21 +219,13 @@ function OfferDetailSheet({
             <View
               style={[
                 sheetStyles.statusPill,
-                {
-                  backgroundColor: statusStyle.bg,
-                  borderColor: statusStyle.border,
-                },
+                { backgroundColor: statusStyle.bg, borderColor: statusStyle.border },
               ]}
             >
               <View
-                style={[
-                  sheetStyles.statusDot,
-                  { backgroundColor: statusStyle.text },
-                ]}
+                style={[sheetStyles.statusDot, { backgroundColor: statusStyle.text }]}
               />
-              <Text
-                style={[sheetStyles.statusText, { color: statusStyle.text }]}
-              >
+              <Text style={[sheetStyles.statusText, { color: statusStyle.text }]}>
                 {offer.status.charAt(0).toUpperCase() + offer.status.slice(1)}
               </Text>
             </View>
@@ -281,10 +267,7 @@ function OfferDetailSheet({
           <View style={sheetStyles.swapSection}>
             <View style={sheetStyles.swapItem}>
               <Image
-                source={{
-                  uri:
-                    offer.offeredItemImage || "https://via.placeholder.com/100",
-                }}
+                source={{ uri: offer.offeredItemImage || "https://via.placeholder.com/100" }}
                 style={sheetStyles.swapItemImage}
               />
               <View style={sheetStyles.swapItemLabel}>
@@ -317,7 +300,7 @@ function OfferDetailSheet({
             </View>
           </View>
 
-          {/* ── Owner profile card — wired to live Firestore data ── */}
+          {/* Owner card */}
           <TouchableOpacity
             style={sheetStyles.ownerCard}
             onPress={onViewProfile}
@@ -329,13 +312,7 @@ function OfferDetailSheet({
                 style={sheetStyles.ownerAvatar}
               />
             ) : (
-              // Letter-avatar fallback when no photo is available
-              <View
-                style={[
-                  sheetStyles.ownerAvatar,
-                  sheetStyles.ownerAvatarFallback,
-                ]}
-              >
+              <View style={[sheetStyles.ownerAvatar, sheetStyles.ownerAvatarFallback]}>
                 <Text style={sheetStyles.ownerAvatarInitial}>
                   {displayName.charAt(0).toUpperCase()}
                 </Text>
@@ -355,11 +332,7 @@ function OfferDetailSheet({
           {/* Message preview */}
           {!!offer.message && (
             <View style={sheetStyles.messageBox}>
-              <Ionicons
-                name="chatbubble-ellipses-outline"
-                size={13}
-                color="#888"
-              />
+              <Ionicons name="chatbubble-ellipses-outline" size={13} color="#888" />
               <Text style={sheetStyles.messageText} numberOfLines={4}>
                 "{offer.message}"
               </Text>
@@ -369,18 +342,14 @@ function OfferDetailSheet({
           {/* Decline reason */}
           {offer.status === "declined" && (offer as any).declineReason && (
             <View style={sheetStyles.declineReasonBox}>
-              <Ionicons
-                name="information-circle-outline"
-                size={14}
-                color="#E11D48"
-              />
+              <Ionicons name="information-circle-outline" size={14} color="#E11D48" />
               <Text style={sheetStyles.declineReasonText}>
                 Reason: {(offer as any).declineReason}
               </Text>
             </View>
           )}
 
-          {/* Confirmation progress (accepted only) */}
+          {/* Confirmation progress */}
           {isAccepted && (
             <View style={sheetStyles.confirmProgress}>
               <View style={sheetStyles.confirmStep}>
@@ -406,9 +375,7 @@ function OfferDetailSheet({
                   sheetStyles.confirmLine,
                   {
                     backgroundColor:
-                      iHaveConfirmed && otherHasConfirmed
-                        ? "#16A34A"
-                        : "#E5E7EB",
+                      iHaveConfirmed && otherHasConfirmed ? "#16A34A" : "#E5E7EB",
                   },
                 ]}
               />
@@ -416,11 +383,7 @@ function OfferDetailSheet({
                 <View
                   style={[
                     sheetStyles.confirmDot,
-                    {
-                      backgroundColor: otherHasConfirmed
-                        ? "#16A34A"
-                        : "#E5E7EB",
-                    },
+                    { backgroundColor: otherHasConfirmed ? "#16A34A" : "#E5E7EB" },
                   ]}
                 >
                   <Ionicons name="checkmark" size={10} color="#fff" />
@@ -437,8 +400,9 @@ function OfferDetailSheet({
             </View>
           )}
 
-          {/* Actions */}
+          {/* ── Actions ── */}
           <View style={sheetStyles.actions}>
+            {/* Message button — accepted or completed */}
             {(isAccepted || isCompleted) && (
               <TouchableOpacity
                 style={sheetStyles.messageBtn}
@@ -450,6 +414,7 @@ function OfferDetailSheet({
               </TouchableOpacity>
             )}
 
+            {/* Mark as finished — accepted only */}
             {isAccepted && (
               <TouchableOpacity
                 style={[
@@ -472,11 +437,7 @@ function OfferDetailSheet({
                   </>
                 ) : (
                   <>
-                    <Ionicons
-                      name="checkmark-done-circle"
-                      size={15}
-                      color="#fff"
-                    />
+                    <Ionicons name="checkmark-done-circle" size={15} color="#fff" />
                     <Text style={sheetStyles.completeBtnText}>
                       {otherHasConfirmed
                         ? "They confirmed — tap to finish!"
@@ -487,12 +448,10 @@ function OfferDetailSheet({
               </TouchableOpacity>
             )}
 
+            {/* Cancel — pending only */}
             {isPending && (
               <TouchableOpacity
-                style={[
-                  sheetStyles.cancelBtn,
-                  isCancelling && { opacity: 0.6 },
-                ]}
+                style={[sheetStyles.cancelBtn, isCancelling && { opacity: 0.6 }]}
                 onPress={onCancel}
                 disabled={isCancelling}
                 activeOpacity={0.8}
@@ -501,24 +460,42 @@ function OfferDetailSheet({
                   <ActivityIndicator size="small" color="#E11D48" />
                 ) : (
                   <>
-                    <Ionicons
-                      name="close-circle-outline"
-                      size={15}
-                      color="#E11D48"
-                    />
+                    <Ionicons name="close-circle-outline" size={15} color="#E11D48" />
                     <Text style={sheetStyles.cancelBtnText}>Cancel Offer</Text>
                   </>
                 )}
               </TouchableOpacity>
             )}
 
+            {/* Completed badge + Rate button */}
             {isCompleted && (
-              <View style={sheetStyles.completedBadge}>
-                <Ionicons name="trophy" size={15} color="#16A34A" />
-                <Text style={sheetStyles.completedBadgeText}>
-                  Trade Completed
-                </Text>
-              </View>
+              <>
+                <View style={sheetStyles.completedBadge}>
+                  <Ionicons name="trophy" size={15} color="#16A34A" />
+                  <Text style={sheetStyles.completedBadgeText}>
+                    Trade Completed
+                  </Text>
+                </View>
+
+                {/* Rate partner button — hidden once already reviewed */}
+                {!alreadyReviewed && (
+                  <TouchableOpacity
+                    style={sheetStyles.rateBtn}
+                    onPress={onRate}
+                    activeOpacity={0.85}
+                  >
+                    <Ionicons name="star" size={15} color="#FFB800" />
+                    <Text style={sheetStyles.rateBtnText}>Rate Trade Partner</Text>
+                  </TouchableOpacity>
+                )}
+
+                {alreadyReviewed && (
+                  <View style={sheetStyles.ratedBadge}>
+                    <Ionicons name="star" size={14} color="#FFB800" />
+                    <Text style={sheetStyles.ratedBadgeText}>Review Submitted</Text>
+                  </View>
+                )}
+              </>
             )}
           </View>
         </ScrollView>
@@ -539,18 +516,10 @@ export default function SentOffersScreen() {
 
   const [allOffers, setAllOffers] = useState<TradeOffer[]>([]);
   const [offersLoading, setOffersLoading] = useState(true);
-
-  // ── Live owner info map ─────────────────────────────────────────────────
-  // Keyed by ownerId. Populated once allOffers loads; refreshed whenever
-  // the set of unique ownerIds changes (e.g. new offer arrives).
-  const [ownerInfoMap, setOwnerInfoMap] = useState<Record<string, OwnerInfo>>(
-    {},
-  );
+  const [ownerInfoMap, setOwnerInfoMap] = useState<Record<string, OwnerInfo>>({});
   const [ownerInfoLoading, setOwnerInfoLoading] = useState(false);
 
-  const [statusFilter, setStatusFilter] = useState<
-    TradeOffer["status"] | "all"
-  >("all");
+  const [statusFilter, setStatusFilter] = useState<TradeOffer["status"] | "all">("all");
   const [categoryFilter, setCategoryFilter] = useState("All");
 
   const [cancellingId, setCancellingId] = useState<string | null>(null);
@@ -560,18 +529,19 @@ export default function SentOffersScreen() {
   const [selectedOffer, setSelectedOffer] = useState<TradeOffer | null>(null);
   const [sheetVisible, setSheetVisible] = useState(false);
 
+  // ── Rating state ─────────────────────────────────────────────────────────
+  const [ratingTrade, setRatingTrade] = useState<TradeOffer | null>(null);
+
   const unsubRef = useRef<(() => void) | null>(null);
 
-  // ── Subscribe to sent offers ────────────────────────────────────────────
+  // ── Subscribe to sent offers ──────────────────────────────────────────────
   useEffect(() => {
     const uid = auth.currentUser?.uid;
     if (!uid || !offeredItemId) return;
 
     setOffersLoading(true);
     const unsub = subscribeToSentOffers(uid, (incoming) => {
-      const filtered = incoming.filter(
-        (o) => o.offeredItemId === offeredItemId,
-      );
+      const filtered = incoming.filter((o) => o.offeredItemId === offeredItemId);
       setAllOffers(filtered);
       setOffersLoading(false);
     });
@@ -582,12 +552,9 @@ export default function SentOffersScreen() {
     };
   }, [offeredItemId]);
 
-  // ── Fetch live owner info for every unique ownerId in the offer list ────
-  // Runs whenever allOffers changes. Only fetches IDs not yet in the map
-  // to avoid redundant network calls.
+  // ── Fetch owner info ──────────────────────────────────────────────────────
   useEffect(() => {
     if (allOffers.length === 0) return;
-
     const missingIds = [
       ...new Set(
         allOffers
@@ -595,7 +562,6 @@ export default function SentOffersScreen() {
           .filter((id): id is string => !!id && !ownerInfoMap[id]),
       ),
     ];
-
     if (missingIds.length === 0) return;
 
     setOwnerInfoLoading(true);
@@ -605,23 +571,16 @@ export default function SentOffersScreen() {
           const raw = await getUserInfo(id);
           return [id, resolveOwnerInfo(raw)] as [string, OwnerInfo];
         } catch {
-          // getUserInfo failed — keep whatever was on the offer doc
-          return [id, { name: "Item Owner", avatar: null }] as [
-            string,
-            OwnerInfo,
-          ];
+          return [id, { name: "Item Owner", avatar: null }] as [string, OwnerInfo];
         }
       }),
     ).then((entries) => {
-      setOwnerInfoMap((prev) => ({
-        ...prev,
-        ...Object.fromEntries(entries),
-      }));
+      setOwnerInfoMap((prev) => ({ ...prev, ...Object.fromEntries(entries) }));
       setOwnerInfoLoading(false);
     });
   }, [allOffers]);
 
-  // ── Category chips derived from live data ───────────────────────────────
+  // ── Category chips ────────────────────────────────────────────────────────
   const availableCategories = useMemo<string[]>(() => {
     const set = new Set<string>();
     for (const o of allOffers) {
@@ -632,26 +591,18 @@ export default function SentOffersScreen() {
   }, [allOffers]);
 
   useEffect(() => {
-    if (
-      categoryFilter !== "All" &&
-      !availableCategories.includes(categoryFilter)
-    ) {
+    if (categoryFilter !== "All" && !availableCategories.includes(categoryFilter)) {
       setCategoryFilter("All");
     }
   }, [availableCategories]);
 
-  // ── Helper: get resolved owner info for an offer ────────────────────────
   const getOwnerInfo = (offer: TradeOffer): OwnerInfo => {
     const id = (offer as any).ownerId as string | undefined;
     if (id && ownerInfoMap[id]) return ownerInfoMap[id];
-    // Fallback to data embedded in the offer doc (may be stale but better
-    // than blank). Never show an email address as a "name".
     const offerOwnerName = (offer as any).ownerName as string | undefined;
     const offerOwnerAvatar = (offer as any).ownerAvatar as string | undefined;
     const fallbackName =
-      offerOwnerName && !isEmailLike(offerOwnerName)
-        ? offerOwnerName
-        : "Item Owner";
+      offerOwnerName && !isEmailLike(offerOwnerName) ? offerOwnerName : "Item Owner";
     return {
       name: fallbackName,
       avatar:
@@ -663,7 +614,7 @@ export default function SentOffersScreen() {
     };
   };
 
-  // ── Detail sheet ────────────────────────────────────────────────────────
+  // ── Sheet helpers ─────────────────────────────────────────────────────────
   const openDetail = (offer: TradeOffer) => {
     setSelectedOffer(offer);
     setSheetVisible(true);
@@ -674,7 +625,7 @@ export default function SentOffersScreen() {
     setTimeout(() => setSelectedOffer(null), 300);
   };
 
-  // ── Actions ─────────────────────────────────────────────────────────────
+  // ── Actions ───────────────────────────────────────────────────────────────
   const handleCancel = async (offer: TradeOffer) => {
     if (cancellingId != null) return;
     setCancellingId(offer.id);
@@ -701,8 +652,6 @@ export default function SentOffersScreen() {
     }
   };
 
-  // FIX: was pushing to `/profile/${ownerId}` which doesn't exist.
-  // All other screens in the codebase use /user-profile + userId param.
   const handleViewProfile = (offer: TradeOffer) => {
     const ownerId = (offer as any).ownerId as string | undefined;
     if (!ownerId) return;
@@ -712,7 +661,13 @@ export default function SentOffersScreen() {
     }, 250);
   };
 
-  // ── Filtering ────────────────────────────────────────────────────────────
+  // Opens RatingModal — closes the detail sheet first so they don't stack
+  const handleRate = (offer: TradeOffer) => {
+    closeDetail();
+    setTimeout(() => setRatingTrade(offer), 320);
+  };
+
+  // ── Filtering ─────────────────────────────────────────────────────────────
   const filteredOffers = useMemo(() => {
     return allOffers.filter((o) => {
       const matchStatus = statusFilter === "all" || o.status === statusFilter;
@@ -735,6 +690,14 @@ export default function SentOffersScreen() {
   const decodedImage = offeredItemImage
     ? decodeURIComponent(offeredItemImage)
     : null;
+
+  // Derive ownerId + ownerName from ratingTrade for RatingModal
+  const ratingOwnerId = ratingTrade
+    ? ((ratingTrade as any).ownerId as string | undefined) ?? ""
+    : "";
+  const ratingOwnerName = ratingTrade
+    ? getOwnerInfo(ratingTrade).name
+    : "";
 
   return (
     <SafeAreaView style={styles.container}>
@@ -808,10 +771,7 @@ export default function SentOffersScreen() {
                 color={isActive ? "#fff" : color}
               />
               <Text
-                style={[
-                  styles.filterTabText,
-                  { color: isActive ? "#fff" : color },
-                ]}
+                style={[styles.filterTabText, { color: isActive ? "#fff" : color }]}
               >
                 {tab.label}
               </Text>
@@ -819,9 +779,7 @@ export default function SentOffersScreen() {
                 <View
                   style={[
                     styles.filterBadge,
-                    {
-                      backgroundColor: isActive ? "rgba(255,255,255,0.25)" : bg,
-                    },
+                    { backgroundColor: isActive ? "rgba(255,255,255,0.25)" : bg },
                   ]}
                 >
                   <Text
@@ -859,9 +817,7 @@ export default function SentOffersScreen() {
                 onPress={() => setCategoryFilter(cat)}
                 activeOpacity={0.7}
               >
-                {isActive && (
-                  <Ionicons name="pricetag" size={11} color="#fff" />
-                )}
+                {isActive && <Ionicons name="pricetag" size={11} color="#fff" />}
                 <Text
                   style={[
                     styles.categoryChipText,
@@ -924,6 +880,7 @@ export default function SentOffersScreen() {
               onCancel={() => handleCancel(offer)}
               onComplete={() => handleComplete(offer)}
               onMessage={() => setChatTrade(offer)}
+              onRate={() => handleRate(offer)}
               onPress={() => openDetail(offer)}
               onViewProfile={() => handleViewProfile(offer)}
             />
@@ -934,7 +891,11 @@ export default function SentOffersScreen() {
       {/* ── Detail Bottom Sheet ── */}
       <OfferDetailSheet
         offer={selectedOffer}
-        ownerInfo={selectedOffer ? getOwnerInfo(selectedOffer) : { name: "Item Owner", avatar: null }}
+        ownerInfo={
+          selectedOffer
+            ? getOwnerInfo(selectedOffer)
+            : { name: "Item Owner", avatar: null }
+        }
         visible={sheetVisible}
         onClose={closeDetail}
         onMessage={() => {
@@ -944,6 +905,7 @@ export default function SentOffersScreen() {
         onViewProfile={() => selectedOffer && handleViewProfile(selectedOffer)}
         onComplete={() => selectedOffer && handleComplete(selectedOffer)}
         onCancel={() => selectedOffer && handleCancel(selectedOffer)}
+        onRate={() => selectedOffer && handleRate(selectedOffer)}
         completingId={completingId}
         cancellingId={cancellingId}
       />
@@ -955,6 +917,17 @@ export default function SentOffersScreen() {
         isOwner={false}
         onClose={() => setChatTrade(null)}
         onStatusChange={() => {}}
+      />
+
+      {/* ── Rating Modal ── */}
+      <RatingModal
+        visible={!!ratingTrade}
+        tradeId={ratingTrade?.id ?? ""}
+        currentUserUid={auth.currentUser?.uid ?? ""}
+        otherUserUid={ratingOwnerId}
+        otherUserName={ratingOwnerName}
+        onClose={() => setRatingTrade(null)}
+        onSubmitted={() => setRatingTrade(null)}
       />
     </SafeAreaView>
   );
@@ -969,6 +942,7 @@ function SentOfferCard({
   onCancel,
   onComplete,
   onMessage,
+  onRate,
   onPress,
   onViewProfile,
 }: {
@@ -979,6 +953,7 @@ function SentOfferCard({
   onCancel: () => void;
   onComplete: () => void;
   onMessage: () => void;
+  onRate: () => void;
   onPress: () => void;
   onViewProfile: () => void;
 }) {
@@ -998,6 +973,9 @@ function SentOfferCard({
     "";
   const otherHasConfirmed = completedBy.includes(otherUid) && !iHaveConfirmed;
 
+  const reviews: Record<string, any> = (offer as any).reviews ?? {};
+  const alreadyReviewed = !!reviews[myUid];
+
   return (
     <TouchableOpacity
       style={[styles.card, { borderColor: statusStyle.border }]}
@@ -1006,14 +984,9 @@ function SentOfferCard({
     >
       {/* Status pill + category badge */}
       <View style={styles.cardTopRow}>
-        <View
-          style={[styles.cardStatusPill, { backgroundColor: statusStyle.bg }]}
-        >
+        <View style={[styles.cardStatusPill, { backgroundColor: statusStyle.bg }]}>
           <View
-            style={[
-              styles.cardStatusDot,
-              { backgroundColor: statusStyle.text },
-            ]}
+            style={[styles.cardStatusDot, { backgroundColor: statusStyle.text }]}
           />
           <Text style={[styles.cardStatusText, { color: statusStyle.text }]}>
             {offer.status.charAt(0).toUpperCase() + offer.status.slice(1)}
@@ -1030,17 +1003,14 @@ function SentOfferCard({
         )}
       </View>
 
-      {/* ── Owner row — tappable, wired to live owner info ── */}
+      {/* Owner row */}
       <TouchableOpacity
         style={styles.ownerRow}
         onPress={onViewProfile}
         activeOpacity={0.75}
       >
         {ownerInfo.avatar ? (
-          <Image
-            source={{ uri: ownerInfo.avatar }}
-            style={styles.ownerAvatar}
-          />
+          <Image source={{ uri: ownerInfo.avatar }} style={styles.ownerAvatar} />
         ) : (
           <View style={[styles.ownerAvatar, styles.ownerAvatarFallback]}>
             <Text style={styles.ownerAvatarInitial}>
@@ -1071,9 +1041,7 @@ function SentOfferCard({
       {/* Items swap row */}
       <View style={styles.swapRow}>
         <Image
-          source={{
-            uri: offer.offeredItemImage || "https://via.placeholder.com/60",
-          }}
+          source={{ uri: offer.offeredItemImage || "https://via.placeholder.com/60" }}
           style={styles.swapImage}
         />
         <View style={{ flex: 1 }}>
@@ -1104,11 +1072,7 @@ function SentOfferCard({
       {/* Decline reason */}
       {offer.status === "declined" && (offer as any).declineReason && (
         <View style={styles.declineReasonBox}>
-          <Ionicons
-            name="information-circle-outline"
-            size={12}
-            color="#E11D48"
-          />
+          <Ionicons name="information-circle-outline" size={12} color="#E11D48" />
           <Text style={styles.declineReasonText} numberOfLines={2}>
             Reason: {(offer as any).declineReason}
           </Text>
@@ -1128,11 +1092,7 @@ function SentOfferCard({
               <ActivityIndicator size="small" color="#E11D48" />
             ) : (
               <>
-                <Ionicons
-                  name="close-circle-outline"
-                  size={14}
-                  color="#E11D48"
-                />
+                <Ionicons name="close-circle-outline" size={14} color="#E11D48" />
                 <Text style={styles.cancelBtnText}>Cancel Offer</Text>
               </>
             )}
@@ -1188,6 +1148,18 @@ function SentOfferCard({
             <Ionicons name="trophy" size={14} color="#16A34A" />
             <Text style={styles.completedBadgeText}>Completed</Text>
           </View>
+        )}
+
+        {/* Rate button on card — only for completed + not yet reviewed */}
+        {isCompleted && !alreadyReviewed && (
+          <TouchableOpacity
+            style={styles.rateBtn}
+            onPress={onRate}
+            activeOpacity={0.85}
+          >
+            <Ionicons name="star" size={14} color="#FFB800" />
+            <Text style={styles.rateBtnText}>Rate</Text>
+          </TouchableOpacity>
         )}
       </View>
     </TouchableOpacity>
@@ -1353,11 +1325,7 @@ const sheetStyles = StyleSheet.create({
     justifyContent: "center",
     alignItems: "center",
   },
-  ownerAvatarInitial: {
-    color: "#fff",
-    fontSize: 18,
-    fontWeight: "700",
-  },
+  ownerAvatarInitial: { color: "#fff", fontSize: 18, fontWeight: "700" },
   ownerName: { fontSize: 15, fontWeight: "700", color: "#111827" },
   ownerSub: { fontSize: 12, color: "#9CA3AF", marginTop: 2 },
   profileChevron: {
@@ -1451,6 +1419,30 @@ const sheetStyles = StyleSheet.create({
     backgroundColor: "#F0FDF4",
   },
   completedBadgeText: { fontSize: 14, fontWeight: "700", color: "#16A34A" },
+  // Rate button — full width, amber accent
+  rateBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 7,
+    paddingVertical: 13,
+    borderRadius: 12,
+    borderWidth: 1.5,
+    borderColor: "#FCD34D",
+    backgroundColor: "#FFFBEB",
+  },
+  rateBtnText: { fontSize: 14, fontWeight: "700", color: "#B45309" },
+  // "Already reviewed" badge
+  ratedBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 7,
+    paddingVertical: 11,
+    borderRadius: 12,
+    backgroundColor: "#FFFBEB",
+  },
+  ratedBadgeText: { fontSize: 13, fontWeight: "600", color: "#B45309" },
 });
 
 // ── Main screen styles ─────────────────────────────────────────────────────────
@@ -1547,11 +1539,7 @@ const styles = StyleSheet.create({
   },
   filterBadgeText: { fontSize: 9, fontWeight: "800" },
   categoryBar: { maxHeight: 44, marginBottom: 4 },
-  categoryBarContent: {
-    paddingHorizontal: 16,
-    gap: 6,
-    alignItems: "center",
-  },
+  categoryBarContent: { paddingHorizontal: 16, gap: 6, alignItems: "center" },
   categoryChip: {
     flexDirection: "row",
     alignItems: "center",
@@ -1654,18 +1642,8 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     backgroundColor: "#E5E7EB",
   },
-  swapMeta: {
-    fontSize: 10,
-    color: "#9CA3AF",
-    marginBottom: 2,
-    fontWeight: "600",
-  },
-  swapTitle: {
-    fontSize: 12,
-    fontWeight: "700",
-    color: "#1A1A2E",
-    lineHeight: 17,
-  },
+  swapMeta: { fontSize: 10, color: "#9CA3AF", marginBottom: 2, fontWeight: "600" },
+  swapTitle: { fontSize: 12, fontWeight: "700", color: "#1A1A2E", lineHeight: 17 },
   swapRightSide: { flex: 1 },
   messageBox: {
     flexDirection: "row",
@@ -1699,7 +1677,7 @@ const styles = StyleSheet.create({
     lineHeight: 16,
     fontWeight: "500",
   },
-  actions: { flexDirection: "row", gap: 8, alignItems: "center" },
+  actions: { flexDirection: "row", gap: 8, alignItems: "center", flexWrap: "wrap" },
   cancelBtn: {
     flex: 1,
     flexDirection: "row",
@@ -1739,16 +1717,30 @@ const styles = StyleSheet.create({
   completeBtnHighlight: { backgroundColor: "#0F9D58" },
   completeBtnText: { fontSize: 12, fontWeight: "700", color: "#fff" },
   completedBadge: {
-    flex: 1,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
     gap: 5,
     paddingVertical: 9,
+    paddingHorizontal: 12,
     borderRadius: 10,
     backgroundColor: "#F0FDF4",
   },
   completedBadgeText: { fontSize: 12, fontWeight: "700", color: "#16A34A" },
+  // Rate button on card — compact, sits next to "Completed" badge
+  rateBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 5,
+    paddingVertical: 9,
+    paddingHorizontal: 14,
+    borderRadius: 10,
+    borderWidth: 1.5,
+    borderColor: "#FCD34D",
+    backgroundColor: "#FFFBEB",
+  },
+  rateBtnText: { fontSize: 12, fontWeight: "700", color: "#B45309" },
   centered: {
     flex: 1,
     alignItems: "center",
