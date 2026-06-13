@@ -1,7 +1,7 @@
 import { Ionicons } from "@expo/vector-icons";
 import { Audio } from "expo-av";
 import * as Clipboard from "expo-clipboard";
-import * as FileSystem from "expo-file-system";
+import * as FileSystem from "expo-file-system/legacy";
 import * as ImagePicker from "expo-image-picker";
 import * as MediaLibrary from "expo-media-library";
 import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
@@ -18,7 +18,6 @@ import {
   Modal,
   Platform,
   Pressable,
-  SafeAreaView,
   ScrollView,
   StyleSheet,
   Text,
@@ -26,7 +25,7 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { auth } from "../firebaseConfig";
 import { getUserInfo } from "../services/itemService";
 import {
@@ -53,6 +52,8 @@ const DELETE_WINDOW_MS = 15 * 60 * 1000;
 const { height: SCREEN_HEIGHT, width: SCREEN_WIDTH } = Dimensions.get("window");
 const TIME_CLUSTER_MINUTES = 5;
 const MEDIA_BUBBLE_WIDTH = Math.min(240, SCREEN_WIDTH * 0.65);
+const MEDIA_BUBBLE_MAX_HEIGHT = MEDIA_BUBBLE_WIDTH * 1.4;
+const MEDIA_BUBBLE_MIN_HEIGHT = MEDIA_BUBBLE_WIDTH * 0.6;
 
 const SUGGESTED_MESSAGES = [
   "Is this still available?",
@@ -425,8 +426,6 @@ function EditMessageModal({
   onCancel: () => void;
 }) {
   const [text, setText] = useState(initialText);
-
-  // ── Android keyboard fix (same technique as TradeChatModal) ──────────────
   const [androidKeyboardHeight, setAndroidKeyboardHeight] = useState(0);
 
   useEffect(() => {
@@ -568,7 +567,8 @@ function ReactionsModal({ visible, emoji, userIds, userInfoMap, onClose }: {
           <ScrollView style={reactModal.list}>
             {userIds.map((userId) => {
               const info = userInfoMap[userId];
-              const name = info?.displayName || info?.username || "User";
+              const rawName = info?.displayName || info?.username || "User";
+              const name = rawName.includes("@") ? "User" : rawName;
               return (
                 <View key={userId} style={reactModal.userRow}>
                   <AvatarWithFallback uri={resolveAvatar(info)} name={name} size={36} fallbackFontSize={16} />
@@ -692,12 +692,35 @@ const vr = StyleSheet.create({
 });
 
 // ─── PhotoBubble ──────────────────────────────────────────────────────────────
+// Preserves the photo's natural aspect ratio (no longer forces a square crop),
+// clamped between a min/max height so very tall or wide images stay readable.
 function PhotoBubble({ uri, isMe }: { uri: string; isMe: boolean }) {
   const [fullscreen, setFullscreen] = useState(false);
+  const [bubbleHeight, setBubbleHeight] = useState(MEDIA_BUBBLE_WIDTH);
+
+  useEffect(() => {
+    let cancelled = false;
+    Image.getSize(
+      uri,
+      (w, h) => {
+        if (cancelled || !w || !h) return;
+        const ratio = w / h;
+        const height = MEDIA_BUBBLE_WIDTH / ratio;
+        setBubbleHeight(Math.min(Math.max(height, MEDIA_BUBBLE_MIN_HEIGHT), MEDIA_BUBBLE_MAX_HEIGHT));
+      },
+      () => { /* ignore errors, keep default square */ },
+    );
+    return () => { cancelled = true; };
+  }, [uri]);
+
   return (
     <>
       <TouchableOpacity onPress={() => setFullscreen(true)} activeOpacity={0.92}
-        style={[mediaBubble.wrap, isMe ? mediaBubble.wrapRight : mediaBubble.wrapLeft]}>
+        style={[
+          mediaBubble.wrap,
+          isMe ? mediaBubble.wrapRight : mediaBubble.wrapLeft,
+          { height: bubbleHeight },
+        ]}>
         <Image source={{ uri }} style={mediaBubble.img} resizeMode="cover" />
       </TouchableOpacity>
       <Modal visible={fullscreen} transparent animationType="fade" onRequestClose={() => setFullscreen(false)}>
@@ -734,19 +757,25 @@ function VideoPlayerWrapper({ uri }: { uri: string }) {
 }
 
 // ─── VideoBubble ──────────────────────────────────────────────────────────────
+// Uses a non-square (portrait-leaning) default ratio for the thumbnail so video
+// bubbles match the look of typical phone-recorded clips instead of a square.
 function VideoBubble({ uri, isMe }: { uri: string; isMe: boolean }) {
   const [fullscreen, setFullscreen] = useState(false);
   const isBlob = uri?.startsWith("blob:");
+  const bubbleHeight = MEDIA_BUBBLE_WIDTH * (4 / 3);
 
   return (
     <>
       <TouchableOpacity
         onPress={() => setFullscreen(true)}
         activeOpacity={0.92}
-        style={[mediaBubble.wrap, isMe ? mediaBubble.wrapRight : mediaBubble.wrapLeft]}
+        style={[
+          mediaBubble.wrap,
+          isMe ? mediaBubble.wrapRight : mediaBubble.wrapLeft,
+          { height: Math.min(bubbleHeight, MEDIA_BUBBLE_MAX_HEIGHT) },
+        ]}
       >
         <View style={mediaBubble.videoThumb}>
-          {/* Never use blob URIs as Image source — just show play icon */}
           {!isBlob && Platform.OS !== "web" ? (
             <Image source={{ uri }} style={StyleSheet.absoluteFill} resizeMode="cover" />
           ) : null}
@@ -779,7 +808,7 @@ function VideoBubble({ uri, isMe }: { uri: string; isMe: boolean }) {
 }
 
 const mediaBubble = StyleSheet.create({
-  wrap: { borderRadius: 14, overflow: "hidden", width: MEDIA_BUBBLE_WIDTH, height: MEDIA_BUBBLE_WIDTH },
+  wrap: { borderRadius: 14, overflow: "hidden", width: MEDIA_BUBBLE_WIDTH },
   wrapRight: { borderBottomRightRadius: 4 },
   wrapLeft: { borderBottomLeftRadius: 4 },
   img: { width: "100%", height: "100%" },
@@ -868,7 +897,7 @@ const vm = StyleSheet.create({
 // ─── Main Screen ──────────────────────────────────────────────────────────────
 export default function ChatScreen() {
   const router = useRouter();
-  const { ownerUserId, itemId, itemTitle } = useLocalSearchParams();
+  const { ownerUserId, itemId, itemTitle, itemImage } = useLocalSearchParams();
   const insets = useSafeAreaInsets();
 
   // ── Core state ──
@@ -920,12 +949,21 @@ export default function ChatScreen() {
     [currentUserId, ownerUserId],
   );
 
-  const ownerFirstName = useMemo(() => {
-    const name = ownerInfo?.displayName || ownerInfo?.username || "User";
-    return name.split(" ")[0];
+  // ── Resolve display name — strip emails ──
+  const ownerName = useMemo(() => {
+    if (ownerInfo?.firstName && ownerInfo?.lastName)
+      return `${ownerInfo.firstName.trim()} ${ownerInfo.lastName.trim()}`;
+    const raw =
+      ownerInfo?.displayName?.trim() ||
+      ownerInfo?.name?.trim() ||
+      ownerInfo?.fullName?.trim() ||
+      ownerInfo?.username?.trim() ||
+      "";
+    return raw.includes("@") ? "User" : raw || "User";
   }, [ownerInfo]);
 
-  const ownerName = ownerInfo?.username || ownerInfo?.displayName || "User";
+  const ownerFirstName = useMemo(() => ownerName.split(" ")[0], [ownerName]);
+
   const avatarUri = resolveAvatar(ownerInfo);
 
   // ── Focus effect ──
@@ -1223,7 +1261,6 @@ export default function ChatScreen() {
   // ── Save media to device ──
   const handleSaveMedia = async (msg: any) => {
     if (Platform.OS === "web") {
-      // Web: open in new tab for manual save
       window.open(msg.mediaUrl, "_blank");
       return;
     }
@@ -1327,7 +1364,7 @@ export default function ChatScreen() {
     options.push({ label: "Delete Conversation", icon: "trash-outline", destructive: true,
       onPress: () => setDeleteConvModalVisible(true),
     });
-    openSheet(ownerInfo?.username || ownerInfo?.displayName || "Options", options);
+    openSheet(ownerName || "Options", options);
   };
 
   const confirmDeleteConversation = async () => {
@@ -1512,6 +1549,12 @@ export default function ChatScreen() {
 
   const ctxIsMe = ctxMessage ? ctxMessage.senderId === currentUserId || ctxMessage.sender === "me" : false;
 
+  // ── Resolve current user display name safely ──
+  const myDisplayName = (() => {
+    const raw = auth.currentUser?.displayName ?? "";
+    return raw.includes("@") ? "You" : raw || "You";
+  })();
+
   // ── Render ──
   return (
     <SafeAreaView style={styles.container} edges={["top", "left", "right"]}>
@@ -1523,7 +1566,7 @@ export default function ChatScreen() {
         visible={reactionsModalVisible} emoji={reactionsModalEmoji}
         userIds={reactionsModalUserIds}
         userInfoMap={{
-          [currentUserId ?? ""]: { displayName: auth.currentUser?.displayName || "You", username: auth.currentUser?.displayName?.split(" ")[0] || "You", photoURL: auth.currentUser?.photoURL },
+          [currentUserId ?? ""]: { displayName: myDisplayName, photoURL: auth.currentUser?.photoURL },
           [ownerUserId as string]: ownerInfo,
         }}
         onClose={() => setReactionsModalVisible(false)}
@@ -1583,10 +1626,16 @@ export default function ChatScreen() {
         </View>
       )}
 
+      {/* Marketplace listing card — shown when arriving from a trade offer / listing chat */}
       {itemTitle && !multiSelect && (
         <View style={styles.offerCard}>
-          <Text style={styles.offerLabel}>Interested in:</Text>
-          <Text style={styles.offerTitle}>{itemTitle as string}</Text>
+          {itemImage ? (
+            <Image source={{ uri: itemImage as string }} style={styles.offerImage} resizeMode="cover" />
+          ) : null}
+          <View style={styles.offerTextWrap}>
+            <Text style={styles.offerLabel}>Marketplace listing</Text>
+            <Text style={styles.offerTitle} numberOfLines={2}>{itemTitle as string}</Text>
+          </View>
         </View>
       )}
 
@@ -1696,7 +1745,9 @@ const styles = StyleSheet.create({
   headerStatus: { color: "#ccc", fontSize: 11, marginTop: 1 },
   mutedBadge: { flexDirection: "row", alignItems: "center", backgroundColor: "rgba(255,255,255,0.2)", borderRadius: 10, paddingHorizontal: 6, paddingVertical: 2, gap: 3 },
   mutedBadgeText: { color: "#fff", fontSize: 10, fontWeight: "600" },
-  offerCard: { paddingHorizontal: 16, paddingVertical: 10, backgroundColor: "#fff", borderBottomWidth: 1, borderBottomColor: "#eee" },
+  offerCard: { flexDirection: "row", alignItems: "center", paddingHorizontal: 16, paddingVertical: 10, backgroundColor: "#fff", borderBottomWidth: 1, borderBottomColor: "#eee", gap: 10 },
+  offerImage: { width: 44, height: 44, borderRadius: 8, backgroundColor: "#eee" },
+  offerTextWrap: { flex: 1 },
   offerLabel: { fontSize: 11, color: "#999", marginBottom: 2 },
   offerTitle: { fontSize: 14, fontWeight: "700", color: "#111" },
   messagesList: { paddingVertical: 12, paddingHorizontal: 8, paddingBottom: 100, flexGrow: 1 },

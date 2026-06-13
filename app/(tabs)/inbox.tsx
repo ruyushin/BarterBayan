@@ -17,7 +17,6 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
-import { TradeChatModal } from "../../components/TradeChatModal";
 import { auth } from "../../firebaseConfig";
 import { badgeStore } from "../../services/badgeStore";
 import { getUserInfo } from "../../services/itemService";
@@ -42,7 +41,7 @@ import {
   addNotificationListeners,
   registerForPushNotificationsAsync,
 } from "../../services/pushNotificationService";
-import { TradeOffer, getTradeOffer } from "../../services/tradeService";
+import { getTradeOffer } from "../../services/tradeService";
 
 // ─── Constants
 const NAVY = "#2e2d7c";
@@ -68,6 +67,10 @@ interface Notification {
   tradeId?: string;
   conversationId?: string;
   otherUserId?: string;
+  senderId?: string;
+  // resolved at runtime — not stored in Firestore
+  _resolvedName?: string;
+  _resolvedAvatar?: string | null;
 }
 
 interface SheetOption {
@@ -150,15 +153,43 @@ const resolveAvatar = (info: any): string | null => {
   return null;
 };
 
-// Prioritises the human-readable profile name over the @username handle.
+/**
+ * Resolve a human-readable display name from a Firestore user doc.
+ * Firebase Auth sometimes writes the user's email into `displayName`,
+ * so we strip anything that looks like an email address.
+ */
 const resolveDisplayName = (info: any): string => {
-  return (
+  const raw =
     info?.displayName?.trim() ||
     info?.name?.trim() ||
     info?.fullName?.trim() ||
     info?.username?.trim() ||
-    ""
-  );
+    "";
+  // If the resolved value looks like an email, discard it
+  if (raw.includes("@")) return "";
+  return raw;
+};
+
+/**
+ * Build the best possible display name for a user doc, with a fallback.
+ */
+const buildDisplayName = (info: any, fallback = "User"): string => {
+  if (info?.firstName && info?.lastName)
+    return `${info.firstName.trim()} ${info.lastName.trim()}`;
+  const resolved = resolveDisplayName(info);
+  return resolved || fallback;
+};
+
+/**
+ * Replace placeholder words like "Someone" / "A user" in a notification
+ * body string with the given real name.
+ */
+const injectNameIntoBody = (body: string, name: string): string => {
+  if (!name || name === "User") return body;
+  return body
+    .replace(/\bSomeone\b/gi, name)
+    .replace(/\bA user\b/gi, name)
+    .replace(/\bsomeone\b/gi, name);
 };
 
 function AvatarWithFallback({
@@ -218,7 +249,7 @@ function NotifAvatarWithFallback({
   title,
   type,
 }: {
-  uri?: string;
+  uri?: string | null;
   title: string;
   type: NotifType;
 }) {
@@ -374,14 +405,11 @@ export default function InboxScreen() {
   const [selectionMode, setSelectionMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
 
-  // ── TradeChatModal state
-  const [tradeChatVisible, setTradeChatVisible] = useState(false);
-  const [tradeChatOffer, setTradeChatOffer] = useState<TradeOffer | null>(null);
+  // ── TradeChatModal state (kept for push-notification deep-links)
   const [tradeChatLoading, setTradeChatLoading] = useState(false);
 
   const router = useRouter();
   const currentUserId = auth.currentUser?.uid;
-  const conversationUnsubscribeRef = useRef<(() => void) | null>(null);
   const notificationListenerCleanup = useRef<(() => void) | null>(null);
 
   const openSheet = (title: string | undefined, options: SheetOption[]) => {
@@ -422,8 +450,8 @@ export default function InboxScreen() {
               () => null,
             );
             const avatarUri = resolveAvatar(userInfo);
-            // Use display name from profile, not the @username handle
-            const displayName = resolveDisplayName(userInfo) || "User";
+            // Strip email-looking values; fall back to "User"
+            const displayName = buildDisplayName(userInfo, "User");
             const unreadCount = await getUnreadMessageCount(
               conv.id,
               currentUserId!,
@@ -473,11 +501,37 @@ export default function InboxScreen() {
     }
   }, [currentUserId]);
 
+  /**
+   * Load notifications, then for each one that has a senderId / otherUserId,
+   * fetch the user's real display name and avatar so we can replace "Someone".
+   */
   const loadNotifications = useCallback(async () => {
     try {
       setNotifLoading(true);
-      const data = await getNotifications(currentUserId!);
-      setNotifications(data ?? []);
+      const raw: Notification[] = (await getNotifications(currentUserId!)) ?? [];
+
+      // Enrich in parallel — resolve the sender name for every notif that has
+      // a user id attached to it.
+      const enriched = await Promise.all(
+        raw.map(async (notif) => {
+          const userId = notif.senderId || notif.otherUserId;
+          if (!userId) return notif;
+          try {
+            const info = await getUserInfo(userId);
+            const name = buildDisplayName(info, "");
+            const avatar = resolveAvatar(info);
+            return {
+              ...notif,
+              _resolvedName: name || undefined,
+              _resolvedAvatar: avatar,
+            };
+          } catch {
+            return notif;
+          }
+        }),
+      );
+
+      setNotifications(enriched);
     } catch (err) {
       console.error("Error loading notifications:", err);
       setNotifications([]);
@@ -502,14 +556,25 @@ export default function InboxScreen() {
     }
   };
 
-  // ─── Open trade chat helper
+  // ─── Open trade — redirect to chat instead of modal
   const openTradeChat = async (tradeId: string) => {
     setTradeChatLoading(true);
     try {
       const trade = await getTradeOffer(tradeId);
       if (trade) {
-        setTradeChatOffer(trade);
-        setTradeChatVisible(true);
+        // Determine the other party's userId
+        const otherUserId =
+          auth.currentUser?.uid === trade.ownerId
+            ? trade.offererId
+            : trade.ownerId;
+        router.push({
+          pathname: "/chat",
+          params: {
+            ownerUserId: otherUserId,
+            itemId: trade.requestedItemId ?? trade.offeredItemId,
+            itemTitle: trade.requestedItemTitle ?? trade.offeredItemTitle,
+          },
+        });
       } else {
         Alert.alert("Not found", "This trade could not be loaded.");
       }
@@ -523,7 +588,6 @@ export default function InboxScreen() {
 
   // ─── Notification press
   const handleNotifPress = async (item: Notification) => {
-    console.log("NOTIF TAPPED type=" + item.type + " tradeId=" + item.tradeId);
     if (selectionMode) {
       toggleSelect(item.id);
       return;
@@ -546,10 +610,10 @@ export default function InboxScreen() {
         router.push({ pathname: "/trade", params: {} });
         break;
       case "message":
-        if (item.otherUserId) {
+        if (item.otherUserId || item.senderId) {
           router.push({
             pathname: "/chat",
-            params: { ownerUserId: item.otherUserId },
+            params: { ownerUserId: item.otherUserId ?? item.senderId },
           });
         }
         break;
@@ -898,6 +962,21 @@ export default function InboxScreen() {
 
   const renderNotification = ({ item }: { item: Notification }) => {
     const isSelected = selectedIds.has(item.id);
+
+    // Use the runtime-resolved name if available, otherwise fall back to
+    // whatever was stored in the notification document's title field.
+    const senderName = item._resolvedName || "";
+    const displayTitle = senderName || item.title;
+    // Inject the real name into body text that says "Someone" etc.
+    const displayBody = senderName
+      ? injectNameIntoBody(item.body, senderName)
+      : item.body;
+    // Prefer the freshly-resolved avatar over the stored one
+    const avatarUri =
+      item._resolvedAvatar !== undefined
+        ? item._resolvedAvatar
+        : item.avatar ?? null;
+
     return (
       <TouchableOpacity
         style={[
@@ -917,18 +996,18 @@ export default function InboxScreen() {
         )}
         <View style={styles.notifIconWrap}>
           <NotifAvatarWithFallback
-            uri={item.avatar}
-            title={item.title}
+            uri={avatarUri}
+            title={displayTitle}
             type={item.type}
           />
           {!item.read && <View style={styles.unreadBadge} />}
         </View>
         <View style={styles.notifContent}>
           <Text style={styles.notifTitle} numberOfLines={1}>
-            {item.title}
+            {displayTitle}
           </Text>
           <Text style={styles.notifBody} numberOfLines={2}>
-            {item.body}
+            {displayBody}
           </Text>
           {formatTime(item.createdAt) ? (
             <Text style={styles.notifTime}>{formatTime(item.createdAt)}</Text>
@@ -1236,25 +1315,6 @@ export default function InboxScreen() {
           )}
         </View>
       </View>
-
-      {/* TradeChatModal */}
-      <TradeChatModal
-        visible={tradeChatVisible}
-        trade={tradeChatOffer}
-        isOwner={
-          tradeChatOffer != null &&
-          auth.currentUser?.uid === tradeChatOffer.ownerId
-        }
-        onClose={() => {
-          setTradeChatVisible(false);
-          setTradeChatOffer(null);
-        }}
-        onStatusChange={(tradeId, newStatus) => {
-          setTradeChatOffer((prev) =>
-            prev ? { ...prev, status: newStatus } : prev,
-          );
-        }}
-      />
     </SafeAreaView>
   );
 }

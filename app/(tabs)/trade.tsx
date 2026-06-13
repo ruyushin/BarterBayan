@@ -9,7 +9,9 @@ import {
   KeyboardAvoidingView,
   Modal,
   Platform,
+  Pressable,
   SafeAreaView,
+  ScrollView,
   StyleSheet,
   Text,
   TextInput,
@@ -56,6 +58,20 @@ type TradeSortType = (typeof TRADE_SORT_CYCLE)[number];
 
 const OFFER_SORT_OPTIONS = ["Default", "Recent"] as const;
 type OfferSortValue = "default" | "recent";
+
+// Status filter tabs for "Your Offers"
+const OFFER_STATUS_TABS: {
+  key: TradeOffer["status"] | "all";
+  label: string;
+  icon: string;
+}[] = [
+  { key: "all", label: "All", icon: "layers-outline" },
+  { key: "pending", label: "Pending", icon: "time-outline" },
+  { key: "accepted", label: "Accepted", icon: "checkmark-circle-outline" },
+  { key: "completed", label: "Completed", icon: "trophy-outline" },
+  { key: "declined", label: "Declined", icon: "close-circle-outline" },
+  { key: "cancelled", label: "Cancelled", icon: "ban-outline" },
+];
 
 function dominantStatus(offers: TradeOffer[]): TradeOffer["status"] | null {
   for (const s of STATUS_PRIORITY) {
@@ -337,6 +353,7 @@ export default function TradeScreen() {
   const [offerSearch, setOfferSearch] = useState("");
   const [offerCategoryFilter, setOfferCategoryFilter] = useState("All");
   const [offerSortValue, setOfferSortValue] = useState<OfferSortValue>("default");
+  const [offerStatusFilter, setOfferStatusFilter] = useState<TradeOffer["status"] | "all">("all");
   const [isOfferSortOpen, setIsOfferSortOpen] = useState(false);
   const [isOfferFilterOpen, setIsOfferFilterOpen] = useState(false);
 
@@ -407,6 +424,7 @@ export default function TradeScreen() {
     setIsOfferFilterOpen(false);
     setIsFilterOpen(false);
     setIsSortOpen(false);
+    setOfferStatusFilter("all");
   };
 
   const handleAddItemPress = () => {
@@ -427,6 +445,13 @@ export default function TradeScreen() {
   // ─────────────────────────────────────────────────────────────────────────
   // Your Trades — filtered + sorted
   // ─────────────────────────────────────────────────────────────────────────
+
+  const SORT_OPTIONS: { value: TradeSortType; label: string }[] = [
+    { value: "none", label: "Default" },
+    { value: "recent", label: "Recent" },
+    { value: "likes", label: "Likes" },
+    { value: "name", label: "A-Z" },
+  ];
 
   const SORT_LABEL: Record<TradeSortType, string> = {
     none: "Default",
@@ -566,6 +591,10 @@ export default function TradeScreen() {
     latestAt: number;
   };
 
+  // IDs of posts you currently still have. Used to detect offers that point
+  // at a post you've since deleted, so they can be dropped from "Your Offers".
+  const myItemIds = new Set(userItems.map((i) => i.id));
+
   const offeredItemGroups: OfferGroup[] = (() => {
     const map = new Map<string, OfferGroup>();
 
@@ -602,18 +631,39 @@ export default function TradeScreen() {
 
     return Array.from(map.values())
       .filter((g) => {
+        // If the post this offer was made with has been deleted, drop it
+        // from "Your Offers". Skip this check while userItems is still
+        // loading so groups don't briefly disappear on first render.
+        if (!loading && g.itemId && !myItemIds.has(g.itemId)) return false;
+
         const matchSearch =
           offerSearch.length === 0 ||
           g.title.toLowerCase().includes(offerSearch.toLowerCase());
         const matchCat =
           offerCategoryFilter === "All" ||
           g.categorySet.has(offerCategoryFilter);
-        return matchSearch && matchCat;
+        const matchStatus =
+          offerStatusFilter === "all" ||
+          g.offers.some((o) => o.status === offerStatusFilter);
+        return matchSearch && matchCat && matchStatus;
       })
       .sort((a, b) => (offerSortValue === "recent" ? b.latestAt - a.latestAt : 0));
   })();
 
-  const pendingCount = sentOffers.filter((o) => o.status === "pending").length;
+  // Offers tied to posts that still exist — used for the status tab counts
+  // so the numbers match what "Your Offers" actually shows.
+  const activeSentOffers = sentOffers.filter(
+    (o) => loading || !o.offeredItemId || myItemIds.has(o.offeredItemId),
+  );
+
+  const pendingCount = activeSentOffers.filter(
+    (o) => o.status === "pending",
+  ).length;
+
+  const countOffersForStatus = (key: TradeOffer["status"] | "all") =>
+    key === "all"
+      ? activeSentOffers.length
+      : activeSentOffers.filter((o) => o.status === key).length;
 
   // ─────────────────────────────────────────────────────────────────────────
   // Render helpers
@@ -716,7 +766,7 @@ export default function TradeScreen() {
         style={styles.tradeItemWrapper}
         onPress={() =>
           router.push({
-            pathname: `/sent-offers/${group.itemId}`,
+            pathname: `/sent-offers/${group.itemId}` as any,
             params: {
               offeredItemId: group.itemId,
               offeredItemTitle: encodeURIComponent(group.title),
@@ -832,7 +882,7 @@ export default function TradeScreen() {
               activeTab === "trades" ? styles.activeText : styles.inactiveText
             }
           >
-            Your Trades
+            Your Posts
           </Text>
         </TouchableOpacity>
 
@@ -916,88 +966,112 @@ export default function TradeScreen() {
               </View>
             </View>
           ) : (
-            <View style={styles.row}>
+            <View style={styles.filterRow}>
               {/* Sort dropdown */}
-              <View>
-                <TouchableOpacity
-                  style={styles.smallButton}
-                  onPress={() => {
-                    setIsSortOpen((p) => !p);
-                    setIsFilterOpen(false);
-                  }}
+              <Pressable
+                style={[
+                  styles.filterBtn,
+                  sortType !== "none" && styles.filterBtnActive,
+                ]}
+                onPress={() => {
+                  setIsSortOpen((p) => !p);
+                  setIsFilterOpen(false);
+                }}
+              >
+                <Ionicons
+                  name="swap-vertical"
+                  size={13}
+                  color={sortType !== "none" ? "#fff" : NAVY}
+                />
+                <Text
+                  style={[
+                    styles.filterText,
+                    sortType !== "none" && styles.filterTextActive,
+                  ]}
                 >
-                  <Ionicons name="swap-vertical" size={14} color="#333" />
-                  <Text style={styles.smallText}>
-                    Sort: {SORT_LABEL[sortType]}
-                  </Text>
-                  <Ionicons
-                    name={isSortOpen ? "chevron-up" : "chevron-down"}
-                    size={12}
-                    color="#555"
-                    style={{ marginLeft: 2 }}
-                  />
-                </TouchableOpacity>
-              </View>
+                  {SORT_LABEL[sortType]}
+                </Text>
+                <Ionicons
+                  name={isSortOpen ? "chevron-up" : "chevron-down"}
+                  size={13}
+                  color={sortType !== "none" ? "#fff" : NAVY}
+                />
+              </Pressable>
+
               {/* Category dropdown */}
-              <View>
-                <TouchableOpacity
-                  style={styles.smallButton}
-                  onPress={() => {
-                    setIsFilterOpen((p) => !p);
-                    setIsSortOpen(false);
-                  }}
+              <Pressable
+                style={[
+                  styles.filterBtn,
+                  filterCategory !== "All" && styles.filterBtnActive,
+                ]}
+                onPress={() => {
+                  setIsFilterOpen((p) => !p);
+                  setIsSortOpen(false);
+                }}
+              >
+                <Ionicons
+                  name="options-outline"
+                  size={13}
+                  color={filterCategory !== "All" ? "#fff" : NAVY}
+                />
+                <Text
+                  style={[
+                    styles.filterText,
+                    filterCategory !== "All" && styles.filterTextActive,
+                  ]}
                 >
-                  <Ionicons name="funnel" size={14} color="#333" />
-                  <Text style={styles.smallText}>Category: {filterCategory}</Text>
-                  <Ionicons
-                    name={isFilterOpen ? "chevron-up" : "chevron-down"}
-                    size={12}
-                    color="#555"
-                    style={{ marginLeft: 2 }}
-                  />
-                </TouchableOpacity>
-              </View>
+                  {filterCategory}
+                </Text>
+                <Ionicons
+                  name={isFilterOpen ? "chevron-up" : "chevron-down"}
+                  size={13}
+                  color={filterCategory !== "All" ? "#fff" : NAVY}
+                />
+              </Pressable>
             </View>
           )}
 
           {/* Sort dropdown list */}
           {isSortOpen && !isSelectMode && (
             <View style={styles.filterDropdown}>
-              {(Object.entries(SORT_LABEL) as [TradeSortType, string][]).map(
-                ([val, label], idx, arr) => (
-                  <TouchableOpacity
-                    key={val}
-                    onPress={() => {
-                      setSortType(val);
-                      setIsSortOpen(false);
-                    }}
+              {SORT_OPTIONS.map((option) => (
+                <Pressable
+                  key={option.value}
+                  onPress={() => {
+                    setSortType(option.value);
+                    setIsSortOpen(false);
+                  }}
+                  style={[
+                    styles.dropdownItem,
+                    sortType === option.value && styles.dropdownItemActive,
+                  ]}
+                >
+                  {sortType === option.value && (
+                    <Ionicons
+                      name="checkmark"
+                      size={14}
+                      color={NAVY}
+                      style={{ marginRight: 6 }}
+                    />
+                  )}
+                  <Text
                     style={[
-                      styles.dropdownItem,
-                      idx < arr.length - 1 && styles.dropdownItemBorder,
+                      styles.dropdownText,
+                      sortType === option.value && styles.dropdownTextActive,
                     ]}
                   >
-                    <Text
-                      style={[
-                        styles.dropdownText,
-                        sortType === val && styles.dropdownTextActive,
-                      ]}
-                    >
-                      {label}
-                    </Text>
-                    {sortType === val && (
-                      <Ionicons name="checkmark" size={14} color={NAVY} />
-                    )}
-                  </TouchableOpacity>
-                ),
-              )}
+                    {option.label}
+                  </Text>
+                </Pressable>
+              ))}
             </View>
           )}
 
           {/* Category dropdown list */}
           {isFilterOpen && !isSelectMode && (
             <View style={styles.filterDropdown}>
-              {FILTER_CATEGORIES.map((cat, idx) => (
-                <TouchableOpacity
+              {FILTER_CATEGORIES.map((cat) => (
+                <Pressable
                   key={cat}
                   onPress={() => {
                     setFilterCategory(cat);
@@ -1005,9 +1079,17 @@ export default function TradeScreen() {
                   }}
                   style={[
                     styles.dropdownItem,
-                    idx < FILTER_CATEGORIES.length - 1 && styles.dropdownItemBorder,
+                    filterCategory === cat && styles.dropdownItemActive,
                   ]}
                 >
+                  {filterCategory === cat && (
+                    <Ionicons
+                      name="checkmark"
+                      size={14}
+                      color={NAVY}
+                      style={{ marginRight: 6 }}
+                    />
+                  )}
                   <Text
                     style={[
                       styles.dropdownText,
@@ -1016,10 +1098,7 @@ export default function TradeScreen() {
                   >
                     {cat}
                   </Text>
-                  {filterCategory === cat && (
-                    <Ionicons name="checkmark" size={14} color={NAVY} />
-                  )}
-                </TouchableOpacity>
+                </Pressable>
               ))}
             </View>
           )}
@@ -1029,59 +1108,148 @@ export default function TradeScreen() {
       {/* ── Offers toolbar ── */}
       {activeTab === "offers" && (
         <>
-          <View style={styles.row}>
+          {/* Status filter tabs */}
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            style={styles.offerStatusBar}
+            contentContainerStyle={styles.offerStatusBarContent}
+          >
+            {OFFER_STATUS_TABS.map((tab) => {
+              const count = countOffersForStatus(tab.key);
+              if (count === 0 && tab.key !== "all") return null;
+              const isActive = offerStatusFilter === tab.key;
+              const color =
+                tab.key === "all"
+                  ? NAVY
+                  : (STATUS_COLORS[tab.key]?.text ?? NAVY);
+              const bg =
+                tab.key === "all"
+                  ? "#ECEDF8"
+                  : (STATUS_COLORS[tab.key]?.bg ?? "#F3F4F6");
+              return (
+                <TouchableOpacity
+                  key={tab.key}
+                  style={[
+                    styles.offerStatusTab,
+                    isActive && {
+                      backgroundColor: tab.key === "all" ? NAVY : color,
+                      borderColor: color,
+                    },
+                  ]}
+                  onPress={() => setOfferStatusFilter(tab.key)}
+                  activeOpacity={0.7}
+                >
+                  <Ionicons
+                    name={tab.icon as any}
+                    size={13}
+                    color={isActive ? "#fff" : color}
+                  />
+                  <Text
+                    style={[
+                      styles.offerStatusTabText,
+                      { color: isActive ? "#fff" : color },
+                    ]}
+                  >
+                    {tab.label}
+                  </Text>
+                  {count > 0 && (
+                    <View
+                      style={[
+                        styles.offerStatusBadge,
+                        {
+                          backgroundColor: isActive
+                            ? "rgba(255,255,255,0.25)"
+                            : bg,
+                        },
+                      ]}
+                    >
+                      <Text
+                        style={[
+                          styles.offerStatusBadgeText,
+                          { color: isActive ? "#fff" : color },
+                        ]}
+                      >
+                        {count}
+                      </Text>
+                    </View>
+                  )}
+                </TouchableOpacity>
+              );
+            })}
+          </ScrollView>
+
+          <View style={styles.filterRow}>
             {/* Sort dropdown */}
-            <View>
-              <TouchableOpacity
-                style={styles.smallButton}
-                onPress={() => {
-                  setIsOfferSortOpen((p) => !p);
-                  setIsOfferFilterOpen(false);
-                }}
+            <Pressable
+              style={[
+                styles.filterBtn,
+                offerSortValue !== "default" && styles.filterBtnActive,
+              ]}
+              onPress={() => {
+                setIsOfferSortOpen((p) => !p);
+                setIsOfferFilterOpen(false);
+              }}
+            >
+              <Ionicons
+                name="swap-vertical"
+                size={13}
+                color={offerSortValue !== "default" ? "#fff" : NAVY}
+              />
+              <Text
+                style={[
+                  styles.filterText,
+                  offerSortValue !== "default" && styles.filterTextActive,
+                ]}
               >
-                <Ionicons name="swap-vertical" size={14} color="#333" />
-                <Text style={styles.smallText}>
-                  Sort: {offerSortValue === "recent" ? "Recent" : "Default"}
-                </Text>
-                <Ionicons
-                  name={isOfferSortOpen ? "chevron-up" : "chevron-down"}
-                  size={12}
-                  color="#555"
-                  style={{ marginLeft: 2 }}
-                />
-              </TouchableOpacity>
-            </View>
+                {offerSortValue === "recent" ? "Recent" : "Default"}
+              </Text>
+              <Ionicons
+                name={isOfferSortOpen ? "chevron-up" : "chevron-down"}
+                size={13}
+                color={offerSortValue !== "default" ? "#fff" : NAVY}
+              />
+            </Pressable>
 
             {/* Category dropdown */}
-            <View>
-              <TouchableOpacity
-                style={styles.smallButton}
-                onPress={() => {
-                  setIsOfferFilterOpen((p) => !p);
-                  setIsOfferSortOpen(false);
-                }}
+            <Pressable
+              style={[
+                styles.filterBtn,
+                offerCategoryFilter !== "All" && styles.filterBtnActive,
+              ]}
+              onPress={() => {
+                setIsOfferFilterOpen((p) => !p);
+                setIsOfferSortOpen(false);
+              }}
+            >
+              <Ionicons
+                name="options-outline"
+                size={13}
+                color={offerCategoryFilter !== "All" ? "#fff" : NAVY}
+              />
+              <Text
+                style={[
+                  styles.filterText,
+                  offerCategoryFilter !== "All" && styles.filterTextActive,
+                ]}
               >
-                <Ionicons name="funnel" size={14} color="#333" />
-                <Text style={styles.smallText}>
-                  Category: {offerCategoryFilter}
-                </Text>
-                <Ionicons
-                  name={isOfferFilterOpen ? "chevron-up" : "chevron-down"}
-                  size={12}
-                  color="#555"
-                  style={{ marginLeft: 2 }}
-                />
-              </TouchableOpacity>
-            </View>
+                {offerCategoryFilter}
+              </Text>
+              <Ionicons
+                name={isOfferFilterOpen ? "chevron-up" : "chevron-down"}
+                size={13}
+                color={offerCategoryFilter !== "All" ? "#fff" : NAVY}
+              />
+            </Pressable>
           </View>
 
           {/* Sort dropdown list */}
           {isOfferSortOpen && (
             <View style={styles.filterDropdown}>
-              {OFFER_SORT_OPTIONS.map((opt, idx) => {
+              {OFFER_SORT_OPTIONS.map((opt) => {
                 const val = opt.toLowerCase() as OfferSortValue;
                 return (
-                  <TouchableOpacity
+                  <Pressable
                     key={opt}
                     onPress={() => {
                       setOfferSortValue(val);
@@ -1089,9 +1257,17 @@ export default function TradeScreen() {
                     }}
                     style={[
                       styles.dropdownItem,
-                      idx < OFFER_SORT_OPTIONS.length - 1 && styles.dropdownItemBorder,
+                      offerSortValue === val && styles.dropdownItemActive,
                     ]}
                   >
+                    {offerSortValue === val && (
+                      <Ionicons
+                        name="checkmark"
+                        size={14}
+                        color={NAVY}
+                        style={{ marginRight: 6 }}
+                      />
+                    )}
                     <Text
                       style={[
                         styles.dropdownText,
@@ -1100,10 +1276,7 @@ export default function TradeScreen() {
                     >
                       {opt}
                     </Text>
-                    {offerSortValue === val && (
-                      <Ionicons name="checkmark" size={14} color={NAVY} />
-                    )}
-                  </TouchableOpacity>
+                  </Pressable>
                 );
               })}
             </View>
@@ -1112,8 +1285,8 @@ export default function TradeScreen() {
           {/* Category dropdown list */}
           {isOfferFilterOpen && (
             <View style={styles.filterDropdown}>
-              {FILTER_CATEGORIES.map((cat, idx) => (
-                <TouchableOpacity
+              {FILTER_CATEGORIES.map((cat) => (
+                <Pressable
                   key={cat}
                   onPress={() => {
                     setOfferCategoryFilter(cat);
@@ -1121,9 +1294,17 @@ export default function TradeScreen() {
                   }}
                   style={[
                     styles.dropdownItem,
-                    idx < FILTER_CATEGORIES.length - 1 && styles.dropdownItemBorder,
+                    offerCategoryFilter === cat && styles.dropdownItemActive,
                   ]}
                 >
+                  {offerCategoryFilter === cat && (
+                    <Ionicons
+                      name="checkmark"
+                      size={14}
+                      color={NAVY}
+                      style={{ marginRight: 6 }}
+                    />
+                  )}
                   <Text
                     style={[
                       styles.dropdownText,
@@ -1132,10 +1313,7 @@ export default function TradeScreen() {
                   >
                     {cat}
                   </Text>
-                  {offerCategoryFilter === cat && (
-                    <Ionicons name="checkmark" size={14} color={NAVY} />
-                  )}
-                </TouchableOpacity>
+                </Pressable>
               ))}
             </View>
           )}
@@ -1183,7 +1361,13 @@ export default function TradeScreen() {
                   size={48}
                   color="#ccc"
                 />
-                <Text style={styles.emptyText}>No trade offers sent yet</Text>
+                <Text style={styles.emptyText}>
+                  {offerStatusFilter === "all" &&
+                  offerCategoryFilter === "All" &&
+                  offerSearch.length === 0
+                    ? "No trade offers sent yet"
+                    : "No offers match your filters"}
+                </Text>
               </View>
             }
           />
@@ -1266,23 +1450,78 @@ const styles = StyleSheet.create({
   },
   tabBadgeText: { color: "#fff", fontSize: 11, fontWeight: "700" },
 
-  row: {
-    flexDirection: "row",
-    marginBottom: 10,
-    marginHorizontal: 16,
-    flexWrap: "wrap",
-    gap: 8,
-  },
-  smallButton: {
+  // ── Offers status filter tabs ──
+  offerStatusBar: { maxHeight: 44, marginHorizontal: 16, marginBottom: 10 },
+  offerStatusBarContent: { gap: 6, alignItems: "center" },
+  offerStatusTab: {
     flexDirection: "row",
     alignItems: "center",
-    backgroundColor: "#d0d0d0",
-    paddingHorizontal: 14,
-    paddingVertical: 7,
-    borderRadius: 8,
     gap: 4,
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+    borderRadius: 20,
+    borderWidth: 1.5,
+    borderColor: "#E5E7EB",
+    backgroundColor: "#fff",
+    flexShrink: 0,
   },
-  smallText: { fontSize: 13, color: "#444", marginLeft: 2 },
+  offerStatusTabText: { fontSize: 11, fontWeight: "700" },
+  offerStatusBadge: {
+    borderRadius: 10,
+    minWidth: 16,
+    height: 16,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 3,
+  },
+  offerStatusBadgeText: { fontSize: 9, fontWeight: "800" },
+
+  // ── Explore-style filter row/buttons/dropdown ──
+  filterRow: {
+    flexDirection: "row",
+    marginHorizontal: 16,
+    marginBottom: 10,
+    gap: 8,
+  },
+  filterBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#fff",
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 10,
+    gap: 5,
+    borderWidth: 1,
+    borderColor: "#E0E0E0",
+  },
+  filterBtnActive: { backgroundColor: NAVY, borderColor: NAVY },
+  filterText: { fontSize: 13, fontWeight: "600", color: NAVY },
+  filterTextActive: { color: "#fff" },
+  filterDropdown: {
+    marginHorizontal: 16,
+    backgroundColor: "#fff",
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: "#E5E7EB",
+    overflow: "hidden",
+    marginBottom: 10,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.07,
+    shadowRadius: 8,
+    elevation: 3,
+  },
+  dropdownItem: {
+    paddingVertical: 13,
+    paddingHorizontal: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: "#F3F4F6",
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  dropdownItemActive: { backgroundColor: "#F0F0FF" },
+  dropdownText: { fontSize: 14, color: "#333" },
+  dropdownTextActive: { fontWeight: "700", color: NAVY },
 
   selectToolbar: {
     flexDirection: "row",
@@ -1321,29 +1560,6 @@ const styles = StyleSheet.create({
     marginBottom: 6,
     marginHorizontal: 16,
   },
-
-  filterDropdown: {
-    marginHorizontal: 16,
-    backgroundColor: "white",
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: "#DDD",
-    overflow: "hidden",
-    marginBottom: 10,
-  },
-  dropdownItem: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    paddingVertical: 12,
-    paddingHorizontal: 15,
-  },
-  dropdownItemBorder: {
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: "#EEEEEE",
-  },
-  dropdownText: { fontSize: 13, color: "#333" },
-  dropdownTextActive: { fontWeight: "700", color: NAVY },
 
   tradeItemWrapper: { marginHorizontal: 16, marginBottom: 10 },
   tradeItemWrapperSelected: {
@@ -1443,7 +1659,12 @@ const styles = StyleSheet.create({
     paddingTop: 60,
     gap: 12,
   },
-  emptyText: { color: "#999", fontSize: 16 },
+  emptyText: {
+    color: "#999",
+    fontSize: 16,
+    textAlign: "center",
+    paddingHorizontal: 24,
+  },
 
   fabWrapper: { position: "absolute", bottom: 20, right: 16 },
   addButton: {

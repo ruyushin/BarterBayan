@@ -3,6 +3,7 @@ import { Tabs, useRouter } from "expo-router";
 import { onAuthStateChanged } from "firebase/auth";
 import React, { useEffect, useState } from "react";
 import { Platform, StyleSheet, Text, View } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { HapticTab } from "@/components/haptic-tab";
 import { Colors } from "@/constants/theme";
@@ -13,18 +14,12 @@ const NAVY = "#2f2f6f";
 const NAVY_LIGHT = "#434399";
 const INACTIVE = "#A0A0B0";
 
-// Tab bar total height (excluding safe area inset which RN adds automatically)
 const TAB_BAR_HEIGHT = Platform.OS === "ios" ? 68 : 70;
-// Vertical padding inside the bar
 const TAB_PT = 6;
 const TAB_PB = Platform.OS === "ios" ? 6 : 8;
 
 const styles = StyleSheet.create({
-  // ── Regular tab icon ────────────────────────────────────────────────────────
   tabIconContainer: {
-    // Flexible: fills the flex item given to it by tabBarItemStyle, so it
-    // automatically shrinks/grows with screen width — no fixed px width
-    // that can overflow on narrow devices.
     width: "100%",
     alignItems: "center",
     justifyContent: "center",
@@ -45,7 +40,6 @@ const styles = StyleSheet.create({
   tabLabelInactive: {
     color: INACTIVE,
   },
-  // Active pill sits behind icon, sized to icon width only
   activePill: {
     position: "absolute",
     top: 0,
@@ -56,14 +50,10 @@ const styles = StyleSheet.create({
     backgroundColor: "#ECEDF8",
     zIndex: -1,
   },
-
-  // ── Center Trade FAB ─────────────────────────────────────────────────────────
   tradeBtnWrap: {
-    // Wrapper gives the FAB a fixed hit-area aligned with the bar
     width: "100%",
     alignItems: "center",
     justifyContent: "center",
-    // Pull the circle up; overflow:visible on the tab bar lets it show
     marginTop: -34,
     paddingBottom: 2,
   },
@@ -89,6 +79,7 @@ const styles = StyleSheet.create({
 
 export default function TabLayout() {
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   const [inboxBadge, setInboxBadge] = useState<number>(badgeStore.getCount());
 
   useEffect(() => {
@@ -107,7 +98,6 @@ export default function TabLayout() {
     return () => unsubscribe();
   }, [router]);
 
-  // ── Reusable icon renderer ────────────────────────────────────────────────
   const TabIcon = ({
     iconName,
     label,
@@ -150,12 +140,10 @@ export default function TabLayout() {
           backgroundColor: "#FFFFFF",
           borderTopWidth: 0.5,
           borderTopColor: "#E8E8EE",
-          // Height = content area only; RN adds the safe area inset on top
-          height: TAB_BAR_HEIGHT,
+          height: TAB_BAR_HEIGHT + insets.bottom,
           paddingTop: TAB_PT,
-          paddingBottom: TAB_PB,
+          paddingBottom: TAB_PB + insets.bottom,
           flexDirection: "row",
-          // Must be visible so the FAB circle overflows above the bar
           overflow: "visible",
           shadowColor: "#000",
           shadowOffset: { width: 0, height: -2 },
@@ -167,11 +155,9 @@ export default function TabLayout() {
             default: {},
           }),
         },
-        // Each tab item gets equal flexible width — total always = screen width,
-        // so nothing can ever overflow off-screen regardless of device size.
         tabBarItemStyle: {
           flex: 1,
-          width: 0, // forces equal flex-basis instead of intrinsic content width
+          width: 0,
           minWidth: 0,
           maxWidth: undefined,
           height: "100%",

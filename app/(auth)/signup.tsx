@@ -10,7 +10,9 @@ import {
   Alert,
   Animated,
   Image,
+  KeyboardAvoidingView,
   Modal,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -165,6 +167,7 @@ export default function SignUpScreen() {
     setIsSubmitting(true);
     await createEmailAccount(email.trim(), password);
   };
+
   const createEmailAccount = async (email: string, password: string) => {
     setIsSubmitting(true);
     let user;
@@ -227,7 +230,10 @@ export default function SignUpScreen() {
   };
 
   return (
-    <View style={{ flex: 1 }}>
+    <KeyboardAvoidingView
+      style={{ flex: 1 }}
+      behavior={Platform.OS === "ios" ? "padding" : "height"}
+    >
       <ScrollView style={[styles.container, { backgroundColor: "#ffffff" }]}>
         <View style={styles.content}>
           <View style={styles.logoContainer}>
@@ -425,7 +431,7 @@ export default function SignUpScreen() {
           </View>
         </View>
       </Modal>
-    </View>
+    </KeyboardAvoidingView>
   );
 }
 

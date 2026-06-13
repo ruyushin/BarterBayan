@@ -57,14 +57,35 @@ interface OwnerInfo {
   avatar: string | null;
 }
 
+// A value that looks like an email shouldn't be shown as a display name
+function isEmailLike(value?: string | null): boolean {
+  return !!value && /\S+@\S+\.\S+/.test(value);
+}
+
 // Resolve the best display name + avatar out of a raw Firestore user doc.
-// Falls back gracefully so the UI is never blank.
+// Falls back gracefully so the UI is never blank, and never shows an email
+// address as the "display name" (e.g. when username/displayName was seeded
+// with the user's gmail).
 function resolveOwnerInfo(raw: any): OwnerInfo {
+  const fullName =
+    raw?.firstName?.trim() && raw?.lastName?.trim()
+      ? `${raw.firstName.trim()} ${raw.lastName.trim()}`
+      : null;
+
+  const candidates = [
+    fullName,
+    raw?.displayName,
+    raw?.name,
+    raw?.fullName,
+    raw?.username,
+    raw?.userName,
+  ];
+
   const name =
-    raw?.username?.trim() ||
-    raw?.displayName?.trim() ||
-    raw?.name?.trim() ||
-    "Item Owner";
+    candidates
+      .map((c) => (typeof c === "string" ? c.trim() : ""))
+      .find((c) => c.length > 0 && !isEmailLike(c)) || "Item Owner";
+
   const avatarUrl =
     raw?.avatarUrl ||
     raw?.photoURL ||
@@ -157,14 +178,19 @@ function OfferDetailSheet({
   const isCompleting = completingId === offer.id;
   const isCancelling = cancellingId === offer.id;
 
-  // Prefer live-fetched owner info; fall back to whatever was stored on the offer
+  // Prefer live-fetched owner info; fall back to whatever was stored on the
+  // offer, but never show an email address as the name.
+  const offerOwnerName = (offer as any).ownerName as string | undefined;
+  const offerOwnerAvatar = (offer as any).ownerAvatar as string | undefined;
+  const fallbackOfferName =
+    offerOwnerName && !isEmailLike(offerOwnerName)
+      ? offerOwnerName
+      : "Item Owner";
   const displayName =
-    ownerInfo.name !== "Item Owner"
-      ? ownerInfo.name
-      : (offer.ownerName || "Item Owner");
+    ownerInfo.name !== "Item Owner" ? ownerInfo.name : fallbackOfferName;
   const displayAvatar =
     ownerInfo.avatar ??
-    (offer.ownerAvatar || null);
+    (offerOwnerAvatar || null);
 
   return (
     <Modal
@@ -618,14 +644,21 @@ export default function SentOffersScreen() {
   const getOwnerInfo = (offer: TradeOffer): OwnerInfo => {
     const id = (offer as any).ownerId as string | undefined;
     if (id && ownerInfoMap[id]) return ownerInfoMap[id];
-    // Fallback to data embedded in the offer doc (may be stale but better than blank)
+    // Fallback to data embedded in the offer doc (may be stale but better
+    // than blank). Never show an email address as a "name".
+    const offerOwnerName = (offer as any).ownerName as string | undefined;
+    const offerOwnerAvatar = (offer as any).ownerAvatar as string | undefined;
+    const fallbackName =
+      offerOwnerName && !isEmailLike(offerOwnerName)
+        ? offerOwnerName
+        : "Item Owner";
     return {
-      name: offer.ownerName || "Item Owner",
+      name: fallbackName,
       avatar:
-        offer.ownerAvatar &&
-        typeof offer.ownerAvatar === "string" &&
-        offer.ownerAvatar.startsWith("http")
-          ? offer.ownerAvatar
+        offerOwnerAvatar &&
+        typeof offerOwnerAvatar === "string" &&
+        offerOwnerAvatar.startsWith("http")
+          ? offerOwnerAvatar
           : null,
     };
   };

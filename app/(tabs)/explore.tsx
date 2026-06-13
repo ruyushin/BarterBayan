@@ -13,10 +13,13 @@ import {
   Alert,
   FlatList,
   Image,
+  KeyboardAvoidingView,
   Modal,
+  Platform,
   Pressable,
   RefreshControl,
   SafeAreaView,
+  ScrollView,
   StyleSheet,
   Text,
   TextInput,
@@ -85,7 +88,56 @@ function safeUriList(images: any): string[] {
   return raw.map(safeUri).filter((u) => u !== PLACEHOLDER);
 }
 
-// ── Display name resolver (fallback only – used before owner info loads) ──────
+// ── MiniAvatar — letter fallback instead of random pravatar ──────────────────
+function MiniAvatar({
+  uri,
+  name,
+  size,
+  style,
+}: {
+  uri?: string | null;
+  name?: string;
+  size: number;
+  style?: any;
+}) {
+  const hasImage =
+    uri && typeof uri === "string" && uri.startsWith("http");
+  const initial = (name || "U")[0].toUpperCase();
+  if (hasImage) {
+    return (
+      <Image
+        source={{ uri }}
+        style={[
+          { width: size, height: size, borderRadius: size / 2 },
+          style,
+        ]}
+      />
+    );
+  }
+  return (
+    <View
+      style={[
+        {
+          width: size,
+          height: size,
+          borderRadius: size / 2,
+          backgroundColor: NAVY,
+          justifyContent: "center",
+          alignItems: "center",
+        },
+        style,
+      ]}
+    >
+      <Text
+        style={{ color: "#fff", fontSize: size * 0.4, fontWeight: "700" }}
+      >
+        {initial}
+      </Text>
+    </View>
+  );
+}
+
+// ── Display name resolver ─────────────────────────────────────────────────────
 function resolveDisplayName(obj: any): string {
   return (
     obj?.displayName?.trim() ||
@@ -96,7 +148,6 @@ function resolveDisplayName(obj: any): string {
   );
 }
 
-// ── Build the best display name from a getUserInfo result ─────────────────────
 function buildOwnerDisplayName(info: any, fallback: string): string {
   if (info?.firstName && info?.lastName)
     return `${info.firstName.trim()} ${info.lastName.trim()}`;
@@ -148,19 +199,16 @@ function formatPostDate(timestamp: any): string {
 export default function Screen() {
   const router = useRouter();
   const [search, setSearch] = useState("");
-  const [sortType, setSortType] = useState<
-    "none" | "likes" | "name" | "recent"
-  >("none");
+  const [sortType, setSortType] = useState<"none" | "likes" | "name" | "recent">("none");
   const [filter, setFilter] = useState("All");
   const [isFilterOpen, setIsFilterOpen] = useState(false);
+  const [isSortOpen, setIsSortOpen] = useState(false);
   const [allItems, setAllItems] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [userId, setUserId] = useState<string | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
-  const [typeFilter, setTypeFilter] = useState<
-    "all" | "trending" | "personalized"
-  >("all");
+  const [typeFilter, setTypeFilter] = useState<"all" | "trending" | "personalized">("all");
   const [isInitialLoad, setIsInitialLoad] = useState(true);
   const [searchPopupVisible, setSearchPopupVisible] = useState(false);
 
@@ -195,7 +243,8 @@ export default function Screen() {
               resolveDisplayName(enrichMap[item.id]) ||
               resolveDisplayName(item) ||
               "Unknown User",
-            userAvatar: enrichMap[item.id]?.userAvatar || item.userAvatar || "",
+            userAvatar:
+              enrichMap[item.id]?.userAvatar || item.userAvatar || "",
           }));
         } else if (typeFilter === "personalized") {
           const personalized = userId
@@ -208,7 +257,8 @@ export default function Screen() {
               resolveDisplayName(enrichMap[item.id]) ||
               resolveDisplayName(item) ||
               "Unknown User",
-            userAvatar: enrichMap[item.id]?.userAvatar || item.userAvatar || "",
+            userAvatar:
+              enrichMap[item.id]?.userAvatar || item.userAvatar || "",
           }));
         } else {
           items = allEnriched;
@@ -238,12 +288,12 @@ export default function Screen() {
     setAllItems((prev) => prev.filter((i) => i.id !== itemId));
   };
 
-  const sortLabels: Record<string, string> = {
-    none: "Default",
-    likes: "Most Liked",
-    name: "Name",
-    recent: "Most Recent",
-  };
+  const SORT_OPTIONS: { value: "none" | "likes" | "name" | "recent"; label: string }[] = [
+    { value: "none", label: "Default" },
+    { value: "recent", label: "Recent" },
+    { value: "likes", label: "Likes" },
+    { value: "name", label: "A-Z" },
+  ];
 
   const filteredItems = allItems
     .filter((item) => {
@@ -271,16 +321,7 @@ export default function Screen() {
       return 0;
     });
 
-  const handleSort = () =>
-    setSortType((prev) =>
-      prev === "none"
-        ? "likes"
-        : prev === "likes"
-          ? "name"
-          : prev === "name"
-            ? "recent"
-            : "none",
-    );
+
 
   if (loading) {
     return (
@@ -444,16 +485,44 @@ export default function Screen() {
 
             {/* Sort / Filter row */}
             <View style={styles.filterRow}>
-              <Pressable style={styles.filterBtn} onPress={handleSort}>
-                <Ionicons name="swap-vertical" size={13} color={NAVY} />
-                <Text style={styles.filterText}>{sortLabels[sortType]}</Text>
+              <Pressable
+                style={[
+                  styles.filterBtn,
+                  sortType !== "none" && styles.filterBtnActive,
+                ]}
+                onPress={() => {
+                  setIsSortOpen((p) => !p);
+                  setIsFilterOpen(false);
+                }}
+              >
+                <Ionicons
+                  name="swap-vertical"
+                  size={13}
+                  color={sortType !== "none" ? "#fff" : NAVY}
+                />
+                <Text
+                  style={[
+                    styles.filterText,
+                    sortType !== "none" && styles.filterTextActive,
+                  ]}
+                >
+                  {SORT_OPTIONS.find((o) => o.value === sortType)?.label ?? "Default"}
+                </Text>
+                <Ionicons
+                  name={isSortOpen ? "chevron-up" : "chevron-down"}
+                  size={13}
+                  color={sortType !== "none" ? "#fff" : NAVY}
+                />
               </Pressable>
               <Pressable
                 style={[
                   styles.filterBtn,
                   filter !== "All" && styles.filterBtnActive,
                 ]}
-                onPress={() => setIsFilterOpen((p) => !p)}
+                onPress={() => {
+                  setIsFilterOpen((p) => !p);
+                  setIsSortOpen(false);
+                }}
               >
                 <Ionicons
                   name="options-outline"
@@ -475,6 +544,41 @@ export default function Screen() {
                 />
               </Pressable>
             </View>
+
+            {isSortOpen && (
+              <View style={styles.filterDropdown}>
+                {SORT_OPTIONS.map((option) => (
+                  <Pressable
+                    key={option.value}
+                    onPress={() => {
+                      setSortType(option.value);
+                      setIsSortOpen(false);
+                    }}
+                    style={[
+                      styles.dropdownItem,
+                      sortType === option.value && styles.dropdownItemActive,
+                    ]}
+                  >
+                    {sortType === option.value && (
+                      <Ionicons
+                        name="checkmark"
+                        size={14}
+                        color={NAVY}
+                        style={{ marginRight: 6 }}
+                      />
+                    )}
+                    <Text
+                      style={[
+                        styles.dropdownText,
+                        sortType === option.value && styles.dropdownTextActive,
+                      ]}
+                    >
+                      {option.label}
+                    </Text>
+                  </Pressable>
+                ))}
+              </View>
+            )}
 
             {isFilterOpen && (
               <View style={styles.filterDropdown}>
@@ -540,11 +644,9 @@ function ItemCard({ item, onCommentAdded, onDelete }: any) {
     (auth.currentUser?.email
       ? auth.currentUser.email.split("@")[0]
       : `User_${auth.currentUser?.uid?.slice(0, 5) ?? ""}`);
-  const currentUserPhotoURL =
-    auth.currentUser?.photoURL || "https://i.pravatar.cc/150?img=1";
+  const currentUserPhotoURL = auth.currentUser?.photoURL || "";
   const isOwnItem = !!currentUser && currentUser === item?.ownerId;
 
-  // ── Owner display name – fetched from Firestore, same logic as ProductDetailModal
   const [ownerDisplayName, setOwnerDisplayName] = useState<string>(
     resolveDisplayName(item) || "Unknown User",
   );
@@ -565,7 +667,6 @@ function ItemCard({ item, onCommentAdded, onDelete }: any) {
     };
   }, [item?.ownerId]);
 
-  // ── Like state ──────────────────────────────────────────────────────────────
   const _cached = getLikeState(item.id);
   const [isLiked, setIsLiked] = useState(
     _cached
@@ -591,11 +692,11 @@ function ItemCard({ item, onCommentAdded, onDelete }: any) {
   const deleteTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [tradeModalVisible, setTradeModalVisible] = useState(false);
 
-  // ── Options & Report ────────────────────────────────────────────────────────
   const [showOptions, setShowOptions] = useState(false);
   const [showReportModal, setShowReportModal] = useState(false);
   const [reportTarget, setReportTarget] = useState<"post" | "user">("post");
   const [selectedReason, setSelectedReason] = useState("");
+  const [otherText, setOtherText] = useState("");
   const [reportSubmitting, setReportSubmitting] = useState(false);
 
   const imagesList = (() => {
@@ -852,12 +953,17 @@ function ItemCard({ item, onCommentAdded, onDelete }: any) {
     setShowOptions(false);
     setReportTarget(target);
     setSelectedReason("");
+    setOtherText("");
     setShowReportModal(true);
   };
 
   const handleSubmitReport = async () => {
     if (!selectedReason) {
       Alert.alert("Select a reason", "Please choose a reason for your report.");
+      return;
+    }
+    if (selectedReason === "Other" && !otherText.trim()) {
+      Alert.alert("Details required", "Please describe your reason in the text box.");
       return;
     }
     if (!currentUser) {
@@ -871,7 +977,7 @@ function ItemCard({ item, onCommentAdded, onDelete }: any) {
         targetId: reportTarget === "post" ? item.id : item.ownerId,
         itemId: item.id,
         reportedBy: currentUser,
-        reason: selectedReason,
+        reason: selectedReason === "Other" ? `Other: ${otherText.trim()}` : selectedReason,
         createdAt: serverTimestamp(),
       });
       setShowReportModal(false);
@@ -895,7 +1001,6 @@ function ItemCard({ item, onCommentAdded, onDelete }: any) {
       params: { itemId: item.id, item: JSON.stringify(item) },
     });
 
-  // Resolve comment author display name
   const resolveCommentName = (comment: any): string => {
     if (comment?.firstName && comment?.lastName)
       return `${comment.firstName.trim()} ${comment.lastName.trim()}`;
@@ -944,14 +1049,12 @@ function ItemCard({ item, onCommentAdded, onDelete }: any) {
           </View>
         </TouchableOpacity>
 
-        {/* Category badge */}
         {!!item?.category && (
           <View style={styles.categoryBadge}>
             <Text style={styles.categoryBadgeText}>{item.category}</Text>
           </View>
         )}
 
-        {/* Options menu button */}
         <TouchableOpacity
           style={styles.optionsBtn}
           onPress={() => setShowOptions(true)}
@@ -979,7 +1082,6 @@ function ItemCard({ item, onCommentAdded, onDelete }: any) {
             <Text style={styles.imageCountText}>{imagesList.length}</Text>
           </View>
         )}
-        {/* Condition badge on image */}
         {!!item?.condition && (
           <View style={styles.conditionOverlay}>
             <Text style={styles.conditionOverlayText}>{item.condition}</Text>
@@ -1032,7 +1134,6 @@ function ItemCard({ item, onCommentAdded, onDelete }: any) {
 
       {/* ── FOOTER STATS ── */}
       <View style={styles.cardFooter}>
-        {/* Like */}
         <TouchableOpacity
           style={styles.footerAction}
           onPress={handleLike}
@@ -1058,7 +1159,6 @@ function ItemCard({ item, onCommentAdded, onDelete }: any) {
           </Text>
         </TouchableOpacity>
 
-        {/* Comment */}
         <TouchableOpacity
           style={styles.footerAction}
           onPress={() => setShowComments(!showComments)}
@@ -1086,7 +1186,6 @@ function ItemCard({ item, onCommentAdded, onDelete }: any) {
           </Text>
         </TouchableOpacity>
 
-        {/* Save */}
         <TouchableOpacity
           style={styles.footerAction}
           onPress={handleSave}
@@ -1121,8 +1220,10 @@ function ItemCard({ item, onCommentAdded, onDelete }: any) {
 
           {/* Comment input */}
           <View style={styles.commentInputRow}>
-            <Image
-              source={{ uri: currentUserPhotoURL }}
+            <MiniAvatar
+              uri={currentUserPhotoURL}
+              name={currentUserName}
+              size={36}
               style={styles.commentInputAvatar}
             />
             <View style={styles.commentInputWrap}>
@@ -1166,11 +1267,10 @@ function ItemCard({ item, onCommentAdded, onDelete }: any) {
                   }
                   activeOpacity={0.8}
                 >
-                  <Image
-                    source={{
-                      uri:
-                        comment.userAvatar || "https://i.pravatar.cc/150?img=1",
-                    }}
+                  <MiniAvatar
+                    uri={comment.userAvatar}
+                    name={commentAuthorName}
+                    size={36}
                     style={styles.commentAvatar}
                   />
                 </TouchableOpacity>
@@ -1192,7 +1292,6 @@ function ItemCard({ item, onCommentAdded, onDelete }: any) {
                     <Text style={styles.commentText}>{comment.text}</Text>
                   </View>
 
-                  {/* Comment actions */}
                   <View style={styles.commentActions}>
                     <TouchableOpacity
                       style={styles.commentActionBtn}
@@ -1231,7 +1330,9 @@ function ItemCard({ item, onCommentAdded, onDelete }: any) {
                         size={15}
                         color={NAVY}
                       />
-                      <Text style={[styles.commentActionText, { color: NAVY }]}>
+                      <Text
+                        style={[styles.commentActionText, { color: NAVY }]}
+                      >
                         Reply
                       </Text>
                     </TouchableOpacity>
@@ -1264,12 +1365,10 @@ function ItemCard({ item, onCommentAdded, onDelete }: any) {
                               "User";
                         return (
                           <View key={reply.id} style={styles.replyItem}>
-                            <Image
-                              source={{
-                                uri:
-                                  reply.userAvatar ||
-                                  "https://i.pravatar.cc/150?img=1",
-                              }}
+                            <MiniAvatar
+                              uri={reply.userAvatar}
+                              name={replyAuthorName}
+                              size={28}
                               style={styles.replyAvatar}
                             />
                             <View style={styles.replyBubble}>
@@ -1366,7 +1465,10 @@ function ItemCard({ item, onCommentAdded, onDelete }: any) {
                   onPress={() => handleOpenReport("post")}
                 >
                   <View
-                    style={[styles.optionIcon, { backgroundColor: "#FFF8EC" }]}
+                    style={[
+                      styles.optionIcon,
+                      { backgroundColor: "#FFF8EC" },
+                    ]}
                   >
                     <Ionicons name="flag-outline" size={18} color={GOLD} />
                   </View>
@@ -1383,7 +1485,10 @@ function ItemCard({ item, onCommentAdded, onDelete }: any) {
                   onPress={() => handleOpenReport("user")}
                 >
                   <View
-                    style={[styles.optionIcon, { backgroundColor: "#F0F0FF" }]}
+                    style={[
+                      styles.optionIcon,
+                      { backgroundColor: "#F0F0FF" },
+                    ]}
                   >
                     <Ionicons
                       name="person-remove-outline"
@@ -1411,72 +1516,111 @@ function ItemCard({ item, onCommentAdded, onDelete }: any) {
         animationType="slide"
         onRequestClose={() => setShowReportModal(false)}
       >
-        <View style={styles.reportOverlay}>
+        <KeyboardAvoidingView
+          style={styles.reportOverlay}
+          behavior={Platform.OS === "ios" ? "padding" : "height"}
+          keyboardVerticalOffset={Platform.OS === "ios" ? 0 : 24}
+        >
+          <TouchableOpacity
+            style={{ flex: 1 }}
+            activeOpacity={1}
+            onPress={() => setShowReportModal(false)}
+          />
           <View style={styles.reportSheet}>
             <View style={styles.optionsHandle} />
-            <Text style={styles.reportTitle}>
-              {reportTarget === "post" ? "Report Post" : `Report User`}
-            </Text>
-            <Text style={styles.reportSub}>
-              {reportTarget === "post"
-                ? "Why are you reporting this listing?"
-                : `Why are you reporting ${ownerDisplayName}?`}
-            </Text>
-            {REPORT_REASONS.map((reason) => (
-              <TouchableOpacity
-                key={reason}
-                style={[
-                  styles.reportReasonRow,
-                  selectedReason === reason && styles.reportReasonRowSelected,
-                ]}
-                onPress={() => setSelectedReason(reason)}
-              >
-                <View
+            <ScrollView
+              showsVerticalScrollIndicator={false}
+              keyboardShouldPersistTaps="handled"
+              bounces={false}
+            >
+              <Text style={styles.reportTitle}>
+                {reportTarget === "post" ? "Report Post" : "Report User"}
+              </Text>
+              <Text style={styles.reportSub}>
+                {reportTarget === "post"
+                  ? "Why are you reporting this listing?"
+                  : `Why are you reporting ${ownerDisplayName}?`}
+              </Text>
+              {REPORT_REASONS.map((reason) => (
+                <TouchableOpacity
+                  key={reason}
                   style={[
-                    styles.reportRadio,
-                    selectedReason === reason && styles.reportRadioSelected,
+                    styles.reportReasonRow,
+                    selectedReason === reason && styles.reportReasonRowSelected,
                   ]}
+                  onPress={() => setSelectedReason(reason)}
                 >
-                  {selectedReason === reason && (
-                    <View style={styles.reportRadioInner} />
-                  )}
+                  <View
+                    style={[
+                      styles.reportRadio,
+                      selectedReason === reason && styles.reportRadioSelected,
+                    ]}
+                  >
+                    {selectedReason === reason && (
+                      <View style={styles.reportRadioInner} />
+                    )}
+                  </View>
+                  <Text
+                    style={[
+                      styles.reportReasonText,
+                      selectedReason === reason && styles.reportReasonTextSelected,
+                    ]}
+                  >
+                    {reason}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+
+              {selectedReason === "Other" && (
+                <View style={styles.reportOtherWrapper}>
+                  <TextInput
+                    style={styles.reportOtherInput}
+                    placeholder="Please describe your reason... (required)"
+                    placeholderTextColor="#aaa"
+                    value={otherText}
+                    onChangeText={(t) => setOtherText(t.slice(0, 300))}
+                    multiline
+                    maxLength={300}
+                    autoFocus
+                  />
+                  <Text style={styles.reportOtherCount}>
+                    {otherText.length}/300
+                  </Text>
                 </View>
-                <Text
-                  style={[
-                    styles.reportReasonText,
-                    selectedReason === reason &&
-                      styles.reportReasonTextSelected,
-                  ]}
+              )}
+
+              <View style={styles.reportActions}>
+                <TouchableOpacity
+                  style={styles.reportCancelBtn}
+                  onPress={() => setShowReportModal(false)}
                 >
-                  {reason}
-                </Text>
-              </TouchableOpacity>
-            ))}
-            <View style={styles.reportActions}>
-              <TouchableOpacity
-                style={styles.reportCancelBtn}
-                onPress={() => setShowReportModal(false)}
-              >
-                <Text style={styles.reportCancelText}>Cancel</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[
-                  styles.reportSubmitBtn,
-                  (!selectedReason || reportSubmitting) &&
-                    styles.reportSubmitBtnDisabled,
-                ]}
-                onPress={handleSubmitReport}
-                disabled={!selectedReason || reportSubmitting}
-              >
-                {reportSubmitting ? (
-                  <ActivityIndicator size="small" color="#fff" />
-                ) : (
-                  <Text style={styles.reportSubmitText}>Submit Report</Text>
-                )}
-              </TouchableOpacity>
-            </View>
+                  <Text style={styles.reportCancelText}>Cancel</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[
+                    styles.reportSubmitBtn,
+                    (!selectedReason ||
+                      (selectedReason === "Other" && !otherText.trim()) ||
+                      reportSubmitting) &&
+                      styles.reportSubmitBtnDisabled,
+                  ]}
+                  onPress={handleSubmitReport}
+                  disabled={
+                    !selectedReason ||
+                    (selectedReason === "Other" && !otherText.trim()) ||
+                    reportSubmitting
+                  }
+                >
+                  {reportSubmitting ? (
+                    <ActivityIndicator size="small" color="#fff" />
+                  ) : (
+                    <Text style={styles.reportSubmitText}>Submit Report</Text>
+                  )}
+                </TouchableOpacity>
+              </View>
+            </ScrollView>
           </View>
-        </View>
+        </KeyboardAvoidingView>
       </Modal>
     </View>
   );
@@ -1486,7 +1630,6 @@ function ItemCard({ item, onCommentAdded, onDelete }: any) {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#F0F0F5" },
 
-  // Search
   searchWrapper: {
     marginHorizontal: 16,
     marginTop: 30,
@@ -1544,7 +1687,6 @@ const styles = StyleSheet.create({
   searchResultCategory: { fontSize: 12, color: "#6B7280", marginTop: 2 },
   noResultsText: { color: "#6B7280", fontSize: 13 },
 
-  // Type filter
   typeFilterRow: {
     flexDirection: "row",
     marginHorizontal: 12,
@@ -1567,7 +1709,6 @@ const styles = StyleSheet.create({
   typeFilterText: { fontSize: 13, fontWeight: "600", color: "#555" },
   typeFilterTextActive: { color: "#fff" },
 
-  // Sort / Filter
   filterRow: {
     flexDirection: "row",
     marginHorizontal: 14,
@@ -1614,7 +1755,6 @@ const styles = StyleSheet.create({
   dropdownText: { fontSize: 14, color: "#333" },
   dropdownTextActive: { fontWeight: "700", color: NAVY },
 
-  // Card
   card: {
     backgroundColor: "#fff",
     marginHorizontal: 12,
@@ -1663,7 +1803,6 @@ const styles = StyleSheet.create({
   categoryBadgeText: { fontSize: 11, fontWeight: "700", color: NAVY },
   optionsBtn: { padding: 6 },
 
-  // Image
   cardImageContainer: {
     position: "relative",
     width: "100%",
@@ -1694,12 +1833,10 @@ const styles = StyleSheet.create({
   },
   conditionOverlayText: { color: "#fff", fontSize: 11, fontWeight: "700" },
 
-  // Content
   cardContent: { paddingHorizontal: 14, paddingTop: 12, paddingBottom: 10 },
   title: { fontWeight: "700", fontSize: 16, color: "#1F1F1F", marginBottom: 4 },
   description: { fontSize: 13, color: "#6B7280", lineHeight: 18 },
 
-  // Action buttons
   actionButtons: {
     flexDirection: "row",
     paddingHorizontal: 14,
@@ -1738,7 +1875,6 @@ const styles = StyleSheet.create({
   },
   ownItemText: { fontSize: 12, color: "#AAAAAA", fontWeight: "500" },
 
-  // Footer stats
   cardFooter: {
     flexDirection: "row",
     paddingHorizontal: 8,
@@ -1771,7 +1907,6 @@ const styles = StyleSheet.create({
   footerCountActive: { color: NAVY },
   footerCountSaved: { color: NAVY },
 
-  // Comments
   commentsSection: {
     borderTopWidth: 1,
     borderTopColor: "#F5F5F5",
@@ -1903,7 +2038,6 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
 
-  // Delete toast
   deleteToast: {
     position: "absolute",
     top: 16,
@@ -1926,7 +2060,6 @@ const styles = StyleSheet.create({
     marginLeft: 12,
   },
 
-  // Options modal
   optionsOverlay: {
     flex: 1,
     backgroundColor: "rgba(0,0,0,0.4)",
@@ -1965,7 +2098,6 @@ const styles = StyleSheet.create({
   optionSub: { fontSize: 12, color: "#999", marginTop: 1 },
   optionDivider: { height: 1, backgroundColor: "#F3F4F6", marginVertical: 4 },
 
-  // Report modal
   reportOverlay: {
     flex: 1,
     backgroundColor: "rgba(0,0,0,0.5)",
@@ -1978,6 +2110,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     paddingTop: 10,
     paddingBottom: 36,
+    maxHeight: "90%",
   },
   reportTitle: {
     fontSize: 18,
@@ -2025,8 +2158,27 @@ const styles = StyleSheet.create({
   },
   reportSubmitBtnDisabled: { opacity: 0.45 },
   reportSubmitText: { fontSize: 14, fontWeight: "700", color: "#fff" },
+  reportOtherWrapper: {
+    marginTop: 12,
+    borderWidth: 1.5,
+    borderColor: NAVY,
+    borderRadius: 12,
+    padding: 12,
+    backgroundColor: "#F8F8FF",
+  },
+  reportOtherInput: {
+    fontSize: 14,
+    color: "#111",
+    minHeight: 80,
+    textAlignVertical: "top",
+  },
+  reportOtherCount: {
+    fontSize: 12,
+    color: "#999",
+    textAlign: "right",
+    marginTop: 6,
+  },
 
-  // Loader / Empty
   loaderContainer: { flex: 1, justifyContent: "center", alignItems: "center" },
   loadingText: { marginTop: 10, fontSize: 14, color: "#777" },
   emptyContainer: {

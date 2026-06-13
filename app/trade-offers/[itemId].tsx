@@ -2,24 +2,23 @@ import { Ionicons } from "@expo/vector-icons";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useEffect, useRef, useState } from "react";
 import {
-    ActivityIndicator,
-    Alert,
-    Image,
-    SafeAreaView,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TouchableOpacity,
-    View,
+  ActivityIndicator,
+  Alert,
+  Image,
+  SafeAreaView,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
 } from "react-native";
-import { TradeChatModal } from "../../components/TradeChatModal";
 import { auth } from "../../firebaseConfig";
-import { getItemById } from "../../services/itemService";
+import { getItemById, getUserInfo } from "../../services/itemService";
 import {
-    TradeOffer,
-    completeTrade,
-    subscribeToOffersForItem,
-    updateTradeStatus
+  TradeOffer,
+  completeTrade,
+  subscribeToOffersForItem,
+  updateTradeStatus
 } from "../../services/tradeService";
 
 const NAVY = "#2e2d7c";
@@ -48,6 +47,106 @@ const FILTER_TABS: {
   { key: "cancelled", label: "Cancelled", icon: "ban-outline" },
 ];
 
+// ── Display name resolver ─────────────────────────────────────────────────────
+function resolveDisplayName(obj: any): string {
+  return (
+    obj?.displayName?.trim() ||
+    obj?.name?.trim() ||
+    obj?.fullName?.trim() ||
+    obj?.userName?.trim() ||
+    ""
+  );
+}
+
+function buildOwnerDisplayName(info: any, fallback: string): string {
+  if (info?.firstName && info?.lastName)
+    return `${info.firstName.trim()} ${info.lastName.trim()}`;
+  return (
+    info?.displayName?.trim() ||
+    info?.name?.trim() ||
+    info?.fullName?.trim() ||
+    info?.username?.trim() ||
+    info?.userName?.trim() ||
+    fallback ||
+    "Unknown User"
+  );
+}
+
+const PLACEHOLDER_AVATAR_HOSTS = [
+  "pravatar.cc",
+  "placeholder.com",
+  "ui-avatars.com",
+  "gravatar.com/avatar/00000000000000000000000000000000",
+];
+
+function resolveRealAvatar(...candidates: (string | null | undefined)[]): string | null {
+  for (const candidate of candidates) {
+    if (!candidate || typeof candidate !== "string") continue;
+    const url = candidate.trim();
+    if (!url.startsWith("http")) continue;
+    if (PLACEHOLDER_AVATAR_HOSTS.some((host) => url.includes(host))) continue;
+    return url;
+  }
+  return null;
+}
+
+function getTabColor(key: TradeOffer["status"] | "all"): string {
+  if (key === "all") return NAVY;
+  return STATUS_COLORS[key]?.text ?? NAVY;
+}
+
+function getTabBg(key: TradeOffer["status"] | "all"): string {
+  if (key === "all") return "#ECEDF8";
+  return STATUS_COLORS[key]?.bg ?? "#F3F4F6";
+}
+
+// ── MiniAvatar ────────────────────────────────────────────────────────────────
+function MiniAvatar({
+  uri,
+  name,
+  size,
+  style,
+}: {
+  uri?: string | null;
+  name?: string;
+  size: number;
+  style?: any;
+}) {
+  const hasRealImage = !!resolveRealAvatar(uri);
+  const initial = (name || "U")[0].toUpperCase();
+
+  if (hasRealImage) {
+    return (
+      <Image
+        source={{ uri: uri as string }}
+        style={[
+          { width: size, height: size, borderRadius: size / 2 },
+          style,
+        ]}
+      />
+    );
+  }
+  return (
+    <View
+      style={[
+        {
+          width: size,
+          height: size,
+          borderRadius: size / 2,
+          backgroundColor: NAVY,
+          justifyContent: "center",
+          alignItems: "center",
+        },
+        style,
+      ]}
+    >
+      <Text style={{ color: "#fff", fontSize: size * 0.4, fontWeight: "700" }}>
+        {initial}
+      </Text>
+    </View>
+  );
+}
+
 export default function TradeOffersScreen() {
   const { itemId } = useLocalSearchParams<{ itemId: string }>();
   const router = useRouter();
@@ -63,9 +162,6 @@ export default function TradeOffersScreen() {
   const [completingOfferId, setCompletingOfferId] = useState<string | null>(
     null,
   );
-
-  const [chatTrade, setChatTrade] = useState<TradeOffer | null>(null);
-  const [chatIsOwner, setChatIsOwner] = useState(false);
 
   const unsubRef = useRef<(() => void) | null>(null);
 
@@ -131,7 +227,6 @@ export default function TradeOffersScreen() {
       ? offers
       : offers.filter((o) => o.status === activeFilter);
 
-  // Count per status for badge
   const countFor = (key: string) =>
     key === "all"
       ? offers.length
@@ -194,12 +289,8 @@ export default function TradeOffersScreen() {
           const count = countFor(tab.key);
           if (count === 0 && tab.key !== "all") return null;
           const isActive = activeFilter === tab.key;
-          const color =
-            tab.key === "all" ? NAVY : (STATUS_COLORS[tab.key]?.text ?? NAVY);
-          const bg =
-            tab.key === "all"
-              ? "#ECEDF8"
-              : (STATUS_COLORS[tab.key]?.bg ?? "#F3F4F6");
+          const color = getTabColor(tab.key);
+          const bg = getTabBg(tab.key);
           return (
             <TouchableOpacity
               key={tab.key}
@@ -284,26 +375,27 @@ export default function TradeOffersScreen() {
               onAccept={() => handleRespond(offer, "accepted")}
               onDecline={() => handleRespond(offer, "declined")}
               onMessage={() => {
-                setChatTrade(offer);
-                setChatIsOwner(true);
+                router.push({
+                  pathname: "/chat",
+                  params: {
+                    ownerUserId: offer.offererId,
+                    itemId: offer.requestedItemId ?? offer.offeredItemId,
+                    itemTitle: offer.requestedItemTitle ?? offer.offeredItemTitle,
+                  },
+                });
               }}
               onComplete={() => handleComplete(offer)}
+              onPressUser={() =>
+                offer.offererId &&
+                router.push({
+                  pathname: "/user-profile",
+                  params: { userId: offer.offererId },
+                })
+              }
             />
           ))}
         </ScrollView>
       )}
-
-      {/* ── Chat modal ── */}
-      <TradeChatModal
-        visible={!!chatTrade}
-        trade={chatTrade}
-        isOwner={chatIsOwner}
-        onClose={() => {
-          setChatTrade(null);
-          setChatIsOwner(false);
-        }}
-        onStatusChange={() => {}}
-      />
     </SafeAreaView>
   );
 }
@@ -317,6 +409,7 @@ function OfferCard({
   onDecline,
   onMessage,
   onComplete,
+  onPressUser,
 }: {
   offer: TradeOffer;
   updatingId: string | null;
@@ -325,6 +418,7 @@ function OfferCard({
   onDecline: () => void;
   onMessage: () => void;
   onComplete: () => void;
+  onPressUser: () => void;
 }) {
   const isUpdating = updatingId === offer.id;
   const isCompleting = completingOfferId === offer.id;
@@ -343,6 +437,35 @@ function OfferCard({
   const otherHasConfirmed =
     completedBy.includes(otherParticipantUid) && !iHaveConfirmed;
 
+  const [offererName, setOffererName] = useState<string>(
+    offer.offererName?.trim() || "Trader",
+  );
+  const [offererAvatar, setOffererAvatar] = useState<string | null>(
+    resolveRealAvatar(offer.offererAvatar),
+  );
+
+  useEffect(() => {
+    if (!offer.offererId) return;
+    let cancelled = false;
+    getUserInfo(offer.offererId)
+      .then((info) => {
+        if (cancelled || !info) return;
+        setOffererName(
+          buildOwnerDisplayName(info, resolveDisplayName(offer) || "Trader"),
+        );
+        const realAvatar = resolveRealAvatar(
+          (info as any)?.avatarUrl,
+          (info as any)?.photoURL,
+          offer.offererAvatar,
+        );
+        setOffererAvatar(realAvatar);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [offer.offererId]);
+
   return (
     <View style={[styles.card, { borderColor: statusStyle.border }]}>
       {/* Status pill */}
@@ -358,16 +481,20 @@ function OfferCard({
       </View>
 
       {/* Offerer row */}
-      <View style={styles.offererRow}>
-        <Image
-          source={{
-            uri: offer.offererAvatar || "https://i.pravatar.cc/150?img=1",
-          }}
+      <TouchableOpacity
+        style={styles.offererRow}
+        onPress={onPressUser}
+        activeOpacity={0.8}
+      >
+        <MiniAvatar
+          uri={offererAvatar}
+          name={offererName}
+          size={36}
           style={styles.offererAvatar}
         />
         <View style={{ flex: 1 }}>
           <Text style={styles.offererName} numberOfLines={1}>
-            {offer.offererName || "Trader"}
+            {offererName}
           </Text>
           {offer.createdAt?.toDate && (
             <Text style={styles.offerDate}>
@@ -379,7 +506,7 @@ function OfferCard({
             </Text>
           )}
         </View>
-      </View>
+      </TouchableOpacity>
 
       {/* Offered item */}
       <View style={styles.offeredItemRow}>

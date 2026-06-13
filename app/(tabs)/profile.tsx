@@ -1466,7 +1466,7 @@ export default function ProfileScreen() {
           onPress={() => router.push("/edit-profile" as any)}
           activeOpacity={0.75}
         >
-          <Ionicons name="pencil" size={18} color="#FF6B6B" />
+          <Ionicons name="pencil" size={18} color="#ffffff" />
         </TouchableOpacity>
       </View>
 

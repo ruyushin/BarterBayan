@@ -26,9 +26,9 @@ import { auth } from "../firebaseConfig";
 import { addItem } from "../services/itemService";
 
 const NAVY = "#2f2f6f";
-const MAX_FILE_SIZE = 10485760; // 10 MB
+const MAX_FILE_SIZE = 10485760;
 const MAX_FILE_SIZE_MB = 10;
-const MAX_VIDEO_SIZE = 104857600; // 100 MB
+const MAX_VIDEO_SIZE = 104857600;
 const MAX_VIDEO_SIZE_MB = 100;
 const DESCRIPTION_MAX = 160;
 
@@ -52,8 +52,8 @@ const WEIGHT_UNITS = ["g", "kg", "lbs"];
 type MediaItem = {
   uri: string;
   type: "image" | "video";
-  /** Stored for dedup checks; not uploaded */
   originalUri?: string;
+  dedupKey?: string;
 };
 
 async function toSafeUri(uri: string): Promise<string> {
@@ -129,7 +129,6 @@ export default function AddItemScreen() {
   const router = useRouter();
   const { width: screenWidth, height: screenHeight } = useWindowDimensions();
 
-  // Existing fields
   const [selectedCategory, setSelectedCategory] = useState("1");
   const [selectedCondition, setSelectedCondition] = useState("1");
   const [title, setTitle] = useState("");
@@ -142,14 +141,12 @@ export default function AddItemScreen() {
   const [selectedMedia, setSelectedMedia] = useState<MediaItem | null>(null);
   const [successModalVisible, setSuccessModalVisible] = useState(false);
 
-  // New fields
   const [weightValue, setWeightValue] = useState("");
   const [weightUnit, setWeightUnit] = useState("kg");
   const [isWeightUnitOpen, setIsWeightUnitOpen] = useState(false);
   const [quantity, setQuantity] = useState("");
   const [additionalDescription, setAdditionalDescription] = useState("");
 
-  // Track original URIs to prevent duplicate uploads
   const originalUriSetRef = useRef<Set<string>>(new Set());
 
   const imageCount = media.filter((m) => m.type === "image").length;
@@ -165,7 +162,6 @@ export default function AddItemScreen() {
   const textSlide = useRef(new Animated.Value(20)).current;
   const textOpacity = useRef(new Animated.Value(0)).current;
 
-  // ─── Quantity helpers ─────────────────────────────────────────────────
   const incrementQuantity = () => {
     const current = parseInt(quantity || "0", 10);
     setQuantity(String(current + 1));
@@ -176,7 +172,7 @@ export default function AddItemScreen() {
     if (current > 1) setQuantity(String(current - 1));
   };
 
-  // ─── Media picker with duplicate detection ────────────────────────────
+  // ─── Media picker ─────────────────────────────────────────────────────
   const pickMedia = async () => {
     if (isAtLimit) {
       Alert.alert("Limit reached", "You can only add up to 10 files.");
@@ -190,7 +186,7 @@ export default function AddItemScreen() {
     }
 
     const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: "livePhotos" as any,
+      mediaTypes: ["images", "videos"],
       allowsEditing: false,
       allowsMultipleSelection: true,
       quality: 0.8,
@@ -213,8 +209,13 @@ export default function AddItemScreen() {
 
         if (typeof rawUri !== "string") continue;
 
-        // ── Duplicate check using original URI ──
-        if (originalUriSetRef.current.has(rawUri)) {
+        // ── Dedup by filename+filesize so same file picked across sessions is caught ──
+        const dedupKey =
+          asset.fileName && asset.fileSize
+            ? `${asset.fileName}-${asset.fileSize}`
+            : rawUri;
+
+        if (originalUriSetRef.current.has(dedupKey)) {
           duplicateCount++;
           continue;
         }
@@ -228,17 +229,12 @@ export default function AddItemScreen() {
 
         const safeUri = await toSafeUri(rawUri);
 
-        // Also guard against identical data-URIs (edge case on web)
-        if (originalUriSetRef.current.has(safeUri)) {
-          duplicateCount++;
-          continue;
-        }
-
-        originalUriSetRef.current.add(rawUri);
+        originalUriSetRef.current.add(dedupKey);
         newMedia.push({
           uri: safeUri,
           type: isVideo ? "video" : "image",
           originalUri: rawUri,
+          dedupKey,
         });
       }
 
@@ -405,7 +401,6 @@ export default function AddItemScreen() {
 
   // ─── Submit ───────────────────────────────────────────────────────────
   const handleSubmit = async () => {
-    // Validate all required fields
     if (!title.trim()) {
       Alert.alert("Missing field", "Please enter an item title.");
       return;
@@ -468,7 +463,6 @@ export default function AddItemScreen() {
         ownerId: currentUser.uid,
         likes: 0,
         likedBy: [],
-        // New fields
         estimatedWeight: `${parsedWeight} ${weightUnit}`,
         quantity: parsedQty,
         ...(additionalDescription.trim()
@@ -485,11 +479,11 @@ export default function AddItemScreen() {
     }
   };
 
-  // ─── Remove media & clean up dedup set ───────────────────────────────
+  // ─── Remove media ─────────────────────────────────────────────────────
   const removeMedia = (index: number) => {
     const item = media[index];
+    if (item?.dedupKey) originalUriSetRef.current.delete(item.dedupKey);
     if (item?.originalUri) originalUriSetRef.current.delete(item.originalUri);
-    // Also clean safeUri in case it was added as fallback
     originalUriSetRef.current.delete(item.uri);
     setMedia((prev) => prev.filter((_, i) => i !== index));
   };
@@ -528,8 +522,7 @@ export default function AddItemScreen() {
     <SafeAreaView style={styles.container}>
       <KeyboardAvoidingView
         style={{ flex: 1 }}
-        behavior={Platform.OS === "ios" ? "padding" : "height"}
-        keyboardVerticalOffset={Platform.OS === "ios" ? 0 : 20}
+        behavior="height"
       >
         <ScrollView
           showsVerticalScrollIndicator={false}
@@ -766,7 +759,6 @@ export default function AddItemScreen() {
               placeholderTextColor="#aaa"
               value={weightValue}
               onChangeText={(t) => {
-                // Allow numbers and a single decimal point
                 const cleaned = t
                   .replace(/[^0-9.]/g, "")
                   .replace(/(\..*)\./g, "$1");
@@ -855,7 +847,7 @@ export default function AddItemScreen() {
             </TouchableOpacity>
           </View>
 
-          {/* ── Description (160 chars) ── */}
+          {/* ── Description ── */}
           <View style={styles.labelRow}>
             <Text style={styles.sectionLabel}>
               Description <Text style={styles.required}>*</Text>
@@ -880,7 +872,7 @@ export default function AddItemScreen() {
             maxLength={DESCRIPTION_MAX}
           />
 
-          {/* ── Additional Description (optional) ── */}
+          {/* ── Additional Description ── */}
           <View style={styles.labelRow}>
             <Text style={styles.sectionLabel}>Additional Description</Text>
             <Text style={styles.optionalBadge}>Optional</Text>
@@ -1011,9 +1003,11 @@ export default function AddItemScreen() {
               }}
             >
               <Text style={styles.successTitle}>Uploaded!</Text>
-              <Text style={styles.successSub}>
-                {"Your item is now live 🎉"}
-              </Text>
+              {/* ── replaced emoji with Ionicon ── */}
+              <View style={styles.successSubRow}>
+                <Text style={styles.successSub}>Your item is now live</Text>
+                <Ionicons name="trophy" size={16} color="#f5c842" />
+              </View>
             </Animated.View>
             <Animated.View
               style={[styles.successPill, { opacity: textOpacity }]}
@@ -1074,7 +1068,6 @@ const styles = StyleSheet.create({
     borderRadius: 6,
   } as TextStyle,
 
-  // Limit bar
   limitBar: {
     flexDirection: "row",
     alignItems: "center",
@@ -1244,7 +1237,6 @@ const styles = StyleSheet.create({
   dropdownItemText: { fontSize: 14, color: "#333" } as TextStyle,
   dropdownItemSelected: { color: NAVY, fontWeight: "600" } as TextStyle,
 
-  // Weight
   weightRow: {
     flexDirection: "row",
     alignItems: "center",
@@ -1272,7 +1264,6 @@ const styles = StyleSheet.create({
   } as ViewStyle,
   unitButtonText: { fontSize: 14, fontWeight: "600", color: NAVY } as TextStyle,
 
-  // Quantity
   quantityRow: {
     flexDirection: "row",
     alignItems: "center",
@@ -1438,7 +1429,13 @@ const styles = StyleSheet.create({
     letterSpacing: -0.5,
     marginBottom: 6,
   } as TextStyle,
-  successSub: { fontSize: 14, color: "#888", marginBottom: 24 } as TextStyle,
+  successSubRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    marginBottom: 24,
+  } as ViewStyle,
+  successSub: { fontSize: 14, color: "#888" } as TextStyle,
   successPill: {
     flexDirection: "row",
     alignItems: "center",

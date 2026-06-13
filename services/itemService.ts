@@ -103,6 +103,21 @@ export const getUserInfo = async (userId: string) => {
   }
 };
 
+// FETCH SINGLE ITEM by id — used by trade-offers screen for the item hero card
+export const getItemById = async (itemId: string) => {
+  try {
+    const itemRef = doc(db, "items", itemId);
+    const itemSnap = await getDoc(itemRef);
+    if (itemSnap.exists()) {
+      return { id: itemSnap.id, ...itemSnap.data() };
+    }
+    return null;
+  } catch (error) {
+    console.error("Error getting item by id:", error);
+    throw error;
+  }
+};
+
 export const getItemDetails = async (itemId: string) => {
   try {
     const itemRef = doc(db, "items", itemId);
