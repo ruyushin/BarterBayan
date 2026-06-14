@@ -1,6 +1,5 @@
 import { Ionicons } from "@expo/vector-icons";
 import { Audio } from "expo-av";
-import { BlurView } from "expo-blur";
 import * as Clipboard from "expo-clipboard";
 import * as FileSystem from "expo-file-system/legacy";
 import * as ImagePicker from "expo-image-picker";
@@ -54,17 +53,10 @@ const DELETE_WINDOW_MS = 15 * 60 * 1000;
 const { height: SCREEN_HEIGHT, width: SCREEN_WIDTH } = Dimensions.get("window");
 const TIME_CLUSTER_MINUTES = 5;
 
-// Media bubbles: sized to roughly match the look of native chat apps —
-// wide enough to read clearly, capped on height so very tall/wide images
-// don't dominate the screen. Aspect ratio is always preserved (see
-// PhotoBubble / VideoBubble), nothing is cropped/cover-cropped.
 const MEDIA_BUBBLE_WIDTH = Math.min(280, SCREEN_WIDTH * 0.72);
 const MEDIA_BUBBLE_MAX_HEIGHT = MEDIA_BUBBLE_WIDTH * 1.6;
 const MEDIA_BUBBLE_MIN_HEIGHT = MEDIA_BUBBLE_WIDTH * 0.6;
 
-// Approximate rendered height of the floating header (incl. status-bar
-// padding). Used to push list content below it since the header is now
-// absolutely positioned (FB Marketplace style floating header).
 const FLOATING_HEADER_HEIGHT = 96;
 
 const SUGGESTED_MESSAGES = [
@@ -97,7 +89,7 @@ type MediaDraft = {
   uri: string;
   type: "photo" | "video";
   caption: string;
-  file?: File; // web only — original File object for upload
+  file?: File;
 };
 
 // ─── Utility functions ────────────────────────────────────────────────────────
@@ -628,20 +620,51 @@ const reactModal = StyleSheet.create({
   userName: { fontSize: 14, color: "#111", fontWeight: "500" },
 });
 
-// ─── MultiSelect bars ─────────────────────────────────────────────────────────
-function MultiSelectBar({ onCancel }: { count: number; onCancel: () => void; onDeleteForMe: () => void; onDeleteForEveryone: () => void; }) {
+// ─── MultiSelectBar ───────────────────────────────────────────────────────────
+function MultiSelectBar({ count, onCancel, onDeleteForMe, onDeleteForEveryone }: {
+  count: number; onCancel: () => void; onDeleteForMe: () => void; onDeleteForEveryone: () => void;
+}) {
+  const insets = useSafeAreaInsets();
   return (
-    <View style={msb.wrap}>
-      <TouchableOpacity onPress={onCancel}><Text style={msb.cancelLabel}>Cancel</Text></TouchableOpacity>
-      <Text style={msb.count}>Delete messages</Text>
-      <View style={{ width: 60 }} />
+    <View style={[styles.header, styles.floatingHeaderInner, { paddingVertical: 16, backgroundColor: NAVY }]}>
+      <View style={[styles.header, styles.floatingHeaderInner]}>
+        <TouchableOpacity onPress={onCancel} style={styles.backBtn}>
+          <Ionicons name="close" size={24} color="white" />
+        </TouchableOpacity>
+        <View style={styles.headerContent}>
+          <View style={styles.headerInfo}>
+            <View style={styles.headerNameRow}>
+              <Text style={styles.headerName} numberOfLines={1}>
+                {count > 0 ? `${count} selected` : "Select messages"}
+              </Text>
+            </View>
+          </View>
+        </View>
+        <TouchableOpacity
+          onPress={onDeleteForMe}
+          hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+        >
+          <Ionicons name="trash-outline" size={20} color="white" />
+        </TouchableOpacity>
+        <TouchableOpacity
+          onPress={onDeleteForEveryone}
+          hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+        >
+          <Ionicons name="trash-bin-outline" size={20} color="white" />
+        </TouchableOpacity>
+      </View>
     </View>
   );
 }
 
-function MultiSelectFooter({ count, onDeleteForMe, onDeleteForEveryone }: { count: number; onDeleteForMe: () => void; onDeleteForEveryone: () => void; }) {
+// FIX: MultiSelectFooter now calls useSafeAreaInsets() internally so the
+// delete buttons are never hidden behind the phone's navigation bar.
+function MultiSelectFooter({ count, onDeleteForMe, onDeleteForEveryone }: {
+  count: number; onDeleteForMe: () => void; onDeleteForEveryone: () => void;
+}) {
+  const insets = useSafeAreaInsets();
   return (
-    <View style={msb.footer}>
+    <View style={[msb.footer, { paddingBottom: Math.max(insets.bottom, 12) }]}>
       <TouchableOpacity onPress={onDeleteForEveryone} style={msb.footerBtn}>
         <Text style={msb.footerLabel}>Delete for Everyone ({count})</Text>
       </TouchableOpacity>
@@ -653,10 +676,18 @@ function MultiSelectFooter({ count, onDeleteForMe, onDeleteForEveryone }: { coun
 }
 
 const msb = StyleSheet.create({
-  wrap: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", backgroundColor: NAVY, paddingHorizontal: 16, paddingVertical: 12 },
+  // FIX: removed paddingVertical — top padding is now set dynamically via
+  // insets.top inside MultiSelectBar; bottom padding in MultiSelectFooter.
+  wrap: {
+  flexDirection: "row", alignItems: "center", justifyContent: "space-between",
+  backgroundColor: NAVY, paddingHorizontal: 16, paddingBottom: 18, paddingTop: 20,
+  },
   cancelLabel: { color: "#fff", fontSize: 15 },
-  count: { color: "#fff", fontWeight: "700", fontSize: 16 },
-  footer: { backgroundColor: "#fff", borderTopWidth: 1, borderTopColor: "#eee", paddingHorizontal: 16, paddingVertical: 12, gap: 8 },
+  count: { color: "#fff", fontWeight: "700", fontSize: 16, },
+  footer: {
+    backgroundColor: "#fff", borderTopWidth: 1, borderTopColor: "#eee",
+    paddingHorizontal: 16, paddingTop: 20, gap: 8,
+  },
   footerBtn: { backgroundColor: "#ef4444", borderRadius: 10, paddingVertical: 14, alignItems: "center" },
   footerBtnSecondary: { backgroundColor: "#f2f2f7" },
   footerLabel: { fontSize: 15, fontWeight: "700", color: "#fff" },
@@ -726,9 +757,6 @@ const vr = StyleSheet.create({
 });
 
 // ─── MediaDraftsModal ─────────────────────────────────────────────────────────
-// Lets the user preview picked photos/videos, add a caption to each, remove
-// items, add more, and either send everything at once or send a single item.
-// Nothing uploads until the user explicitly taps a send action.
 function MediaDraftsModal({
   visible, drafts, onClose, onRemove, onCaptionChange, onAddMore, onSendAll, onSendOne, sending,
 }: {
@@ -832,11 +860,7 @@ const draftStyles = StyleSheet.create({
 });
 
 // ─── PhotoBubble ──────────────────────────────────────────────────────────────
-// Preserves the photo's natural aspect ratio (never crops the image). The
-// bubble height is computed from the real width/height of the image and
-// clamped between a min/max so very tall or very wide images stay readable,
-// while resizeMode="contain" guarantees nothing is ever cut off.
-function PhotoBubble({ uri, isMe }: { uri: string; isMe: boolean }) {
+function PhotoBubble({ uri, isMe, onLongPress }: { uri: string; isMe: boolean; onLongPress?: (e: any) => void }) {
   const [fullscreen, setFullscreen] = useState(false);
   const [bubbleHeight, setBubbleHeight] = useState(MEDIA_BUBBLE_WIDTH);
 
@@ -850,14 +874,15 @@ function PhotoBubble({ uri, isMe }: { uri: string; isMe: boolean }) {
         const height = MEDIA_BUBBLE_WIDTH / ratio;
         setBubbleHeight(Math.min(Math.max(height, MEDIA_BUBBLE_MIN_HEIGHT), MEDIA_BUBBLE_MAX_HEIGHT));
       },
-      () => { /* ignore errors, keep default square */ },
+      () => {},
     );
     return () => { cancelled = true; };
   }, [uri]);
 
   return (
     <>
-      <TouchableOpacity onPress={() => setFullscreen(true)} activeOpacity={0.92}
+      <TouchableOpacity onPress={() => setFullscreen(true)} onLongPress={onLongPress}
+        delayLongPress={350} activeOpacity={0.92}
         style={[
           mediaBubble.wrap,
           isMe ? mediaBubble.wrapRight : mediaBubble.wrapLeft,
@@ -899,9 +924,7 @@ function VideoPlayerWrapper({ uri }: { uri: string }) {
 }
 
 // ─── VideoBubble ──────────────────────────────────────────────────────────────
-// Uses a non-square (portrait-leaning) default ratio for the thumbnail so video
-// bubbles match the look of typical phone-recorded clips instead of a square.
-function VideoBubble({ uri, isMe }: { uri: string; isMe: boolean }) {
+function VideoBubble({ uri, isMe, onLongPress }: { uri: string; isMe: boolean; onLongPress?: (e: any) => void }) {
   const [fullscreen, setFullscreen] = useState(false);
   const isBlob = uri?.startsWith("blob:");
   const bubbleHeight = MEDIA_BUBBLE_WIDTH * (4 / 3);
@@ -910,6 +933,8 @@ function VideoBubble({ uri, isMe }: { uri: string; isMe: boolean }) {
     <>
       <TouchableOpacity
         onPress={() => setFullscreen(true)}
+        onLongPress={onLongPress}
+        delayLongPress={350}
         activeOpacity={0.92}
         style={[
           mediaBubble.wrap,
@@ -1082,7 +1107,7 @@ export default function ChatScreen() {
   const recordingRef = useRef<Audio.Recording | null>(null);
   const recordTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  // ── Media drafts (photo/video) — staged before send, supports multi-send ──
+  // ── Media drafts ──
   const [mediaDrafts, setMediaDrafts] = useState<MediaDraft[]>([]);
   const [draftsModalVisible, setDraftsModalVisible] = useState(false);
 
@@ -1096,7 +1121,6 @@ export default function ChatScreen() {
     [currentUserId, ownerUserId],
   );
 
-  // ── Resolve display name — strip emails ──
   const ownerName = useMemo(() => {
     if (ownerInfo?.firstName && ownerInfo?.lastName)
       return `${ownerInfo.firstName.trim()} ${ownerInfo.lastName.trim()}`;
@@ -1110,14 +1134,13 @@ export default function ChatScreen() {
   }, [ownerInfo]);
 
   const presenceStatusText = presence?.isOnline
-  ? "Active"
-  : presence?.lastSeen
-    ? formatLastSeen(presence.lastSeen)
-    : "Offline";
+    ? "Active"
+    : presence?.lastSeen
+      ? formatLastSeen(presence.lastSeen)
+      : "Offline";
 
   const presenceDotColor = presence?.isOnline ? "#4CAF50" : "#9aa";
   const ownerFirstName = useMemo(() => ownerName.split(" ")[0], [ownerName]);
-
   const avatarUri = resolveAvatar(ownerInfo);
 
   // ── Focus effect ──
@@ -1166,10 +1189,11 @@ export default function ChatScreen() {
   );
 
   useEffect(() => {
-  if (!ownerUserId) return;
-  const unsub = subscribeToPresence(ownerUserId as string, setPresence);
-  return () => unsub();
+    if (!ownerUserId) return;
+    const unsub = subscribeToPresence(ownerUserId as string, setPresence);
+    return () => unsub();
   }, [ownerUserId]);
+
   // ── Keyboard listener ──
   useEffect(() => {
     if (Platform.OS === "web") return;
@@ -1310,10 +1334,7 @@ export default function ChatScreen() {
     } finally { setSending(false); setUploadLabel(""); }
   };
 
-  // ── Media picker — stages drafts instead of sending immediately ──
-  // Supports picking multiple photos at once (multi-send). The user previews
-  // everything in MediaDraftsModal, can add captions, remove items, add more,
-  // and only then sends (all at once or one at a time).
+  // ── Media picker ──
   const handleMediaAttach = () => {
     if (Platform.OS === "web") {
       const fileInput = document.createElement("input");
@@ -1361,7 +1382,6 @@ export default function ChatScreen() {
         result = await ImagePicker.launchImageLibraryAsync({
           mediaTypes: mediaType === "photo" ? ImagePicker.MediaTypeOptions.Images : ImagePicker.MediaTypeOptions.Videos,
           quality: 0.85, videoMaxDuration: 60,
-          // Multi-select only makes sense for photo library picks
           allowsMultipleSelection: source === "library" && mediaType === "photo",
           selectionLimit: 10,
         });
@@ -1381,7 +1401,6 @@ export default function ChatScreen() {
     }
   };
 
-  // ── Upload + send a single media draft ──
   const sendSingleMediaDraft = async (draft: MediaDraft) => {
     if (!currentUserId || !ownerUserId) return;
     setUploadLabel(draft.type === "photo" ? "Uploading photo…" : "Uploading video…");
@@ -1420,7 +1439,6 @@ export default function ChatScreen() {
     }
   };
 
-  // ── Send all staged drafts, one by one ──
   const handleSendAllDrafts = async () => {
     if (mediaDrafts.length === 0) return;
     const items = [...mediaDrafts];
@@ -1449,7 +1467,6 @@ export default function ChatScreen() {
     }
   };
 
-  // ── Send a single draft, leaving the rest staged ──
   const handleSendOneDraft = async (index: number) => {
     const draft = mediaDrafts[index];
     if (!draft) return;
@@ -1464,7 +1481,6 @@ export default function ChatScreen() {
     } finally {
       setSending(false);
       setUploadLabel("");
-      // Close the modal if nothing's left to preview
       setMediaDrafts((prev) => {
         if (prev.length === 0) setDraftsModalVisible(false);
         return prev;
@@ -1486,11 +1502,9 @@ export default function ChatScreen() {
 
   const handleAddMoreDrafts = () => {
     setDraftsModalVisible(false);
-    // Re-open the picker; results get appended to existing drafts
     setTimeout(() => handleMediaAttach(), 250);
   };
 
-  // ── Save media to device ──
   const handleSaveMedia = async (msg: any) => {
     if (Platform.OS === "web") {
       window.open(msg.mediaUrl, "_blank");
@@ -1701,9 +1715,12 @@ export default function ChatScreen() {
                 </Text>
               </View>
             ) : isPhoto ? (
-              <Pressable onLongPress={(e) => handleLongPress(item, e.nativeEvent.pageY)}
-                onPress={() => multiSelect && toggleSelect(item.id)} delayLongPress={350}>
-                <PhotoBubble uri={item.mediaUrl} isMe={isMe} />
+              <Pressable onPress={() => multiSelect && toggleSelect(item.id)}>
+                <PhotoBubble
+                  uri={item.mediaUrl}
+                  isMe={isMe}
+                  onLongPress={(e) => handleLongPress(item, e.nativeEvent.pageY)}
+                />
                 {!!item.text && (
                   <View style={[styles.mediaCaptionWrap, isMe ? styles.mediaCaptionRight : styles.mediaCaptionLeft]}>
                     <Text style={[styles.mediaCaptionText, isMe ? styles.myBubbleText : styles.theirBubbleText]}>
@@ -1713,9 +1730,12 @@ export default function ChatScreen() {
                 )}
               </Pressable>
             ) : isVideo ? (
-              <Pressable onLongPress={(e) => handleLongPress(item, e.nativeEvent.pageY)}
-                onPress={() => multiSelect && toggleSelect(item.id)} delayLongPress={350}>
-                <VideoBubble uri={item.mediaUrl} isMe={isMe} />
+              <Pressable onPress={() => multiSelect && toggleSelect(item.id)}>
+                <VideoBubble
+                  uri={item.mediaUrl}
+                  isMe={isMe}
+                  onLongPress={(e) => handleLongPress(item, e.nativeEvent.pageY)}
+                />
                 {!!item.text && (
                   <View style={[styles.mediaCaptionWrap, isMe ? styles.mediaCaptionRight : styles.mediaCaptionLeft]}>
                     <Text style={[styles.mediaCaptionText, isMe ? styles.myBubbleText : styles.theirBubbleText]}>
@@ -1795,7 +1815,6 @@ export default function ChatScreen() {
 
   const ctxIsMe = ctxMessage ? ctxMessage.senderId === currentUserId || ctxMessage.sender === "me" : false;
 
-  // ── Resolve current user display name safely ──
   const myDisplayName = (() => {
     const raw = auth.currentUser?.displayName ?? "";
     return raw.includes("@") ? "You" : raw || "You";
@@ -1851,13 +1870,18 @@ export default function ChatScreen() {
           onCancel={() => setEditingMessage(null)} />
       )}
 
-      {/* Multi-select bar replaces the floating header entirely while active */}
+      {/*
+        FIX: Multi-select bar — no longer wrapped in a View with paddingTop.
+        MultiSelectBar handles its own safe-area top padding internally via
+        useSafeAreaInsets(), so the outer wrapper has been removed entirely.
+      */}
       {multiSelect && (
-        <View style={[styles.multiSelectWrap, { paddingTop: insets.top }]}>
-          <MultiSelectBar count={selectedIds.size}
-            onCancel={() => { setMultiSelect(false); setSelectedIds(new Set()); }}
-            onDeleteForMe={handleMultiDeleteForMe} onDeleteForEveryone={handleMultiDeleteForEveryone} />
-        </View>
+        <MultiSelectBar
+          count={selectedIds.size}
+          onCancel={() => { setMultiSelect(false); setSelectedIds(new Set()); }}
+          onDeleteForMe={handleMultiDeleteForMe}
+          onDeleteForEveryone={handleMultiDeleteForEveryone}
+        />
       )}
 
       <KeyboardAvoidingView style={{ flex: 1 }}
@@ -1899,8 +1923,17 @@ export default function ChatScreen() {
           </View>
         )}
 
+        {/*
+          FIX: MultiSelectFooter now handles its own bottom safe-area padding
+          internally via useSafeAreaInsets(), so the delete buttons are never
+          hidden behind the phone's navigation / gesture bar.
+        */}
         {multiSelect && selectedIds.size > 0 && (
-          <MultiSelectFooter count={selectedIds.size} onDeleteForMe={handleMultiDeleteForMe} onDeleteForEveryone={handleMultiDeleteForEveryone} />
+          <MultiSelectFooter
+            count={selectedIds.size}
+            onDeleteForMe={handleMultiDeleteForMe}
+            onDeleteForEveryone={handleMultiDeleteForEveryone}
+          />
         )}
 
         {replyTo && !multiSelect && (
@@ -1960,12 +1993,9 @@ export default function ChatScreen() {
         )}
       </KeyboardAvoidingView>
 
-      {/* ── Floating header (FB Marketplace style) ──
-          Absolutely positioned over the message list with a translucent blur
-          so messages scroll underneath it. Hidden while multi-select is active. */}
+      {/* ── Floating header (FB Marketplace style) ── */}
       {!multiSelect && (
         <View style={[styles.floatingHeaderWrap, { paddingTop: insets.top }]} pointerEvents="box-none">
-          <BlurView intensity={45} tint="dark" style={StyleSheet.absoluteFill} />
           <View style={[styles.header, styles.floatingHeaderInner]}>
             <TouchableOpacity onPress={handleBack} style={styles.backBtn}>
               <Ionicons name="chevron-back" size={24} color="white" />
@@ -1997,7 +2027,6 @@ export default function ChatScreen() {
             </TouchableOpacity>
           </View>
 
-          {/* Marketplace listing card — shown when arriving from a trade offer / listing chat */}
           {itemTitle && (
             <View style={styles.offerCard}>
               {itemImage ? (
@@ -2019,22 +2048,13 @@ export default function ChatScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#f5f5f7" },
   centered: { flex: 1, justifyContent: "center", alignItems: "center" },
-
-  // Base header layout — reused by both the floating header and the
-  // static loading-state header.
   header: { flexDirection: "row", alignItems: "center", backgroundColor: NAVY, paddingHorizontal: 14, paddingVertical: 10, gap: 10 },
   headerStatic: { paddingTop: 32 },
-
-  // Floating header (FB Marketplace style): absolutely positioned over the
-  // FlatList with a blurred translucent background. The inner header row
-  // keeps a semi-transparent navy tint so it stays legible over any content.
   floatingHeaderWrap: {
     position: "absolute", top: 0, left: 0, right: 0, zIndex: 20, overflow: "hidden",
   },
   floatingHeaderInner: { backgroundColor: "rgba(47,47,111,0.55)" },
-
   multiSelectWrap: { backgroundColor: NAVY },
-
   backBtn: { padding: 2 },
   headerContent: { flex: 1, flexDirection: "row", alignItems: "center", gap: 10 },
   headerAvatar: {},
@@ -2082,7 +2102,6 @@ const styles = StyleSheet.create({
   theirBubbleText: { color: "#111" },
   deletedText: { color: "#8e8e93", fontStyle: "italic" },
   editedLabel: { fontSize: 10, marginTop: 2 },
-  // Captions shown under photo/video bubbles
   mediaCaptionWrap: { marginTop: 4, paddingHorizontal: 4, maxWidth: MEDIA_BUBBLE_WIDTH },
   mediaCaptionRight: { alignSelf: "flex-end" },
   mediaCaptionLeft: { alignSelf: "flex-start" },
@@ -2104,7 +2123,6 @@ const styles = StyleSheet.create({
   suggestedButtons: { gap: 6 },
   suggestedButton: { backgroundColor: "white", paddingHorizontal: 14, paddingVertical: 10, borderRadius: 10, borderWidth: 1, borderColor: "#e5e7eb" },
   suggestedButtonText: { fontSize: 13, fontWeight: "500", color: NAVY },
-  // Pending media-drafts pill above the input bar
   draftsPill: { flexDirection: "row", alignItems: "center", gap: 6, backgroundColor: "#eef0fb", paddingHorizontal: 12, paddingVertical: 8, borderRadius: 16, alignSelf: "flex-start", marginHorizontal: 12, marginBottom: 6, borderWidth: 1, borderColor: "#dde0f7" },
   draftsPillText: { color: NAVY, fontSize: 12, fontWeight: "600" },
   inputBar: { flexDirection: "row", alignItems: "center", paddingHorizontal: 12, paddingTop: 10, backgroundColor: "white", borderTopWidth: 1, borderTopColor: "#eee", gap: 8 },

@@ -1,6 +1,10 @@
 // profile.tsx — patched: added follower/following counts + navigation to followers screen
 // All original functionality preserved. Follow counts are real-time via onSnapshot.
 // FIX: savedCount now reflects only items that still exist (deleted posts no longer counted).
+// FIX: setUserOfflineBeforeSignOut called before signOut to prevent Firestore permission error.
+// FIX: Review comments are now collapsible.
+// FIX: Email no longer shown as display name.
+// FIX: Ratings & Reviews section is now collapsible (collapsed by default).
 
 import { Ionicons } from "@expo/vector-icons";
 import * as ImagePicker from "expo-image-picker";
@@ -41,7 +45,8 @@ import {
   View,
 } from "react-native";
 import { auth, db } from "../../firebaseConfig";
-import { getUserSavedItems } from "../../services/itemService"; // ← FIX: import for real count
+import { getUserSavedItems } from "../../services/itemService";
+import { setUserOfflineBeforeSignOut } from "../../services/presenceService";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 const DARK_BLUE = "#2f2f6f";
@@ -88,6 +93,60 @@ const REPORT_CATEGORIES: string[] = [
   "Scam or fraud",
   "Other",
 ];
+
+// ─── Resolve display name safely (never returns an email) ─────────────────────
+function resolveDisplayName(data: any, fallback = "Unknown User"): string {
+  if (data?.firstName && data?.lastName)
+    return `${String(data.firstName).trim()} ${String(data.lastName).trim()}`;
+  const candidates = [
+    data?.username,
+    data?.displayName,
+    data?.name,
+    data?.fullName,
+  ];
+  for (const candidate of candidates) {
+    const raw = typeof candidate === "string" ? candidate.trim() : "";
+    if (raw && !raw.includes("@")) return raw;
+  }
+  return fallback;
+}
+
+// ─── Collapsible Comment ──────────────────────────────────────────────────────
+function CollapsibleComment({
+  comment,
+  style,
+  quoteStyle,
+  containerStyle,
+}: {
+  comment: string;
+  style?: any;
+  quoteStyle?: any;
+  containerStyle?: any;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const COLLAPSE_THRESHOLD = 100;
+  const isLong = comment.length > COLLAPSE_THRESHOLD;
+
+  return (
+    <View style={containerStyle}>
+      {quoteStyle && (
+        <Text style={quoteStyle}>"</Text>
+      )}
+      <View style={{ flex: 1 }}>
+        <Text style={style}>
+          {isLong && !expanded ? comment.slice(0, COLLAPSE_THRESHOLD) + "…" : comment}
+        </Text>
+        {isLong && (
+          <TouchableOpacity onPress={() => setExpanded((p) => !p)} activeOpacity={0.7}>
+            <Text style={collapsibleStyles.toggle}>
+              {expanded ? "Show less" : "Show more"}
+            </Text>
+          </TouchableOpacity>
+        )}
+      </View>
+    </View>
+  );
+}
 
 // ─── Star Rating ──────────────────────────────────────────────────────────────
 function StarRating({
@@ -579,10 +638,12 @@ function OverviewModal({
                     )}
                   </View>
                   {r.comment ? (
-                    <View style={ovStyles.commentBox}>
-                      <Text style={ovStyles.commentQuote}>"</Text>
-                      <Text style={ovStyles.comment}>{r.comment}</Text>
-                    </View>
+                    <CollapsibleComment
+                      comment={r.comment}
+                      containerStyle={ovStyles.commentBox}
+                      quoteStyle={ovStyles.commentQuote}
+                      style={ovStyles.comment}
+                    />
                   ) : (
                     <Text style={ovStyles.noComment}>No written review</Text>
                   )}
@@ -1054,7 +1115,7 @@ function ReportModal({
   );
 }
 
-// ─── Recent Reviews Section ───────────────────────────────────────────────────
+// ─── Recent Reviews Section (collapsible) ─────────────────────────────────────
 function RecentReviewsSection({
   userId,
   ratingCount,
@@ -1066,6 +1127,9 @@ function RecentReviewsSection({
 }) {
   const [reviews, setReviews] = useState<Review[]>([]);
   const [loading, setLoading] = useState(false);
+  const [expanded, setExpanded] = useState(false);
+
+  const PREVIEW_COUNT = 3;
 
   useEffect(() => {
     if (!userId) return;
@@ -1074,7 +1138,7 @@ function RecentReviewsSection({
       query(
         collection(db, "users", userId, "reviews"),
         orderBy("createdAt", "desc"),
-        limit(3),
+        limit(20),
       ),
     )
       .then((snap) =>
@@ -1089,95 +1153,126 @@ function RecentReviewsSection({
       .finally(() => setLoading(false));
   }, [userId]);
 
+  const visibleReviews = expanded ? reviews.slice(0, PREVIEW_COUNT) : [];
+  const hasMore = reviews.length > PREVIEW_COUNT;
+
   return (
     <View style={reviewSectionStyles.wrapper}>
-      <View style={reviewSectionStyles.header}>
-        <Text style={reviewSectionStyles.title}>Ratings & Reviews</Text>
-        {ratingCount > 0 && (
-          <View style={reviewSectionStyles.countPill}>
-            <Text style={reviewSectionStyles.countPillText}>{ratingCount}</Text>
-          </View>
-        )}
-      </View>
-      {loading ? (
-        <ActivityIndicator
-          color={DARK_BLUE}
-          style={{ marginVertical: 16 }}
-          size="small"
-        />
-      ) : reviews.length === 0 ? (
-        <View style={reviewSectionStyles.emptyBox}>
-          <Ionicons name="star-outline" size={28} color="#D8D8D8" />
-          <Text style={reviewSectionStyles.emptyText}>
-            No reviews yet. Complete trades to earn ratings.
-          </Text>
-        </View>
-      ) : (
-        <>
-          {reviews.map((r) => (
-            <View key={r.id} style={reviewSectionStyles.reviewRow}>
-              {r.reviewerAvatar ? (
-                <Image
-                  source={{ uri: r.reviewerAvatar }}
-                  style={reviewSectionStyles.avatar}
-                />
-              ) : (
-                <View
-                  style={[
-                    reviewSectionStyles.avatar,
-                    reviewSectionStyles.avatarPlaceholder,
-                  ]}
-                >
-                  <Text style={reviewSectionStyles.avatarInitial}>
-                    {(r.reviewerName ?? "?")[0].toUpperCase()}
-                  </Text>
-                </View>
-              )}
-              <View style={reviewSectionStyles.reviewBody}>
-                <View style={reviewSectionStyles.reviewMeta}>
-                  <Text style={reviewSectionStyles.reviewerName}>
-                    {r.reviewerName}
-                  </Text>
-                  <View style={reviewSectionStyles.starsRow}>
-                    {Array.from({ length: MAX_RATING }, (_, i) => (
-                      <Ionicons
-                        key={i}
-                        name={i + 1 <= r.rating ? "star" : "star-outline"}
-                        size={12}
-                        color={i + 1 <= r.rating ? STAR_FILLED : STAR_EMPTY}
-                      />
-                    ))}
-                  </View>
-                  {r.createdAt?.toDate && (
-                    <Text style={reviewSectionStyles.date}>
-                      {r.createdAt
-                        .toDate()
-                        .toLocaleDateString("en-PH", {
-                          month: "short",
-                          day: "numeric",
-                        })}
-                    </Text>
-                  )}
-                </View>
-                {r.comment ? (
-                  <Text style={reviewSectionStyles.comment} numberOfLines={2}>
-                    {r.comment}
-                  </Text>
-                ) : null}
-              </View>
+      {/* ── Tappable header row ── */}
+      <TouchableOpacity
+        style={reviewSectionStyles.header}
+        onPress={() => setExpanded((v) => !v)}
+        activeOpacity={0.7}
+      >
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 8, flex: 1 }}>
+          <Text style={reviewSectionStyles.title}>Ratings & Reviews</Text>
+          {ratingCount > 0 && (
+            <View style={reviewSectionStyles.countPill}>
+              <Text style={reviewSectionStyles.countPillText}>{ratingCount}</Text>
             </View>
-          ))}
-          {ratingCount > 3 && (
-            <TouchableOpacity
-              style={reviewSectionStyles.seeAllBtn}
-              onPress={onSeeAll}
-              activeOpacity={0.7}
-            >
-              <Text style={reviewSectionStyles.seeAllText}>
-                See all {ratingCount} reviews
+          )}
+        </View>
+        <Ionicons
+          name={expanded ? "chevron-up" : "chevron-down"}
+          size={18}
+          color={DARK_BLUE}
+        />
+      </TouchableOpacity>
+
+      {/* ── Collapsed hint ── */}
+      {!expanded && ratingCount > 0 && (
+        <Text style={reviewSectionStyles.collapsedHint}>
+          Tap to view {ratingCount} {ratingCount === 1 ? "review" : "reviews"}
+        </Text>
+      )}
+
+      {/* ── Expanded body ── */}
+      {expanded && (
+        <>
+          {loading ? (
+            <ActivityIndicator
+              color={DARK_BLUE}
+              style={{ marginVertical: 16 }}
+              size="small"
+            />
+          ) : reviews.length === 0 ? (
+            <View style={reviewSectionStyles.emptyBox}>
+              <Ionicons name="star-outline" size={28} color="#D8D8D8" />
+              <Text style={reviewSectionStyles.emptyText}>
+                No reviews yet. Complete trades to earn ratings.
               </Text>
-              <Ionicons name="chevron-forward" size={14} color={DARK_BLUE} />
-            </TouchableOpacity>
+            </View>
+          ) : (
+            <>
+              {visibleReviews.map((r) => (
+                <View key={r.id} style={reviewSectionStyles.reviewRow}>
+                  {r.reviewerAvatar ? (
+                    <Image
+                      source={{ uri: r.reviewerAvatar }}
+                      style={reviewSectionStyles.avatar}
+                    />
+                  ) : (
+                    <View
+                      style={[
+                        reviewSectionStyles.avatar,
+                        reviewSectionStyles.avatarPlaceholder,
+                      ]}
+                    >
+                      <Text style={reviewSectionStyles.avatarInitial}>
+                        {(r.reviewerName ?? "?")[0].toUpperCase()}
+                      </Text>
+                    </View>
+                  )}
+                  <View style={reviewSectionStyles.reviewBody}>
+                    <View style={reviewSectionStyles.reviewMeta}>
+                      <Text style={reviewSectionStyles.reviewerName}>
+                        {r.reviewerName}
+                      </Text>
+                      <View style={reviewSectionStyles.starsRow}>
+                        {Array.from({ length: MAX_RATING }, (_, i) => (
+                          <Ionicons
+                            key={i}
+                            name={i + 1 <= r.rating ? "star" : "star-outline"}
+                            size={12}
+                            color={i + 1 <= r.rating ? STAR_FILLED : STAR_EMPTY}
+                          />
+                        ))}
+                      </View>
+                      {r.createdAt?.toDate && (
+                        <Text style={reviewSectionStyles.date}>
+                          {r.createdAt
+                            .toDate()
+                            .toLocaleDateString("en-PH", {
+                              month: "short",
+                              day: "numeric",
+                            })}
+                        </Text>
+                      )}
+                    </View>
+                    {r.comment ? (
+                      <CollapsibleComment
+                        comment={r.comment}
+                        style={reviewSectionStyles.comment}
+                      />
+                    ) : null}
+                  </View>
+                </View>
+              ))}
+
+              {/* See all button */}
+              {hasMore && (
+                <TouchableOpacity
+                  style={reviewSectionStyles.seeAllBtn}
+                  onPress={onSeeAll}
+                  activeOpacity={0.7}
+                >
+                  <Text style={reviewSectionStyles.seeAllText}>
+                    See all {ratingCount} reviews
+                  </Text>
+                  <Ionicons name="chevron-forward" size={14} color={DARK_BLUE} />
+                </TouchableOpacity>
+              )}
+            </>
           )}
         </>
       )}
@@ -1201,8 +1296,6 @@ export default function ProfileScreen() {
   ]);
   const [showLogoutModal, setShowLogoutModal] = useState(false);
   const [loggingOut, setLoggingOut] = useState(false);
-
-  // ── FIX: real saved count (excludes deleted posts) ──────────────────────────
   const [realSavedCount, setRealSavedCount] = useState<number>(0);
 
   const router = useRouter();
@@ -1238,8 +1331,11 @@ export default function ProfileScreen() {
         (snap) => {
           if (snap.exists()) {
             const data = snap.data();
+            // ── FIX: resolve display name without ever showing an email ──
+            const resolvedUsername = resolveDisplayName(data, "Unknown User");
             setUserData({
               ...data,
+              username: resolvedUsername,
               rating:
                 typeof data.rating === "number"
                   ? data.rating
@@ -1252,7 +1348,6 @@ export default function ProfileScreen() {
                 typeof data.exchangedCount === "number"
                   ? data.exchangedCount
                   : 0,
-              // ── savedCount intentionally omitted here; realSavedCount is used instead ──
               followerCount:
                 typeof data.followerCount === "number" ? data.followerCount : 0,
               followingCount:
@@ -1262,9 +1357,12 @@ export default function ProfileScreen() {
             } as UserData);
             setError(null);
           } else {
+            // Doc doesn't exist — fall back to Auth display name (strip email)
+            const rawDisplay = currentUser.displayName?.trim() ?? "";
+            const safeDisplay = rawDisplay.includes("@") ? "Unknown User" : rawDisplay || "Unknown User";
             setUserData({
               email: currentUser.email ?? undefined,
-              username: currentUser.displayName ?? "Unknown User",
+              username: safeDisplay,
               rating: 0,
               ratingCount: 0,
               tradesCount: 0,
@@ -1285,9 +1383,11 @@ export default function ProfileScreen() {
               ? "You appear to be offline. Showing cached data."
               : "Failed to load profile.",
           );
+          const rawDisplay = currentUser.displayName?.trim() ?? "";
+          const safeDisplay = rawDisplay.includes("@") ? "Offline User" : rawDisplay || "Offline User";
           setUserData({
             email: currentUser.email ?? undefined,
-            username: currentUser.displayName ?? "Offline User",
+            username: safeDisplay,
             rating: 0,
             ratingCount: 0,
             tradesCount: 0,
@@ -1304,10 +1404,6 @@ export default function ProfileScreen() {
     return () => unsubAuth();
   }, [router, animateIn]);
 
-  // ── FIX: fetch real saved count whenever userId is known ───────────────────
-  // getUserSavedItems resolves each saved ID against the items collection, so
-  // IDs whose documents have been deleted simply come back empty and are
-  // excluded — giving us the true count.
   useEffect(() => {
     if (!userId) return;
     getUserSavedItems(userId)
@@ -1338,9 +1434,11 @@ export default function ProfileScreen() {
     });
   }, [userId]);
 
+  // ── FIX: setUserOfflineBeforeSignOut called before signOut ─────────────────
   const handleLogout = async () => {
     setLoggingOut(true);
     try {
+      await setUserOfflineBeforeSignOut();
       await signOut(auth);
       router.replace("/login");
     } catch (err) {
@@ -1580,7 +1678,6 @@ export default function ProfileScreen() {
               count={userData?.exchangedCount ?? 0}
             />
             <View style={styles.statDivider} />
-            {/* ── FIX: use realSavedCount instead of userData.savedCount ── */}
             <StatCard
               iconName="bookmark"
               label="Saved"
@@ -1589,7 +1686,7 @@ export default function ProfileScreen() {
             />
           </View>
 
-          {/* Recent Reviews */}
+          {/* Recent Reviews — collapsible */}
           <RecentReviewsSection
             userId={userId}
             ratingCount={ratingCount}
@@ -1635,6 +1732,15 @@ export default function ProfileScreen() {
 }
 
 // ─── Styles ───────────────────────────────────────────────────────────────────
+const collapsibleStyles = StyleSheet.create({
+  toggle: {
+    fontSize: 12,
+    color: DARK_BLUE,
+    fontWeight: "700",
+    marginTop: 4,
+  },
+});
+
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#F4F5F9" },
   loadingContainer: {
@@ -2300,7 +2406,7 @@ const reviewSectionStyles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     gap: 8,
-    marginBottom: 14,
+    marginBottom: 4,
   },
   title: {
     fontSize: 15,
@@ -2318,6 +2424,13 @@ const reviewSectionStyles = StyleSheet.create({
     paddingHorizontal: 6,
   },
   countPillText: { color: "#fff", fontSize: 11, fontWeight: "700" },
+  collapsedHint: {
+    fontSize: 12,
+    color: "#aaa",
+    fontStyle: "italic",
+    marginTop: 2,
+    marginBottom: 4,
+  },
   emptyBox: { alignItems: "center", paddingVertical: 20, gap: 8 },
   emptyText: {
     fontSize: 13,

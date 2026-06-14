@@ -1,11 +1,13 @@
 import FontAwesome from "@expo/vector-icons/FontAwesome";
 import MaterialIcons from "@expo/vector-icons/MaterialIcons";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { GoogleSignin } from "@react-native-google-signin/google-signin";
 import { useRouter } from "expo-router";
 import {
   GoogleAuthProvider,
   browserLocalPersistence,
   browserSessionPersistence,
+  fetchSignInMethodsForEmail,
   sendEmailVerification,
   setPersistence,
   signInWithCredential,
@@ -37,6 +39,53 @@ const MUTED = "#666666";
 const BORDER = "#E0E0E0";
 const DANGER = "#D9534F";
 
+// ─── Storage key ─────────────────────────────────────────────────────────────
+export const KEEP_LOGGED_IN_KEY = "bb_keepLoggedIn";
+
+// ─── Persistence helpers ──────────────────────────────────────────────────────
+
+/** Persists the "keep me logged in" flag across platforms. */
+export const saveKeepLoggedIn = async (value: boolean): Promise<void> => {
+  if (Platform.OS === "web" && typeof window !== "undefined") {
+    if (value) window.localStorage.setItem(KEEP_LOGGED_IN_KEY, "1");
+    else window.localStorage.removeItem(KEEP_LOGGED_IN_KEY);
+  } else {
+    await AsyncStorage.setItem(KEEP_LOGGED_IN_KEY, value ? "1" : "0");
+  }
+};
+
+/** Reads the flag back (sync on web, async on native). */
+export const readKeepLoggedIn = async (): Promise<boolean> => {
+  if (Platform.OS === "web" && typeof window !== "undefined") {
+    return window.localStorage.getItem(KEEP_LOGGED_IN_KEY) === "1";
+  }
+  const val = await AsyncStorage.getItem(KEEP_LOGGED_IN_KEY);
+  // Default to true so existing users aren't surprised on first upgrade
+  return val === null ? true : val === "1";
+};
+
+/**
+ * Call this ONCE in your root _layout.tsx (inside a useEffect on mount).
+ * If the user is signed in but chose NOT to keep their session, it signs
+ * them out so the next app open lands on the login screen.
+ *
+ * Usage in _layout.tsx:
+ *   import { checkSessionPersistence } from "../app/(auth)/login";
+ *   useEffect(() => { checkSessionPersistence(); }, []);
+ */
+export const checkSessionPersistence = async (): Promise<void> => {
+  try {
+    const keep = await readKeepLoggedIn();
+    if (!keep && auth.currentUser) {
+      await auth.signOut();
+    }
+  } catch (err) {
+    console.warn("checkSessionPersistence error:", err);
+  }
+};
+
+// ─── Validation helpers ───────────────────────────────────────────────────────
+
 const validateEmail = (email: string) =>
   /^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}$/.test(
     email.trim().toLowerCase(),
@@ -44,11 +93,29 @@ const validateEmail = (email: string) =>
 
 const sanitizeEmail = (email: string) => email.trim().toLowerCase();
 
+/**
+ * Firebase v9+ collapses auth/user-not-found + auth/wrong-password into
+ * auth/invalid-credential.  We disambiguate by fetching the sign-in methods
+ * for the email: if methods come back the account exists → wrong password.
+ */
+const diagnoseInvalidCredential = async (
+  email: string,
+): Promise<"wrong_password" | "no_account"> => {
+  try {
+    const methods = await fetchSignInMethodsForEmail(auth, sanitizeEmail(email));
+    return methods && methods.length > 0 ? "wrong_password" : "no_account";
+  } catch {
+    return "no_account";
+  }
+};
+
+// ─── Component ────────────────────────────────────────────────────────────────
+
 export default function LoginScreen() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
-  const [keepLoggedIn, setKeepLoggedIn] = useState(false);
+  const [keepLoggedIn, setKeepLoggedIn] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errors, setErrors] = useState<{
     email?: string;
@@ -58,23 +125,16 @@ export default function LoginScreen() {
 
   const router = useRouter();
 
-  const setKeepLoggedInStorage = (value: boolean) => {
-    if (Platform.OS !== "web" || typeof window === "undefined") return;
-    if (value) window.localStorage.setItem("keepLoggedIn", "1");
-    else window.localStorage.removeItem("keepLoggedIn");
-  };
-
-  const getRememberedFlag = () => {
-    if (Platform.OS === "web" && typeof window !== "undefined") {
-      return window.localStorage.getItem("keepLoggedIn") === "1";
-    }
-    return keepLoggedIn;
-  };
-
+  // Load persisted preference on mount
   useEffect(() => {
-    if (Platform.OS !== "web" || typeof window === "undefined") return;
-    setKeepLoggedIn(window.localStorage.getItem("keepLoggedIn") === "1");
+    readKeepLoggedIn().then(setKeepLoggedIn);
   }, []);
+
+  const toggleKeepLoggedIn = async () => {
+    const next = !keepLoggedIn;
+    setKeepLoggedIn(next);
+    await saveKeepLoggedIn(next);
+  };
 
   const signalWelcomeIfReturning = async (uid: string, displayName: string) => {
     try {
@@ -88,19 +148,18 @@ export default function LoginScreen() {
     }
   };
 
+  // ── Google sign-in ─────────────────────────────────────────────────────────
   const handleGoogleSignIn = async () => {
     setIsSubmitting(true);
     setErrors({});
     try {
-      const remember = getRememberedFlag();
+      await saveKeepLoggedIn(keepLoggedIn);
+
       if (Platform.OS === "web") {
-        // Web: use Firebase popup
-        if (Platform.OS === "web") {
-          await setPersistence(
-            auth,
-            remember ? browserLocalPersistence : browserSessionPersistence,
-          );
-        }
+        await setPersistence(
+          auth,
+          keepLoggedIn ? browserLocalPersistence : browserSessionPersistence,
+        );
         const result = await signInWithPopup(auth, googleProvider);
         const user = result.user;
         try {
@@ -126,7 +185,7 @@ export default function LoginScreen() {
           user.displayName?.split(" ")[0] || user.email?.split("@")[0] || "",
         );
       } else {
-        // Native Android/iOS: use GoogleSignin
+        // Native Android/iOS
         await GoogleSignin.hasPlayServices();
         const userInfo = await GoogleSignin.signIn();
         const idToken = userInfo.data?.idToken;
@@ -168,6 +227,7 @@ export default function LoginScreen() {
     }
   };
 
+  // ── Email/password login ───────────────────────────────────────────────────
   const handleLogin = async () => {
     const nextErrors: typeof errors = {};
 
@@ -192,12 +252,12 @@ export default function LoginScreen() {
     setIsSubmitting(true);
 
     try {
-      setKeepLoggedInStorage(keepLoggedIn);
+      await saveKeepLoggedIn(keepLoggedIn);
+
       if (Platform.OS === "web") {
-        const remember = getRememberedFlag();
         await setPersistence(
           auth,
-          remember ? browserLocalPersistence : browserSessionPersistence,
+          keepLoggedIn ? browserLocalPersistence : browserSessionPersistence,
         );
       }
 
@@ -261,12 +321,21 @@ export default function LoginScreen() {
       );
     } catch (err: any) {
       switch (err.code) {
+        case "auth/invalid-credential": {
+          // Disambiguate: wrong password vs no account
+          const diagnosis = await diagnoseInvalidCredential(email);
+          if (diagnosis === "wrong_password") {
+            setErrors({ password: "Wrong password. Please try again." });
+          } else {
+            setErrors({ email: "No account found with this email." });
+          }
+          break;
+        }
         case "auth/user-not-found":
-        case "auth/invalid-credential":
           setErrors({ email: "No account found with this email." });
           break;
         case "auth/wrong-password":
-          setErrors({ password: "Incorrect password. Please try again." });
+          setErrors({ password: "Wrong password. Please try again." });
           break;
         case "auth/invalid-email":
           setErrors({ email: "Please enter a valid email address." });
@@ -298,6 +367,7 @@ export default function LoginScreen() {
     }
   };
 
+  // ── UI ─────────────────────────────────────────────────────────────────────
   return (
     <KeyboardAvoidingView
       style={{ flex: 1, backgroundColor: BG }}
@@ -321,6 +391,7 @@ export default function LoginScreen() {
           <Text style={styles.headerText}>Start Trading!</Text>
         </View>
 
+        {/* Email */}
         <View
           style={[styles.inputContainer, errors.email && styles.inputError]}
         >
@@ -341,11 +412,7 @@ export default function LoginScreen() {
             value={email}
             onChangeText={(t) => {
               setEmail(t);
-              setErrors((e) => ({
-                ...e,
-                email: undefined,
-                general: undefined,
-              }));
+              setErrors((e) => ({ ...e, email: undefined, general: undefined }));
             }}
           />
         </View>
@@ -353,6 +420,7 @@ export default function LoginScreen() {
           <Text style={styles.errorText}>{errors.email}</Text>
         ) : null}
 
+        {/* Password */}
         <View
           style={[styles.inputContainer, errors.password && styles.inputError]}
         >
@@ -372,11 +440,7 @@ export default function LoginScreen() {
             value={password}
             onChangeText={(t) => {
               setPassword(t);
-              setErrors((e) => ({
-                ...e,
-                password: undefined,
-                general: undefined,
-              }));
+              setErrors((e) => ({ ...e, password: undefined, general: undefined }));
             }}
           />
           <TouchableOpacity onPress={() => setShowPassword((v) => !v)}>
@@ -391,19 +455,14 @@ export default function LoginScreen() {
           <Text style={styles.errorText}>{errors.password}</Text>
         ) : null}
 
+        {/* General error */}
         {errors.general ? (
           <Text style={styles.errorText}>{errors.general}</Text>
         ) : null}
 
+        {/* Options row */}
         <View style={styles.optionsRow}>
-          <TouchableOpacity
-            style={styles.keepRow}
-            onPress={() => {
-              const v = !keepLoggedIn;
-              setKeepLoggedIn(v);
-              setKeepLoggedInStorage(v);
-            }}
-          >
+          <TouchableOpacity style={styles.keepRow} onPress={toggleKeepLoggedIn}>
             <MaterialIcons
               name={keepLoggedIn ? "check-box" : "check-box-outline-blank"}
               size={22}
@@ -442,10 +501,7 @@ export default function LoginScreen() {
           <TouchableOpacity
             style={styles.socialBtn}
             activeOpacity={0.7}
-            onPress={() => {
-              setKeepLoggedInStorage(keepLoggedIn);
-              handleGoogleSignIn();
-            }}
+            onPress={handleGoogleSignIn}
           >
             <FontAwesome name="google" size={24} color={PRIMARY} />
           </TouchableOpacity>

@@ -85,7 +85,10 @@ async function saveImageCrossPlatform(url: string) {
         return;
       }
       const filename = `BarterBayan_${Date.now()}.jpg`;
-      const fileDir = (FileSystem as any).documentDirectory || "";
+      const fileDir =
+        (FileSystem as any).documentDirectory ??
+        (FileSystem as any).cacheDirectory ??
+        "";
       const result = await FileSystem.downloadAsync(url, fileDir + filename);
       await MediaLibrary.saveToLibraryAsync(result.uri);
       Alert.alert("Saved!", "Image saved to your gallery.");
@@ -262,9 +265,16 @@ export default function ProductDetailsScreen() {
   };
 
   const handleSaveCurrentImage = async () => {
-    if (!mediaItems || mediaItems.length === 0) return;
+    if (!mediaItems || mediaItems.length === 0) {
+      Alert.alert("No media", "There is no image to save.");
+      return;
+    }
     const current = mediaItems[currentMediaIndex];
-    if (!current || isVideoUrl(current)) {
+    if (!current) {
+      Alert.alert("No media", "Could not find the current image.");
+      return;
+    }
+    if (isVideoUrl(current)) {
       Alert.alert("Cannot save", "Videos cannot be saved this way.");
       return;
     }
@@ -438,6 +448,7 @@ export default function ProductDetailsScreen() {
 
             {/* Save button */}
             {mediaItems.length > 0 &&
+              mediaItems[currentMediaIndex] &&
               !isVideoUrl(mediaItems[currentMediaIndex]) && (
                 <TouchableOpacity
                   style={styles.saveImageBtn}
@@ -471,7 +482,6 @@ export default function ProductDetailsScreen() {
           <View style={styles.content}>
             <Text style={styles.title}>{item?.title}</Text>
 
-            {/* ── NEW: Structured Details Card ── */}
             <ItemDetailsCard
               description={item?.description}
               additionalDescription={item?.additionalDescription}
@@ -921,7 +931,6 @@ const styles = StyleSheet.create({
     fontWeight: "600",
     marginLeft: 6,
   } as TextStyle,
-  // Content area — white card
   content: {
     backgroundColor: "#fff",
     paddingHorizontal: 16,
@@ -934,7 +943,6 @@ const styles = StyleSheet.create({
     color: "#111827",
     lineHeight: 28,
   } as TextStyle,
-  // Owner card
   ownerCard: {
     backgroundColor: "#F9FAFB",
     borderRadius: 16,
@@ -1050,7 +1058,6 @@ const styles = StyleSheet.create({
     borderRadius: 12,
   } as ViewStyle,
   ownItemText: { fontSize: 13, color: "#888", fontWeight: "500" } as TextStyle,
-  // Trade modal
   tradeModalOverlay: {
     flex: 1,
     backgroundColor: "rgba(0,0,0,0.5)",

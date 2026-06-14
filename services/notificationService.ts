@@ -9,6 +9,7 @@ import {
   addDoc,
   collection,
   doc,
+  getDoc,
   getDocs,
   onSnapshot,
   orderBy,
@@ -28,7 +29,7 @@ export type NotifType =
   | "trade_offer"
   | "trade_accepted"
   | "trade_declined"
-  | "trade_message" // ← NEW: message sent inside a trade chat
+  | "trade_message"
   | "message"
   | "generic";
 
@@ -46,16 +47,52 @@ export interface CreateNotificationPayload {
   conversationId?: string;
 }
 
+// ─── Push helper ──────────────────────────────────────────────────────────────
+
+async function sendExpoPush(
+  pushToken: string,
+  title: string,
+  body: string,
+  data?: Record<string, any>,
+): Promise<void> {
+  try {
+    const response = await fetch("https://exp.host/--/api/v2/push/send", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "application/json",
+        "Accept-Encoding": "gzip, deflate",
+      },
+      body: JSON.stringify({
+        to: pushToken,
+        title,
+        body,
+        data,
+        sound: "default",
+        channelId: "default",
+      }),
+    });
+    const result = await response.json();
+    if (result?.data?.status === "error") {
+      console.warn("[Push] Expo error:", result.data.message);
+    }
+  } catch (err) {
+    console.warn("[Push] sendExpoPush failed (non-fatal):", err);
+  }
+}
+
 // ─── Create ───────────────────────────────────────────────────────────────────
 
 /**
- * Write a notification document for `userId`.
+ * Write a notification document for `userId` and send a push notification
+ * to their device if they have a valid Expo push token saved.
  * Silently swallows errors so it never breaks the calling operation.
  */
 export async function createNotification(
   payload: CreateNotificationPayload,
 ): Promise<void> {
   try {
+    // 1. Write to Firestore
     await addDoc(collection(db, NOTIF_COLLECTION), {
       userId: payload.userId,
       type: payload.type,
@@ -70,6 +107,21 @@ export async function createNotification(
         ? { conversationId: payload.conversationId }
         : {}),
     });
+
+    // 2. Fetch the recipient's push token and send a push notification
+    const userSnap = await getDoc(doc(db, "users", payload.userId));
+    const pushToken: string | undefined = userSnap.data()?.pushToken;
+
+    if (pushToken && pushToken.startsWith("ExponentPushToken[")) {
+      await sendExpoPush(pushToken, payload.title, payload.body, {
+        type: payload.type,
+        ...(payload.tradeId ? { tradeId: payload.tradeId } : {}),
+        ...(payload.otherUserId ? { otherUserId: payload.otherUserId } : {}),
+        ...(payload.conversationId
+          ? { conversationId: payload.conversationId }
+          : {}),
+      });
+    }
   } catch (err) {
     console.warn("createNotification failed (non-fatal):", err);
   }
@@ -79,8 +131,6 @@ export async function createNotification(
 
 /**
  * Returns all notifications for a user, newest first.
- * All Firestore fields are spread onto the returned objects so tradeId,
- * otherUserId, conversationId etc. are always available to the caller.
  */
 export async function getNotifications(userId: string): Promise<any[]> {
   try {
@@ -92,7 +142,6 @@ export async function getNotifications(userId: string): Promise<any[]> {
     const snapshot = await getDocs(q);
     return snapshot.docs.map((d) => ({ id: d.id, ...d.data() }));
   } catch (err: any) {
-    // Composite index may not exist yet — fall back to unordered fetch
     if (err?.code === "failed-precondition") {
       console.warn(
         "notifications index missing — fetching unordered. " +
@@ -121,24 +170,8 @@ export async function getNotifications(userId: string): Promise<any[]> {
   }
 }
 
-// ─── Realtime subscription ─────────────────────────────────────────────────────
+// ─── Realtime subscription ────────────────────────────────────────────────────
 
-/**
- * Subscribes to realtime updates for a user's notifications, newest first.
- *
- * Calls `callback` immediately with the current snapshot and again on every
- * subsequent change (new notification, read-state change, deletion, etc.)
- * without requiring a manual refresh.
- *
- * Returns an unsubscribe function — call it on cleanup (e.g. in a
- * useEffect's return) to detach the listener.
- *
- * NOTE: This query requires the same composite index as `getNotifications`
- * (userId ASC/== + createdAt DESC). Unlike `getDocs`, `onSnapshot` will not
- * retry or fall back if the index is missing — it will emit a permanent
- * "failed-precondition" error via the `onError` callback. Create the index
- * via the link in that error, or Firebase Console → Firestore → Indexes.
- */
 export function subscribeToNotifications(
   userId: string,
   callback: (notifications: any[]) => void,

@@ -2,7 +2,7 @@ import { Ionicons } from "@expo/vector-icons";
 import DateTimePicker from "@react-native-community/datetimepicker";
 import * as ImagePicker from "expo-image-picker";
 import { useRouter } from "expo-router";
-import { onAuthStateChanged, signOut, updateProfile, User } from "firebase/auth";
+import { onAuthStateChanged, updateProfile, User } from "firebase/auth";
 import { doc, getDoc, updateDoc } from "firebase/firestore";
 import React, { useEffect, useRef, useState } from "react";
 import {
@@ -387,8 +387,6 @@ export default function EditProfileScreen() {
   const [saved, setSaved] = useState(false);
   const [showSaveModal, setShowSaveModal] = useState(false);
   const [showDiscardModal, setShowDiscardModal] = useState(false);
-  const [showLogoutModal, setShowLogoutModal] = useState(false);
-  const [loggingOut, setLoggingOut] = useState(false);
   const [deleteModalVisible, setDeleteModalVisible] = useState(false);
 
   // Dropdown open states
@@ -506,13 +504,6 @@ export default function EditProfileScreen() {
       { text: "Cancel", style: "cancel" },
       { text: "Remove", style: "destructive", onPress: () => { setAvatarUri(null); setSaved(false); } },
     ]);
-  };
-
-  const handleLogout = async () => {
-    setLoggingOut(true);
-    try { await signOut(auth); router.replace("/login"); }
-    catch (err) { console.error("Logout error:", err); Alert.alert("Error", "Failed to log out."); }
-    finally { setLoggingOut(false); setShowLogoutModal(false); }
   };
 
   const handleSave = async () => {
@@ -634,23 +625,6 @@ export default function EditProfileScreen() {
               <TouchableOpacity style={[styles.modalBtn, styles.modalBtnCancel]} onPress={() => setShowSaveModal(false)}><Text style={styles.modalBtnCancelText}>Cancel</Text></TouchableOpacity>
               <TouchableOpacity style={[styles.modalBtn, styles.modalBtnSave]} onPress={handleSave} disabled={saving}>
                 {saving ? <ActivityIndicator color="#fff" size="small" /> : <Text style={styles.modalBtnSaveText}>Save</Text>}
-              </TouchableOpacity>
-            </View>
-          </View>
-        </View>
-      </AppModal>
-
-      {/* ── Logout Modal ── */}
-      <AppModal visible={showLogoutModal} onRequestClose={() => setShowLogoutModal(false)}>
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
-            <View style={styles.modalIconRow}><View style={[styles.modalIconBox, { backgroundColor: "#FEF3C7" }]}><Ionicons name="log-out-outline" size={22} color="#C0392B" /></View></View>
-            <Text style={styles.modalTitle}>Log Out?</Text>
-            <Text style={styles.modalMessage}>You will be signed out. Any unsaved changes will be lost.</Text>
-            <View style={styles.modalButtonsRow}>
-              <TouchableOpacity style={[styles.modalBtn, styles.modalBtnCancel]} onPress={() => setShowLogoutModal(false)} disabled={loggingOut}><Text style={styles.modalBtnCancelText}>Cancel</Text></TouchableOpacity>
-              <TouchableOpacity style={[styles.modalBtn, styles.modalBtnLogout, loggingOut && { opacity: 0.6 }]} onPress={handleLogout} disabled={loggingOut}>
-                {loggingOut ? <ActivityIndicator color="#fff" size="small" /> : <Text style={styles.modalBtnLogoutText}>Log Out</Text>}
               </TouchableOpacity>
             </View>
           </View>
@@ -853,15 +827,7 @@ export default function EditProfileScreen() {
               </View>
               <Ionicons name="chevron-forward" size={16} color="#CCCCCC" />
             </TouchableOpacity>
-            <View style={styles.dangerDivider} />
-            <TouchableOpacity style={styles.dangerRow} activeOpacity={0.7} onPress={() => setShowLogoutModal(true)}>
-              <View style={styles.dangerRowLeft}>
-                <View style={[styles.dangerIconBox, { backgroundColor: "#FEF3C7" }]}><Ionicons name="log-out-outline" size={18} color="#C0392B" /></View>
-                <View><Text style={[styles.dangerRowLabel, { color: "#C0392B" }]}>Log Out</Text><Text style={styles.dangerRowSub}>Sign out of your account</Text></View>
-              </View>
-              <Ionicons name="chevron-forward" size={16} color="#C0392B" />
-            </TouchableOpacity>
-            <View style={styles.dangerDivider} />
+
             <TouchableOpacity style={styles.dangerRow} activeOpacity={0.7} onPress={() => setDeleteModalVisible(true)}>
               <View style={styles.dangerRowLeft}>
                 <View style={[styles.dangerIconBox, { backgroundColor: "#FEE2E2" }]}><Ionicons name="trash-outline" size={18} color={ACCENT_RED} /></View>

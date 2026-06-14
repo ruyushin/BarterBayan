@@ -27,6 +27,7 @@ const BORDER   = '#E0DDD8';
 const TEXT     = '#1A1A1A';
 const MUTED    = '#888888';
 const SUCCESS  = '#27AE60';
+const WARNING  = '#F59E0B';
 
 const POLL_MS         = 3000;
 const RESEND_COOLDOWN = 60;
@@ -122,7 +123,7 @@ export default function VerifyEmailScreen() {
     return () => clearTimeout(id);
   }, [countdown]);
 
-  // ── Success: show checkmark, then let auth guard route to terms ───
+  // ── Success ───────────────────────────────────────────────────────
   const triggerSuccess = () => {
     stopPulse();
     setIsVerified(true);
@@ -130,9 +131,6 @@ export default function VerifyEmailScreen() {
       toValue: 1, useNativeDriver: true,
       damping: 12, stiffness: 180,
     }).start();
-    // Auth guard in _layout.tsx will detect emailVerified=true and
-    // route to /(auth)/terms automatically after a short delay.
-    // We just show the success state here.
     setTimeout(() => router.replace('/(auth)/terms'), 1800);
   };
 
@@ -155,37 +153,52 @@ export default function VerifyEmailScreen() {
     } finally { setIsSending(false); }
   };
 
-  // ── Cancel: delete the unverified account entirely ────────────────
-  // This means the email can be reused and no ghost account is left behind.
+  // ── Cancel ────────────────────────────────────────────────────────
   const handleCancel = () => {
-    Alert.alert(
-      'Cancel Registration',
-      'Your unverified account will be permanently deleted. You can sign up again anytime.',
-      [
-        { text: 'Stay', style: 'cancel' },
-        {
-          text: 'Delete & Exit',
-          style: 'destructive',
-          onPress: async () => {
-            try {
-              const currentUser = auth.currentUser;
-              if (currentUser) {
-                // Delete the Firebase Auth account so the email is freed up
-                await deleteUser(currentUser);
-              } else {
-                await signOut(auth);
-              }
-            } catch (err: any) {
-              // If delete fails (e.g. needs re-auth), just sign out
-              console.warn('Could not delete user:', err?.message);
-              try { await signOut(auth); } catch (_) {}
+  Alert.alert(
+    'Cancel Registration',
+    'Your unverified account will be permanently deleted. You can sign up again anytime.',
+    [
+      { text: 'Stay', style: 'cancel' },
+      {
+        text: 'Delete & Exit',
+        style: 'destructive',
+        onPress: async () => {
+          const currentUser = auth.currentUser;
+          if (!currentUser) {
+            // Already signed out — onAuthStateChanged will navigate
+            return;
+          }
+
+          try {
+            await deleteUser(currentUser);
+            // onAuthStateChanged fires → router.replace('/(auth)/login')
+          } catch (err: any) {
+            if (err?.code === 'auth/requires-recent-login') {
+              // Can't delete — sign out instead and warn the user
+              Alert.alert(
+                'Session Expired',
+                'We could not delete your account automatically. Please sign up again to complete registration.',
+                [{ text: 'OK' }]
+              );
+            } else {
+              console.warn('deleteUser failed:', err?.message);
             }
-            router.replace('/(auth)/login');
-          },
+            // Fall back to sign-out so the user isn't stuck
+            try {
+              await signOut(auth);
+              // onAuthStateChanged fires → router.replace('/(auth)/login')
+            } catch (signOutErr: any) {
+              console.warn('signOut failed:', signOutErr?.message);
+              // Force navigation as last resort
+              router.replace('/(auth)/login');
+            }
+          }
         },
-      ]
-    );
-  };
+      },
+    ]
+  );
+};
 
   // ── Loading splash ────────────────────────────────────────────────
   if (isBooting) {
@@ -241,10 +254,10 @@ export default function VerifyEmailScreen() {
         {/* Steps */}
         <View style={styles.stepsCard}>
           {([
-            { icon: 'inbox',     text: 'Open your email app' },
-            { icon: 'touch-app', text: 'Click the verification link' },
-            { icon: 'autorenew', text: "We'll detect it automatically — no action needed" },
-          ] as const).map(({ icon, text }, i) => (
+            { icon: 'inbox',     text: "Open your email app", warning: false },
+            { icon: 'touch-app', text: "Click the verification link", warning: false },
+            { icon: 'autorenew', text: "We'll detect it automatically — no action needed", warning: false },
+          ] as const).map(({ icon, text, warning }, i) => (
             <View key={i} style={styles.stepRow}>
               <View style={styles.stepBadge}>
                 <Text style={styles.stepNum}>{i + 1}</Text>
@@ -253,6 +266,22 @@ export default function VerifyEmailScreen() {
               <Text style={styles.stepText}>{text}</Text>
             </View>
           ))}
+
+          {/* Divider */}
+          <View style={styles.stepDivider} />
+
+          {/* Spam tip */}
+          <View style={styles.spamTip}>
+            <MaterialIcons name="warning-amber" size={16} color={WARNING} />
+            <Text style={styles.spamTipText}>
+              <Text style={styles.spamTipBold}>Can't find it?</Text>
+              {' '}Check your{' '}
+              <Text style={styles.spamTipBold}>Spam</Text>
+              {' '}or{' '}
+              <Text style={styles.spamTipBold}>Junk</Text>
+              {' '}folder — verification emails sometimes land there.
+            </Text>
+          </View>
         </View>
 
         {/* Live status */}
@@ -289,7 +318,7 @@ export default function VerifyEmailScreen() {
           </Text>
         </TouchableOpacity>
 
-        {/* Cancel — deletes the account */}
+        {/* Cancel */}
         <TouchableOpacity style={styles.cancelBtn} onPress={handleCancel}>
           <Text style={styles.cancelText}>Cancel registration</Text>
         </TouchableOpacity>
@@ -392,6 +421,31 @@ const styles = StyleSheet.create({
   stepIcon: { marginRight: 10 },
   stepText: { fontSize: 13, color: TEXT, flex: 1, lineHeight: 19 },
 
+  stepDivider: {
+    height:          1,
+    backgroundColor: BORDER,
+    marginVertical:  2,
+  },
+
+  spamTip: {
+    flexDirection:   'row',
+    alignItems:      'flex-start',
+    gap:             8,
+    backgroundColor: `${WARNING}12`,
+    borderRadius:    10,
+    padding:         12,
+  },
+  spamTipText: {
+    flex:       1,
+    fontSize:   12,
+    color:      TEXT,
+    lineHeight: 18,
+  },
+  spamTipBold: {
+    fontWeight: '700',
+    color:      TEXT,
+  },
+
   statusRow: {
     flexDirection: 'row',
     alignItems:    'center',
@@ -408,16 +462,16 @@ const styles = StyleSheet.create({
   statusText: { fontSize: 12, color: MUTED },
 
   resendBtn: {
-    flexDirection:  'row',
-    alignItems:     'center',
-    gap:            8,
-    width:          '100%',
-    borderWidth:    1.5,
-    borderColor:    PRIMARY,
-    borderRadius:   12,
+    flexDirection:   'row',
+    alignItems:      'center',
+    gap:             8,
+    width:           '100%',
+    borderWidth:     1.5,
+    borderColor:     PRIMARY,
+    borderRadius:    12,
     paddingVertical: 13,
-    justifyContent: 'center',
-    marginBottom:   14,
+    justifyContent:  'center',
+    marginBottom:    14,
   },
   resendBtnOff:  { borderColor: BORDER },
   resendText:    { fontSize: 15, fontWeight: '700', color: PRIMARY },

@@ -15,9 +15,9 @@ const NAVY = "#2f2f6f";
 const NAVY_LIGHT = "#434399";
 const INACTIVE = "#A0A0B0";
 
-const TAB_BAR_HEIGHT = Platform.OS === "ios" ? 68 : 70;
-const TAB_PT = 6;
-const TAB_PB = Platform.OS === "ios" ? 6 : 8;
+const TAB_BAR_HEIGHT = Platform.OS === "ios" ? 64 : 60;
+const TAB_PT = 4;
+const TAB_PB = Platform.OS === "ios" ? 6 : 10;
 
 const styles = StyleSheet.create({
   tabIconContainer: {
@@ -55,8 +55,8 @@ const styles = StyleSheet.create({
     width: "100%",
     alignItems: "center",
     justifyContent: "center",
-    marginTop: -34,
-    paddingBottom: 2,
+    marginTop: -28,
+    paddingBottom: 4,
   },
   tradeBtn: {
     width: 60,

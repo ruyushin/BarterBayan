@@ -1,7 +1,7 @@
 ﻿// index.tsx - patched: replace swap-horizontal icon with BBicon.png in logo mark
 // + added pull-to-refresh (same pattern as Explore tab)
 
-import React, { useCallback, useState } from "react";
+import React, { useCallback, useMemo, useState } from "react";
 import {
   ActivityIndicator,
   FlatList,
@@ -38,6 +38,70 @@ const BB_ICON = require("../../assets/images/BBicon.png");
 
 const NAVY = "#2f2f6f";
 
+// Minimum items the Suggested carousel must show before we stop deduplicating
+// against Trending and start backfilling from the shared pool.
+const SUGGESTED_MIN = 4;
+
+// ─── Trending score ────────────────────────────────────────────────────────────
+function computeTrendingScore(item: any): number {
+  const views = item.viewCount ?? item.views ?? 0;
+  const likes = item.likeCount ?? item.likes ?? 0;
+  const createdAt: Date | null = item.createdAt?.toDate?.()
+    ? item.createdAt.toDate()
+    : item.createdAt
+    ? new Date(item.createdAt)
+    : null;
+  const ageMs = createdAt ? Date.now() - createdAt.getTime() : Infinity;
+  const isRecent = ageMs < 7 * 24 * 60 * 60 * 1000;
+  return views * 3 + likes * 2 + (isRecent ? 5 : 0);
+}
+
+// ─── Suggested score ───────────────────────────────────────────────────────────
+function scoreSuggested(item: any, userCategories: Set<string>): number {
+  const categoryMatch = userCategories.has(item.category?.toLowerCase?.() ?? "");
+  const createdAt: Date | null = item.createdAt?.toDate?.()
+    ? item.createdAt.toDate()
+    : item.createdAt
+    ? new Date(item.createdAt)
+    : null;
+  const ageMs = createdAt ? Date.now() - createdAt.getTime() : Infinity;
+  const isRecent = ageMs < 7 * 24 * 60 * 60 * 1000;
+  const views = item.viewCount ?? item.views ?? 0;
+  return (categoryMatch ? 10 : 0) + (isRecent ? 5 : 0) + views;
+}
+
+// ─── Suggested algorithm ───────────────────────────────────────────────────────
+// 1. Score and sort all non-owned, non-traded items by the suggested score.
+// 2. First pass: exclude items already in Trending.
+// 3. If the result has fewer than SUGGESTED_MIN items, backfill from the
+//    Trending pool (still sorted by suggested score, not trending score) so
+//    the carousel is never empty.
+function computeSuggestedItems(
+  allNonTradedItems: any[],
+  userCategories: Set<string>,
+  trendingIds: Set<string>,
+  currentUserId: string | undefined,
+): any[] {
+  // Score everything that isn't owned by the current user
+  const candidates = allNonTradedItems
+    .filter((item) => !currentUserId || item.ownerId !== currentUserId)
+    .map((item) => ({ ...item, _suggestedScore: scoreSuggested(item, userCategories) }))
+    .sort((a, b) => b._suggestedScore - a._suggestedScore);
+
+  // Prefer items not already shown in Trending
+  const dedupedFirst = candidates.filter((item) => !trendingIds.has(item.id));
+
+  // Backfill from Trending pool if we don't have enough unique items
+  if (dedupedFirst.length >= SUGGESTED_MIN) {
+    return dedupedFirst;
+  }
+
+  // Merge: dedupedFirst + trending items not yet included, keeping score order
+  const dedupedIds = new Set(dedupedFirst.map((i) => i.id));
+  const backfill = candidates.filter((item) => !dedupedIds.has(item.id));
+  return [...dedupedFirst, ...backfill];
+}
+
 export default function HomeScreen() {
   const { items, loading, refetch } = useItems("trending") as any;
   const [searchQuery, setSearchQuery] = useState("");
@@ -48,11 +112,12 @@ export default function HomeScreen() {
   const [isRefreshing, setIsRefreshing] = useState(false);
   const router = useRouter();
 
+  const currentUserId = auth.currentUser?.uid;
+
   const fetchUserItems = useCallback(async () => {
     try {
-      const currentUser = auth.currentUser;
-      if (currentUser) {
-        const postedItems = await getUserPostedItems(currentUser.uid);
+      if (currentUserId) {
+        const postedItems = await getUserPostedItems(currentUserId);
         setUserPostedItems(postedItems);
       }
     } catch (error) {
@@ -60,7 +125,7 @@ export default function HomeScreen() {
     } finally {
       setLoadingUserItems(false);
     }
-  }, []);
+  }, [currentUserId]);
 
   useFocusEffect(
     React.useCallback(() => {
@@ -85,7 +150,7 @@ export default function HomeScreen() {
     }
   }, [fetchUserItems, refetch]);
 
-  const tradedItemIds = React.useMemo(
+  const tradedItemIds = useMemo(
     () =>
       new Set(
         userPostedItems.filter((i: any) => i.isTraded).map((i: any) => i.id),
@@ -93,23 +158,56 @@ export default function HomeScreen() {
     [userPostedItems],
   );
 
-  const isItemTraded = (item: any) =>
-    !!item.isTraded || !!item.traded || tradedItemIds.has(item.id);
+  const isItemTraded = useCallback(
+    (item: any) => !!item.isTraded || !!item.traded || tradedItemIds.has(item.id),
+    [tradedItemIds],
+  );
 
+  // ── Trending list ─────────────────────────────────────────────────────────
+  const trendingItems = useMemo(() => {
+    if (!items?.length) return [];
+    return [...items]
+      .filter(
+        (item: any) =>
+          !isItemTraded(item) &&
+          (!currentUserId || item.ownerId !== currentUserId),
+      )
+      .sort((a, b) => computeTrendingScore(b) - computeTrendingScore(a));
+  }, [items, isItemTraded, currentUserId]);
+
+  // ── Suggested list ────────────────────────────────────────────────────────
+  const userCategories = useMemo(
+    () =>
+      new Set(
+        userPostedItems.map((i: any) => i.category?.toLowerCase?.() ?? ""),
+      ),
+    [userPostedItems],
+  );
+
+  const trendingIds = useMemo(
+    () => new Set(trendingItems.map((i: any) => i.id)),
+    [trendingItems],
+  );
+
+  const suggestedItems = useMemo(() => {
+    if (!items?.length) return [];
+    const allNonTraded = (items as any[]).filter((item) => !isItemTraded(item));
+    return computeSuggestedItems(allNonTraded, userCategories, trendingIds, currentUserId);
+  }, [items, isItemTraded, userCategories, trendingIds, currentUserId]);
+
+  // ── Search ────────────────────────────────────────────────────────────────
   const query = searchQuery.toLowerCase().trim();
   const filteredResults = query
-    ? items
+    ? (items || [])
         .filter((item: any) => !isItemTraded(item))
         .filter(
-          (item) =>
+          (item: any) =>
             item.title.toLowerCase().includes(query) ||
             item.category.toLowerCase().includes(query),
         )
     : [];
   const searchResults = filteredResults.slice(0, 5);
   const totalResults = filteredResults.length;
-
-  const displayItems = (items || []).filter((item: any) => !isItemTraded(item));
 
   const handleSearchResultPress = (itemTitle: string) => {
     router.push(`/explore?search=${encodeURIComponent(itemTitle)}`);
@@ -166,7 +264,6 @@ export default function HomeScreen() {
         {/* ── Header ── */}
         <View style={styles.header}>
           <View style={styles.headerBrand}>
-            {/* Logo mark — BBicon.png */}
             <View style={styles.logoMark}>
               <Image
                 source={BB_ICON}
@@ -174,14 +271,12 @@ export default function HomeScreen() {
                 resizeMode="cover"
               />
             </View>
-            {/* Wordmark */}
             <Text style={styles.headerWordmark}>
               <Text style={styles.headerWordmarkBold}>Barter</Text>
               <Text style={styles.headerWordmarkLight}>Bayan</Text>
             </Text>
           </View>
 
-          {/* Right actions */}
           <View style={styles.headerActions}>
             <TouchableOpacity
               style={styles.headerIconBtn}
@@ -333,7 +428,7 @@ export default function HomeScreen() {
           </View>
         ) : (
           <FlatList
-            data={displayItems}
+            data={trendingItems}
             horizontal
             showsHorizontalScrollIndicator={false}
             keyExtractor={(item) => item.id}
@@ -348,7 +443,7 @@ export default function HomeScreen() {
             contentContainerStyle={styles.horizontalList}
             ListEmptyComponent={
               <Text style={styles.emptyText}>
-               No trending items available right now.
+                No trending items available right now.
               </Text>
             }
           />
@@ -362,26 +457,33 @@ export default function HomeScreen() {
           </Link>
         </View>
 
-        <FlatList
-          data={displayItems}
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          keyExtractor={(item) => `suggested-${item.id}`}
-          renderItem={({ item }) => (
-            <ItemCard
-              item={item}
-              onPress={() => handleItemPress(item)}
-              onLongPress={() => handleItemLongPress(item)}
-            />
-          )}
-          ItemSeparatorComponent={() => <View style={{ width: 12 }} />}
-          contentContainerStyle={styles.horizontalList}
-          ListEmptyComponent={
-            <Text style={styles.emptyText}>
-              No suggested items available right now.
-            </Text>
-          }
-        />
+        {loading ? (
+          <View style={styles.loaderContainer}>
+            <ActivityIndicator size="small" color="#5D5FEF" />
+            <Text style={styles.loadingText}>Loading suggestions...</Text>
+          </View>
+        ) : (
+          <FlatList
+            data={suggestedItems}
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            keyExtractor={(item) => `suggested-${item.id}`}
+            renderItem={({ item }) => (
+              <ItemCard
+                item={item}
+                onPress={() => handleItemPress(item)}
+                onLongPress={() => handleItemLongPress(item)}
+              />
+            )}
+            ItemSeparatorComponent={() => <View style={{ width: 12 }} />}
+            contentContainerStyle={styles.horizontalList}
+            ListEmptyComponent={
+              <Text style={styles.emptyText}>
+                No suggested items available right now.
+              </Text>
+            }
+          />
+        )}
 
         {selectedItem && (
           <ProductDetailModal
@@ -396,19 +498,9 @@ export default function HomeScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: "#FFFFFF",
-  },
-  scrollView: {
-    backgroundColor: "#FFFFFF",
-  },
-  scrollContent: {
-    paddingTop: 0,
-    paddingBottom: 16,
-  },
-
-  // ── Header ──────────────────────────────────────────────────────────────────
+  container: { flex: 1, backgroundColor: "#FFFFFF" },
+  scrollView: { backgroundColor: "#FFFFFF" },
+  scrollContent: { paddingTop: 0, paddingBottom: 16 },
   header: {
     flexDirection: "row",
     alignItems: "center",
@@ -418,11 +510,7 @@ const styles = StyleSheet.create({
     paddingBottom: 10,
     backgroundColor: "#FFFFFF",
   },
-  headerBrand: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-  },
+  headerBrand: { flexDirection: "row", alignItems: "center", gap: 8 },
   logoMark: {
     width: 34,
     height: 34,
@@ -434,27 +522,11 @@ const styles = StyleSheet.create({
     shadowRadius: 6,
     elevation: 4,
   },
-  logoImage: {
-    width: 34,
-    height: 34,
-  },
-  headerWordmark: {
-    fontSize: 22,
-    letterSpacing: -0.3,
-  },
-  headerWordmarkBold: {
-    fontWeight: "800",
-    color: NAVY,
-  },
-  headerWordmarkLight: {
-    fontWeight: "400",
-    color: "#5B5B9F",
-  },
-  headerActions: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 4,
-  },
+  logoImage: { width: 34, height: 34 },
+  headerWordmark: { fontSize: 22, letterSpacing: -0.3 },
+  headerWordmarkBold: { fontWeight: "800", color: NAVY },
+  headerWordmarkLight: { fontWeight: "400", color: "#5B5B9F" },
+  headerActions: { flexDirection: "row", alignItems: "center", gap: 4 },
   headerIconBtn: {
     width: 38,
     height: 38,
@@ -463,8 +535,6 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     alignItems: "center",
   },
-
-  // ── Search ──────────────────────────────────────────────────────────────────
   searchWrapper: {
     marginHorizontal: 16,
     marginTop: 12,
@@ -484,12 +554,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
   },
   searchIcon: { marginRight: 10 },
-  searchInput: {
-    flex: 1,
-    color: "#242424",
-    fontSize: 15,
-    paddingVertical: 8,
-  },
+  searchInput: { flex: 1, color: "#242424", fontSize: 15, paddingVertical: 8 },
   searchPopup: {
     position: "absolute",
     top: 52,
@@ -507,12 +572,7 @@ const styles = StyleSheet.create({
     elevation: 30,
     zIndex: 10000,
   },
-  popupTitle: {
-    fontSize: 14,
-    fontWeight: "700",
-    color: "#111827",
-    marginBottom: 10,
-  },
+  popupTitle: { fontSize: 14, fontWeight: "700", color: "#111827", marginBottom: 10 },
   searchResultList: { paddingBottom: 6 },
   searchResultLink: { width: "100%" },
   searchResultItem: {
@@ -523,8 +583,6 @@ const styles = StyleSheet.create({
   searchResultText: { fontSize: 14, fontWeight: "600", color: "#111827" },
   searchResultCategory: { fontSize: 12, color: "#6B7280", marginTop: 2 },
   noResultsText: { color: "#6B7280", fontSize: 13, lineHeight: 20 },
-
-  // ── Categories ───────────────────────────────────────────────────────────────
   sectionHeaderSmall: { marginHorizontal: 16, marginBottom: 8, marginTop: 16 },
   sectionTitleSmall: { fontSize: 20, fontWeight: "700", color: "#1F2937" },
   categoryList: { paddingHorizontal: 16, paddingVertical: 6 },
@@ -540,14 +598,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: "#E8EEF9",
   },
-  categoryText: {
-    marginTop: 8,
-    fontSize: 12,
-    fontWeight: "600",
-    color: "#1F2937",
-  },
-
-  // ── Banner Card ──────────────────────────────────────────────────────────────
+  categoryText: { marginTop: 8, fontSize: 12, fontWeight: "600", color: "#1F2937" },
   bannerCard: {
     flexDirection: "row",
     alignItems: "center",
@@ -568,16 +619,8 @@ const styles = StyleSheet.create({
     shadowRadius: 12,
     elevation: 15,
   },
-  bannerContent: {
-    flex: 1,
-    paddingRight: 12,
-  },
-  bannerTitle: {
-    color: "#FFFFFF",
-    fontSize: 20,
-    fontWeight: "700",
-    marginBottom: 8,
-  },
+  bannerContent: { flex: 1, paddingRight: 12 },
+  bannerTitle: { color: "#FFFFFF", fontSize: 20, fontWeight: "700", marginBottom: 8 },
   bannerDescription: {
     color: "#EBF0FF",
     fontSize: 13,
@@ -595,19 +638,8 @@ const styles = StyleSheet.create({
     paddingVertical: 7,
     gap: 6,
   },
-  bannerButtonText: {
-    color: "#2f2f6f",
-    fontSize: 13,
-    fontWeight: "700",
-  },
-  bannerImage: {
-    width: 130,
-    height: 160,
-    marginBottom: -22,
-    alignSelf: "flex-end",
-  },
-
-  // ── Section headers ──────────────────────────────────────────────────────────
+  bannerButtonText: { color: "#2f2f6f", fontSize: 13, fontWeight: "700" },
+  bannerImage: { width: 130, height: 160, marginBottom: -22, alignSelf: "flex-end" },
   sectionHeader: {
     flexDirection: "row",
     justifyContent: "space-between",
@@ -617,8 +649,6 @@ const styles = StyleSheet.create({
   },
   sectionTitle: { fontSize: 20, fontWeight: "700", color: "#111827" },
   seeAllText: { color: "#2f2f6f", fontSize: 14, fontWeight: "700" },
-
-  // ── Lists ────────────────────────────────────────────────────────────────────
   loaderContainer: { paddingVertical: 24, alignItems: "center" },
   loadingText: { marginTop: 10, fontSize: 13, color: "#000000" },
   emptyText: { opacity: 0.6, paddingVertical: 18, color: "#6B7280" },

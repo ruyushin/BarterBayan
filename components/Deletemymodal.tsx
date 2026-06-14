@@ -1,10 +1,8 @@
 import { Ionicons } from "@expo/vector-icons";
-import { GoogleSignin } from "@react-native-google-signin/google-signin";
 import { useRouter } from "expo-router";
 import {
   deleteUser,
   EmailAuthProvider,
-  GoogleAuthProvider,
   onAuthStateChanged,
   reauthenticateWithCredential,
   User,
@@ -26,6 +24,7 @@ import {
   Animated,
   Keyboard,
   KeyboardAvoidingView,
+  Modal,
   Platform,
   ScrollView,
   StyleSheet,
@@ -69,13 +68,6 @@ function AppModal({
     >
       {children}
     </View>
-  );
-}
-
-/** Returns true if the user signed in via Google (no password). */
-function isGoogleUser(user: User | null): boolean {
-  return (
-    user?.providerData?.some((p) => p.providerId === "google.com") ?? false
   );
 }
 
@@ -182,7 +174,9 @@ function CountdownButton({
               size={16}
               color="rgba(255,255,255,0.7)"
             />
-            <Text style={cdStyles.btnTextWaiting}>Please wait {seconds}s…</Text>
+            <Text style={cdStyles.btnTextWaiting}>
+              Please wait {seconds}s…
+            </Text>
           </View>
         )}
       </TouchableOpacity>
@@ -251,74 +245,150 @@ function SuccessOverlay({ onDone }: { onDone: () => void }) {
   }, []);
 
   return (
-    <View style={successStyles.overlay}>
-      <Animated.View
-        style={[successStyles.card, { opacity, transform: [{ scale }] }]}
-      >
-        <View style={successStyles.iconRing}>
-          <Ionicons name="checkmark-circle" size={56} color="#22C55E" />
-        </View>
-        <Text style={successStyles.title}>Account Deleted</Text>
-        <Text style={successStyles.body}>
-          Your account and all associated data have been permanently erased. We
-          hope to see you again someday.
-        </Text>
-        <TouchableOpacity
-          style={successStyles.btn}
-          onPress={onDone}
-          activeOpacity={0.85}
+    <Modal
+      visible
+      transparent
+      animationType="none"
+      statusBarTranslucent
+      onRequestClose={onDone}
+    >
+      <View style={successStyles.overlay}>
+        <Animated.View
+          style={[
+            successStyles.card,
+            { opacity, transform: [{ scale }] },
+          ]}
         >
-          <Text style={successStyles.btnText}>Back to Login</Text>
-        </TouchableOpacity>
-      </Animated.View>
-    </View>
+          <View style={successStyles.iconRing}>
+            <Ionicons name="sad-outline" size={52} color="#6B7280" />
+          </View>
+
+          <View style={successStyles.divider} />
+
+          <Text style={successStyles.title}>We're sorry to see you go</Text>
+          <Text style={successStyles.body}>
+            Your account and all associated data have been permanently deleted.
+            We appreciate the time you spent with us and hope our paths cross
+            again someday.
+          </Text>
+
+          <View style={successStyles.infoRow}>
+            <Ionicons
+              name="information-circle-outline"
+              size={15}
+              color="#9CA3AF"
+            />
+            <Text style={successStyles.infoText}>
+              All your data has been erased and cannot be recovered.
+            </Text>
+          </View>
+
+          <View style={successStyles.divider} />
+
+          <TouchableOpacity
+            style={successStyles.btn}
+            onPress={onDone}
+            activeOpacity={0.85}
+          >
+            <Text style={successStyles.btnText}>Back to Login</Text>
+          </TouchableOpacity>
+
+          <Text style={successStyles.footerNote}>
+            You can always create a new account if you change your mind.
+          </Text>
+        </Animated.View>
+      </View>
+    </Modal>
   );
 }
 
 const successStyles = StyleSheet.create({
   overlay: {
-    position: "absolute",
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    backgroundColor: "rgba(10,10,30,0.7)",
+    flex: 1,
+    backgroundColor: "rgba(10,10,30,0.72)",
     justifyContent: "center",
     alignItems: "center",
-    zIndex: 99999,
-    elevation: 100,
     padding: 24,
   },
   card: {
     backgroundColor: WHITE,
     borderRadius: 24,
-    padding: 32,
+    paddingTop: 32,
+    paddingHorizontal: 28,
+    paddingBottom: 24,
     alignItems: "center",
     width: "100%",
     maxWidth: 360,
   },
-  iconRing: { marginBottom: 16 },
+  iconRing: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    backgroundColor: "#F3F4F6",
+    justifyContent: "center",
+    alignItems: "center",
+    marginBottom: 20,
+    borderWidth: 1,
+    borderColor: "#E5E7EB",
+  },
+  divider: {
+    width: "100%",
+    height: 1,
+    backgroundColor: "#F3F4F6",
+    marginVertical: 16,
+  },
   title: {
-    fontSize: 22,
-    fontWeight: "800",
+    fontSize: 18,
+    fontWeight: "700",
     color: "#1A1A2E",
     marginBottom: 10,
     textAlign: "center",
+    letterSpacing: 0.1,
   },
   body: {
-    fontSize: 14,
-    color: "#666",
+    fontSize: 13.5,
+    color: "#6B7280",
     lineHeight: 21,
     textAlign: "center",
-    marginBottom: 24,
+  },
+  infoRow: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: 7,
+    backgroundColor: "#F9FAFB",
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: "#E5E7EB",
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    marginTop: 14,
+    width: "100%",
+  },
+  infoText: {
+    flex: 1,
+    fontSize: 12,
+    color: "#9CA3AF",
+    lineHeight: 17,
   },
   btn: {
     backgroundColor: DARK_BLUE,
-    borderRadius: 14,
+    borderRadius: 12,
     paddingVertical: 14,
-    paddingHorizontal: 40,
+    width: "100%",
+    alignItems: "center",
+    marginBottom: 12,
   },
-  btnText: { color: WHITE, fontWeight: "700", fontSize: 15 },
+  btnText: {
+    color: WHITE,
+    fontWeight: "700",
+    fontSize: 15,
+    letterSpacing: 0.2,
+  },
+  footerNote: {
+    fontSize: 12,
+    color: "#D1D5DB",
+    textAlign: "center",
+  },
 });
 
 // ─── Main Modal ───────────────────────────────────────────────────────────────
@@ -344,11 +414,6 @@ export function DeleteAccountModal({
   const [deleting, setDeleting] = useState(false);
   const [showSuccess, setShowSuccess] = useState(false);
   const [currentUser, setCurrentUser] = useState<User | null>(null);
-
-  // ── Android keyboard fix (same technique as TradeChatModal) ──────────────
-  // KeyboardAvoidingView inside a non-standard Modal wrapper on Android
-  // miscalculates its own Y-offset and causes the sheet to jump. Instead,
-  // we listen to keyboard events and apply marginBottom directly to the sheet.
   const [androidKeyboardHeight, setAndroidKeyboardHeight] = useState(0);
 
   useEffect(() => {
@@ -365,7 +430,6 @@ export function DeleteAccountModal({
     };
   }, []);
 
-  const googleUser = isGoogleUser(currentUser);
   const phraseMatches =
     typedPhrase.trim().toLowerCase() === CONFIRMATION_PHRASE.toLowerCase();
 
@@ -390,9 +454,11 @@ export function DeleteAccountModal({
   }, [visible, step]);
 
   useEffect(() => {
-    const unsub = onAuthStateChanged(auth, (u) => setCurrentUser(u));
+    const unsub = onAuthStateChanged(auth, (u) => {
+      if (!showSuccess) setCurrentUser(u);
+    });
     return () => unsub();
-  }, []);
+  }, [showSuccess]);
 
   const reset = () => {
     setStep(1);
@@ -431,7 +497,6 @@ export function DeleteAccountModal({
     ]).start();
   };
 
-  // ── Step 3: submit reason for deletion ───────────────────────────────────
   const handleReasonContinue = async () => {
     const trimmed = deleteReason.trim();
     if (!trimmed) {
@@ -439,7 +504,9 @@ export function DeleteAccountModal({
       return;
     }
     if (trimmed.length > REASON_MAX_LENGTH) {
-      setReasonError(`Please limit your reason to ${REASON_MAX_LENGTH} characters.`);
+      setReasonError(
+        `Please limit your reason to ${REASON_MAX_LENGTH} characters.`
+      );
       return;
     }
 
@@ -464,42 +531,11 @@ export function DeleteAccountModal({
     goNext();
   };
 
-  // ── Step 4: verify identity ──────────────────────────────────────────────
   const handleVerify = async () => {
     if (!currentUser?.email) {
       setCredentialError(
         "Unable to identify your account. Please log out and try again."
       );
-      return;
-    }
-
-    if (googleUser) {
-      setVerifying(true);
-      setCredentialError(null);
-      try {
-        await GoogleSignin.hasPlayServices();
-        const signInResult = await GoogleSignin.signIn();
-        const idToken =
-          signInResult.data?.idToken ?? (signInResult as any).idToken;
-
-        if (!idToken) {
-          setCredentialError("Google sign-in failed. Please try again.");
-          return;
-        }
-
-        const googleCredential = GoogleAuthProvider.credential(idToken);
-        await reauthenticateWithCredential(currentUser, googleCredential);
-        goNext();
-      } catch (err: any) {
-        const code = err?.code ?? "";
-        if (code === "SIGN_IN_CANCELLED" || code === "-5") {
-          setCredentialError("Sign-in was cancelled. Please try again.");
-        } else {
-          setCredentialError("Google verification failed. Please try again.");
-        }
-      } finally {
-        setVerifying(false);
-      }
       return;
     }
 
@@ -511,7 +547,10 @@ export function DeleteAccountModal({
     setVerifying(true);
     setCredentialError(null);
     try {
-      const cred = EmailAuthProvider.credential(currentUser.email, credential);
+      const cred = EmailAuthProvider.credential(
+        currentUser.email,
+        credential
+      );
       await reauthenticateWithCredential(currentUser, cred);
       goNext();
     } catch (err: any) {
@@ -527,7 +566,7 @@ export function DeleteAccountModal({
         );
       } else {
         setCredentialError(
-          "Verification failed. Please check your credentials and try again."
+          "Verification failed. Please check your password and try again."
         );
       }
     } finally {
@@ -535,7 +574,6 @@ export function DeleteAccountModal({
     }
   };
 
-  // ── Step 5: execute deletion ─────────────────────────────────────────────
   const handleDeleteAccount = async () => {
     if (!currentUser) return;
     setDeleting(true);
@@ -543,8 +581,6 @@ export function DeleteAccountModal({
       const firestoreDb = getFirestore();
       const uid = currentUser.uid;
 
-      // ── 1. Delete all items/posts created by this user ──────────────────
-      // These appear in the Explore and Home (trending/suggested) tabs.
       try {
         const itemsQuery = query(
           collection(firestoreDb, "items"),
@@ -556,7 +592,6 @@ export function DeleteAccountModal({
         console.warn("[DeleteAccount] Failed to delete user items:", err);
       }
 
-      // ── 2. Delete all trade offers where user is offerer or owner ────────
       try {
         const asOfferer = query(
           collection(firestoreDb, "tradeOffers"),
@@ -570,24 +605,26 @@ export function DeleteAccountModal({
           getDocs(asOfferer),
           getDocs(asOwner),
         ]);
-        // Deduplicate by doc ID in case a doc appears in both queries
         const tradeDocMap = new Map<string, any>();
         [...offererSnap.docs, ...ownerSnap.docs].forEach((d) =>
           tradeDocMap.set(d.id, d.ref)
         );
-        await Promise.all([...tradeDocMap.values()].map((ref) => deleteDoc(ref)));
+        await Promise.all(
+          [...tradeDocMap.values()].map((ref) => deleteDoc(ref))
+        );
       } catch (err) {
         console.warn("[DeleteAccount] Failed to delete trade offers:", err);
       }
 
-      // ── 3. Delete the user Firestore profile doc ─────────────────────────
       try {
         await deleteDoc(doc(firestoreDb, "users", uid));
       } catch (err) {
-        console.warn("[DeleteAccount] Failed to delete user profile doc:", err);
+        console.warn(
+          "[DeleteAccount] Failed to delete user profile doc:",
+          err
+        );
       }
 
-      // ── 4. Delete the Firebase Auth account ─────────────────────────────
       await deleteUser(currentUser);
 
       setDeleting(false);
@@ -598,7 +635,9 @@ export function DeleteAccountModal({
       if (err?.code === "auth/requires-recent-login") {
         setStep(4);
         setCredential("");
-        setCredentialError("Session expired. Please re-verify your identity.");
+        setCredentialError(
+          "Session expired. Please re-verify your identity."
+        );
       }
     }
   };
@@ -609,21 +648,14 @@ export function DeleteAccountModal({
     router.replace("/(auth)/login");
   };
 
+  if (showSuccess) {
+    return <SuccessOverlay onDone={handleSuccessDone} />;
+  }
+
   if (!visible) return null;
 
   return (
     <AppModal visible={visible}>
-      {showSuccess && <SuccessOverlay onDone={handleSuccessDone} />}
-
-      {/*
-       * PATCH: Same keyboard fix as TradeChatModal.
-       *
-       * On iOS: KeyboardAvoidingView behavior="padding" works correctly because
-       *   the AppModal wrapper starts at (0,0).
-       * On Android: KeyboardAvoidingView miscalculates offset inside custom
-       *   modal wrappers and causes the sheet to jump. We skip it entirely and
-       *   drive the sheet offset via androidKeyboardHeight + marginBottom below.
-       */}
       {Platform.OS === "ios" ? (
         <KeyboardAvoidingView
           style={{ flex: 1 }}
@@ -644,7 +676,6 @@ export function DeleteAccountModal({
             setDeleteReason={setDeleteReason}
             reasonError={reasonError}
             handleReasonContinue={handleReasonContinue}
-            googleUser={googleUser}
             credential={credential}
             setCredential={setCredential}
             credentialVisible={credentialVisible}
@@ -673,7 +704,6 @@ export function DeleteAccountModal({
             setDeleteReason={setDeleteReason}
             reasonError={reasonError}
             handleReasonContinue={handleReasonContinue}
-            googleUser={googleUser}
             credential={credential}
             setCredential={setCredential}
             credentialVisible={credentialVisible}
@@ -691,7 +721,7 @@ export function DeleteAccountModal({
   );
 }
 
-// ─── SheetContent (extracted so both iOS/Android branches share the same JSX) ─
+// ─── SheetContent ─────────────────────────────────────────────────────────────
 interface SheetContentProps {
   step: number;
   fadeAnim: Animated.Value;
@@ -706,7 +736,6 @@ interface SheetContentProps {
   setDeleteReason: (v: string) => void;
   reasonError: string | null;
   handleReasonContinue: () => void;
-  googleUser: boolean;
   credential: string;
   setCredential: (v: string) => void;
   credentialVisible: boolean;
@@ -720,37 +749,18 @@ interface SheetContentProps {
 }
 
 function SheetContent({
-  step,
-  fadeAnim,
-  sheetAnim,
-  androidKeyboardHeight,
-  onClose,
-  goNext,
-  typedPhrase,
-  setTypedPhrase,
-  phraseMatches,
-  deleteReason,
-  setDeleteReason,
-  reasonError,
-  handleReasonContinue,
-  googleUser,
-  credential,
-  setCredential,
-  credentialVisible,
-  setCredentialVisible,
-  credentialError,
-  setCredentialError,
-  verifying,
-  handleVerify,
-  deleting,
-  handleDeleteAccount,
+  step, fadeAnim, sheetAnim, androidKeyboardHeight, onClose, goNext,
+  typedPhrase, setTypedPhrase, phraseMatches,
+  deleteReason, setDeleteReason, reasonError, handleReasonContinue,
+  credential, setCredential, credentialVisible, setCredentialVisible,
+  credentialError, setCredentialError, verifying, handleVerify,
+  deleting, handleDeleteAccount,
 }: SheetContentProps) {
   return (
     <Animated.View style={[modalStyles.overlay, { opacity: fadeAnim }]}>
       <ScrollView
         contentContainerStyle={[
           modalStyles.scrollContainer,
-          // Android: push the sheet up by the exact keyboard height
           Platform.OS === "android" && androidKeyboardHeight > 0
             ? { paddingBottom: androidKeyboardHeight }
             : {},
@@ -765,7 +775,6 @@ function SheetContent({
             { transform: [{ translateY: sheetAnim }] },
           ]}
         >
-          {/* Close */}
           <TouchableOpacity
             style={modalStyles.closeBtn}
             onPress={onClose}
@@ -777,7 +786,7 @@ function SheetContent({
 
           <StepDots step={step} total={5} />
 
-          {/* ══ STEP 1 — Warning & Consequences ══ */}
+          {/* ══ STEP 1 ══ */}
           {step === 1 && (
             <>
               <View style={modalStyles.iconRing}>
@@ -794,39 +803,19 @@ function SheetContent({
                   />
                 </View>
               </View>
-
               <Text style={modalStyles.title}>Delete Account</Text>
               <Text style={modalStyles.subtitle}>
                 This action is permanent and cannot be reversed. Please read
                 the following carefully.
               </Text>
-
               <View style={s1.list}>
                 {[
-                  {
-                    icon: "person-remove-outline",
-                    text: "Your profile and personal information will be permanently erased.",
-                  },
-                  {
-                    icon: "swap-horizontal-outline",
-                    text: "All active and past trade listings will be removed.",
-                  },
-                  {
-                    icon: "grid-outline",
-                    text: "All your posts will be removed from Explore and Home.",
-                  },
-                  {
-                    icon: "chatbubbles-outline",
-                    text: "Your messages and trade history will be deleted.",
-                  },
-                  {
-                    icon: "star-outline",
-                    text: "Your ratings, reviews, and reputation will be lost.",
-                  },
-                  {
-                    icon: "shield-checkmark-outline",
-                    text: "You will be immediately signed out and cannot recover this account.",
-                  },
+                  { icon: "person-remove-outline", text: "Your profile and personal information will be permanently erased." },
+                  { icon: "swap-horizontal-outline", text: "All active and past trade listings will be removed." },
+                  { icon: "grid-outline", text: "All your posts will be removed from Explore and Home." },
+                  { icon: "chatbubbles-outline", text: "Your messages and trade history will be deleted." },
+                  { icon: "star-outline", text: "Your ratings, reviews, and reputation will be lost." },
+                  { icon: "shield-checkmark-outline", text: "You will be immediately signed out and cannot recover this account." },
                 ].map((item, i) => (
                   <View key={i} style={s1.row}>
                     <View style={s1.iconWrap}>
@@ -840,7 +829,6 @@ function SheetContent({
                   </View>
                 ))}
               </View>
-
               <View style={s1.badge}>
                 <Ionicons name="alert-circle" size={14} color="#92400E" />
                 <Text style={s1.badgeText}>
@@ -848,7 +836,6 @@ function SheetContent({
                   including our support team.
                 </Text>
               </View>
-
               <TouchableOpacity
                 style={[
                   modalStyles.primaryBtn,
@@ -864,7 +851,6 @@ function SheetContent({
                   <Ionicons name="arrow-forward" size={16} color={WHITE} />
                 </View>
               </TouchableOpacity>
-
               <TouchableOpacity
                 style={modalStyles.cancelBtn}
                 onPress={onClose}
@@ -876,7 +862,7 @@ function SheetContent({
             </>
           )}
 
-          {/* ══ STEP 2 — Type Confirmation Phrase ══ */}
+          {/* ══ STEP 2 ══ */}
           {step === 2 && (
             <>
               <View style={modalStyles.iconRing}>
@@ -893,23 +879,18 @@ function SheetContent({
                   />
                 </View>
               </View>
-
               <Text style={modalStyles.title}>Confirm Your Intent</Text>
               <Text style={modalStyles.subtitle}>
                 To proceed, type the following phrase exactly as shown below.
               </Text>
-
               <View style={s2.phraseBox}>
                 <Text style={s2.phraseLabel}>Type this phrase:</Text>
                 <Text style={s2.phrase}>{CONFIRMATION_PHRASE}</Text>
               </View>
-
               <View
                 style={[
                   s2.inputBox,
-                  typedPhrase.length > 0 &&
-                    !phraseMatches &&
-                    s2.inputBoxError,
+                  typedPhrase.length > 0 && !phraseMatches && s2.inputBoxError,
                   phraseMatches && s2.inputBoxMatch,
                 ]}
               >
@@ -932,7 +913,6 @@ function SheetContent({
                   />
                 )}
               </View>
-
               {typedPhrase.length > 0 && !phraseMatches && (
                 <View style={s2.mismatchRow}>
                   <Ionicons
@@ -945,7 +925,6 @@ function SheetContent({
                   </Text>
                 </View>
               )}
-
               <TouchableOpacity
                 style={[
                   modalStyles.primaryBtn,
@@ -963,7 +942,6 @@ function SheetContent({
                   <Ionicons name="arrow-forward" size={16} color={WHITE} />
                 </View>
               </TouchableOpacity>
-
               <TouchableOpacity
                 style={modalStyles.cancelBtn}
                 onPress={onClose}
@@ -973,7 +951,7 @@ function SheetContent({
             </>
           )}
 
-          {/* ══ STEP 3 — Reason for Deletion ══ */}
+          {/* ══ STEP 3 ══ */}
           {step === 3 && (
             <>
               <View style={modalStyles.iconRing}>
@@ -990,13 +968,11 @@ function SheetContent({
                   />
                 </View>
               </View>
-
               <Text style={modalStyles.title}>Help Us Improve</Text>
               <Text style={modalStyles.subtitle}>
-                Before you go, please share why you're deleting your
-                account. This is required and helps us improve the app.
+                Before you go, please share why you're deleting your account.
+                This is required and helps us improve the app.
               </Text>
-
               <View
                 style={[
                   s5.textAreaBox,
@@ -1007,9 +983,7 @@ function SheetContent({
                   style={s5.textArea}
                   value={deleteReason}
                   onChangeText={(t) => {
-                    if (t.length <= REASON_MAX_LENGTH) {
-                      setDeleteReason(t);
-                    }
+                    if (t.length <= REASON_MAX_LENGTH) setDeleteReason(t);
                   }}
                   placeholder="Tell us why you're leaving…"
                   placeholderTextColor="#CCCCCC"
@@ -1019,7 +993,6 @@ function SheetContent({
                   textAlignVertical="top"
                 />
               </View>
-
               <View style={s5.counterRow}>
                 {reasonError ? (
                   <View style={s5.errorRow}>
@@ -1043,7 +1016,6 @@ function SheetContent({
                   {deleteReason.length}/{REASON_MAX_LENGTH}
                 </Text>
               </View>
-
               <TouchableOpacity
                 style={[
                   modalStyles.primaryBtn,
@@ -1057,7 +1029,6 @@ function SheetContent({
                   <Ionicons name="arrow-forward" size={16} color={WHITE} />
                 </View>
               </TouchableOpacity>
-
               <TouchableOpacity
                 style={modalStyles.cancelBtn}
                 onPress={onClose}
@@ -1067,33 +1038,28 @@ function SheetContent({
             </>
           )}
 
-          {/* ══ STEP 4 — Verify Identity ══ */}
+          {/* ══ STEP 4 — Verify Identity (password only) ══ */}
           {step === 4 && (
             <>
               <View style={modalStyles.iconRing}>
                 <View
                   style={[
                     modalStyles.iconBox,
-                    {
-                      backgroundColor: googleUser ? "#E8F0FE" : "#EEF0FB",
-                    },
+                    { backgroundColor: "#EEF0FB" },
                   ]}
                 >
                   <Ionicons
-                    name={googleUser ? "logo-google" : "lock-closed-outline"}
+                    name="lock-closed-outline"
                     size={28}
-                    color={googleUser ? "#4285F4" : DARK_BLUE}
+                    color={DARK_BLUE}
                   />
                 </View>
               </View>
-
               <Text style={modalStyles.title}>Verify Your Identity</Text>
               <Text style={modalStyles.subtitle}>
-                {googleUser
-                  ? "Tap the button below to verify your Google account before proceeding."
-                  : "For your security, please enter your current password to authorize this request."}
+                For your security, please enter your current password to
+                authorize this request.
               </Text>
-
               {credentialError && (
                 <View style={s3.errorRow}>
                   <Ionicons
@@ -1104,101 +1070,66 @@ function SheetContent({
                   <Text style={s3.errorText}>{credentialError}</Text>
                 </View>
               )}
-
-              {googleUser ? (
+              <View
+                style={[
+                  s3.inputBox,
+                  credentialError != null && s3.inputBoxError,
+                ]}
+              >
+                <Ionicons
+                  name="key-outline"
+                  size={18}
+                  color={credentialError ? ACCENT_RED : "#AAAAAA"}
+                />
+                <TextInput
+                  style={s3.input}
+                  value={credential}
+                  onChangeText={(t) => {
+                    setCredential(t);
+                    setCredentialError(null);
+                  }}
+                  placeholder="Enter your password"
+                  placeholderTextColor="#CCCCCC"
+                  secureTextEntry={!credentialVisible}
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  returnKeyType="done"
+                  onSubmitEditing={handleVerify}
+                />
                 <TouchableOpacity
-                  style={[
-                    modalStyles.primaryBtn,
-                    { backgroundColor: "#4285F4" },
-                    verifying && { opacity: 0.7 },
-                  ]}
-                  onPress={handleVerify}
-                  disabled={verifying}
-                  activeOpacity={0.8}
+                  onPress={() => setCredentialVisible(!credentialVisible)}
+                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
                 >
-                  {verifying ? (
-                    <ActivityIndicator color={WHITE} size="small" />
-                  ) : (
-                    <View style={modalStyles.primaryBtnInner}>
-                      <Ionicons name="logo-google" size={18} color={WHITE} />
-                      <Text style={modalStyles.primaryBtnText}>
-                        Verify with Google
-                      </Text>
-                    </View>
-                  )}
+                  <Ionicons
+                    name={
+                      credentialVisible ? "eye-off-outline" : "eye-outline"
+                    }
+                    size={18}
+                    color="#AAAAAA"
+                  />
                 </TouchableOpacity>
-              ) : (
-                <>
-                  <View
-                    style={[
-                      s3.inputBox,
-                      credentialError != null && s3.inputBoxError,
-                    ]}
-                  >
-                    <Ionicons
-                      name="key-outline"
-                      size={18}
-                      color={credentialError ? ACCENT_RED : "#AAAAAA"}
-                    />
-                    <TextInput
-                      style={s3.input}
-                      value={credential}
-                      onChangeText={(t) => {
-                        setCredential(t);
-                        setCredentialError(null);
-                      }}
-                      placeholder="Enter your password"
-                      placeholderTextColor="#CCCCCC"
-                      secureTextEntry={!credentialVisible}
-                      autoCapitalize="none"
-                      autoCorrect={false}
-                      returnKeyType="done"
-                      onSubmitEditing={handleVerify}
-                    />
-                    <TouchableOpacity
-                      onPress={() => setCredentialVisible(!credentialVisible)}
-                      hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                    >
-                      <Ionicons
-                        name={
-                          credentialVisible
-                            ? "eye-off-outline"
-                            : "eye-outline"
-                        }
-                        size={18}
-                        color="#AAAAAA"
-                      />
-                    </TouchableOpacity>
+              </View>
+              <TouchableOpacity
+                style={[
+                  modalStyles.primaryBtn,
+                  { backgroundColor: DARK_BLUE },
+                  verifying && { opacity: 0.7 },
+                ]}
+                onPress={handleVerify}
+                disabled={verifying}
+                activeOpacity={0.8}
+              >
+                {verifying ? (
+                  <ActivityIndicator color={WHITE} size="small" />
+                ) : (
+                  <View style={modalStyles.primaryBtnInner}>
+                    <Text style={modalStyles.primaryBtnText}>
+                      Verify & Continue
+                    </Text>
+                    <Ionicons name="arrow-forward" size={16} color={WHITE} />
                   </View>
-
-                  <TouchableOpacity
-                    style={[
-                      modalStyles.primaryBtn,
-                      { backgroundColor: DARK_BLUE },
-                      verifying && { opacity: 0.7 },
-                    ]}
-                    onPress={handleVerify}
-                    disabled={verifying}
-                    activeOpacity={0.8}
-                  >
-                    {verifying ? (
-                      <ActivityIndicator color={WHITE} size="small" />
-                    ) : (
-                      <View style={modalStyles.primaryBtnInner}>
-                        <Text style={modalStyles.primaryBtnText}>
-                          Verify & Continue
-                        </Text>
-                        <Ionicons
-                          name="arrow-forward"
-                          size={16}
-                          color={WHITE}
-                        />
-                      </View>
-                    )}
-                  </TouchableOpacity>
-                </>
-              )}
-
+                )}
+              </TouchableOpacity>
               <TouchableOpacity
                 style={modalStyles.cancelBtn}
                 onPress={onClose}
@@ -1208,7 +1139,7 @@ function SheetContent({
             </>
           )}
 
-          {/* ══ STEP 5 — Final Confirm + 15s Cooldown ══ */}
+          {/* ══ STEP 5 ══ */}
           {step === 5 && (
             <>
               <View style={modalStyles.iconRing}>
@@ -1225,39 +1156,17 @@ function SheetContent({
                   />
                 </View>
               </View>
-
               <Text style={modalStyles.title}>Final Confirmation</Text>
               <Text style={modalStyles.subtitle}>
                 You are about to permanently delete your account. This step
                 cannot be undone.
               </Text>
-
               <View style={s4.summaryBox}>
                 {[
-                  {
-                    icon: "checkmark-circle",
-                    color: "#22C55E",
-                    label: "Confirmation phrase verified",
-                    bold: false,
-                  },
-                  {
-                    icon: "checkmark-circle",
-                    color: "#22C55E",
-                    label: "Identity verified",
-                    bold: false,
-                  },
-                  {
-                    icon: "checkmark-circle",
-                    color: "#22C55E",
-                    label: "All posts & trade items will be deleted",
-                    bold: false,
-                  },
-                  {
-                    icon: "alert-circle",
-                    color: ACCENT_RED,
-                    label: "Deletion is irreversible",
-                    bold: true,
-                  },
+                  { icon: "checkmark-circle", color: "#22C55E", label: "Confirmation phrase verified", bold: false },
+                  { icon: "checkmark-circle", color: "#22C55E", label: "Identity verified", bold: false },
+                  { icon: "checkmark-circle", color: "#22C55E", label: "All posts & trade items will be deleted", bold: false },
+                  { icon: "alert-circle", color: ACCENT_RED, label: "Deletion is irreversible", bold: true },
                 ].map((item, i) => (
                   <View key={i} style={s4.summaryRow}>
                     <Ionicons
@@ -1268,10 +1177,7 @@ function SheetContent({
                     <Text
                       style={[
                         s4.summaryText,
-                        item.bold && {
-                          color: ACCENT_RED,
-                          fontWeight: "700",
-                        },
+                        item.bold && { color: ACCENT_RED, fontWeight: "700" },
                       ]}
                     >
                       {item.label}
@@ -1279,18 +1185,15 @@ function SheetContent({
                   </View>
                 ))}
               </View>
-
               <Text style={s4.cooldownNote}>
                 The delete button will activate after the countdown. This
                 delay is to prevent accidental deletion.
               </Text>
-
               <CountdownButton
                 key={`countdown-${step}`}
                 onPress={handleDeleteAccount}
                 loading={deleting}
               />
-
               <TouchableOpacity
                 style={modalStyles.cancelBtn}
                 onPress={onClose}
@@ -1373,11 +1276,7 @@ const modalStyles = StyleSheet.create({
     shadowRadius: 6,
     marginBottom: 12,
   },
-  primaryBtnInner: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-  },
+  primaryBtnInner: { flexDirection: "row", alignItems: "center", gap: 8 },
   primaryBtnText: {
     color: WHITE,
     fontSize: 15,

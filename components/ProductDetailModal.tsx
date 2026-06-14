@@ -3,7 +3,7 @@ import { ResizeMode, Video } from "expo-av";
 import * as FileSystem from "expo-file-system";
 import * as MediaLibrary from "expo-media-library";
 import { useRouter } from "expo-router";
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -48,7 +48,8 @@ const isVideoUrl = (url: string): boolean => {
     lower.includes(".avi") ||
     lower.includes(".webm") ||
     lower.includes("videos%2F") ||
-    lower.includes("/video/upload/")
+    lower.includes("/video/upload/") ||
+    lower.includes("video")
   );
 };
 
@@ -81,7 +82,10 @@ async function saveImageCrossPlatform(url: string) {
         return;
       }
       const filename = `BarterBayan_${Date.now()}.jpg`;
-      const fileDir = (FileSystem as any).documentDirectory || "";
+      const fileDir =
+        (FileSystem as any).documentDirectory ??
+        (FileSystem as any).cacheDirectory ??
+        "";
       const result = await FileSystem.downloadAsync(url, fileDir + filename);
       await MediaLibrary.saveToLibraryAsync(result.uri);
       Alert.alert("Saved!", "Image saved to your gallery.");
@@ -184,7 +188,7 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
 
   const isOwnItem = !!currentUser && currentUser === item?.ownerId;
 
-  const mediaItems: string[] = (() => {
+  const mediaItems = useMemo<string[]>(() => {
     const all: string[] = [];
     if (Array.isArray(item?.images))
       item.images.forEach((u: string) => {
@@ -199,9 +203,12 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
       if (isValidMediaUrl(item?.video)) all.push(item.video);
     }
     return all;
-  })();
+  }, [item?.images, item?.videos, item?.image, item?.video]);
 
-  const imageOnlyItems = mediaItems.filter((u) => !isVideoUrl(u));
+  const imageOnlyItems = useMemo(
+    () => mediaItems.filter((u) => !isVideoUrl(u)),
+    [mediaItems],
+  );
 
   useEffect(() => {
     if (visible && item) {
@@ -259,8 +266,16 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
   };
 
   const handleSaveCurrentImage = async () => {
+    if (mediaItems.length === 0) {
+      Alert.alert("No media", "There is no image to save.");
+      return;
+    }
     const current = mediaItems[currentMediaIndex];
-    if (!current || isVideoUrl(current)) {
+    if (!current) {
+      Alert.alert("No media", "Could not find the current image.");
+      return;
+    }
+    if (isVideoUrl(current)) {
       Alert.alert("Cannot save", "Videos cannot be saved this way.");
       return;
     }
@@ -326,6 +341,7 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
   const renderFullScreen = () => {
     if (fullScreenIndex === null) return null;
     const url = imageOnlyItems[fullScreenIndex];
+    if (!url) return null;
     return (
       <Modal
         visible
@@ -418,15 +434,16 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
               setCurrentMediaIndex(idx);
             }}
           />
-          {!isVideoUrl(mediaItems[currentMediaIndex]) && (
-            <TouchableOpacity
-              style={styles.saveImageBtn}
-              onPress={handleSaveCurrentImage}
-              activeOpacity={0.8}
-            >
-              <Ionicons name="download-outline" size={18} color="#fff" />
-            </TouchableOpacity>
-          )}
+          {mediaItems[currentMediaIndex] &&
+            !isVideoUrl(mediaItems[currentMediaIndex]) && (
+              <TouchableOpacity
+                style={styles.saveImageBtn}
+                onPress={handleSaveCurrentImage}
+                activeOpacity={0.8}
+              >
+                <Ionicons name="download-outline" size={18} color="#fff" />
+              </TouchableOpacity>
+            )}
           {mediaItems.length > 1 && (
             <View style={styles.pagination}>
               {mediaItems.map((u, i) => (
@@ -469,7 +486,6 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
 
               <Text style={styles.headerTitle}>Product Details</Text>
 
-              {/* "See post" replaces the expand icon */}
               <TouchableOpacity
                 onPress={handleSeePost}
                 style={styles.seePostBtn}
@@ -547,9 +563,7 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
                     <Text style={styles.bio}>{ownerInfo.bio}</Text>
                   )}
                   <View style={styles.viewProfileRow}>
-                    <Text style={styles.viewProfileText}>
-                      View full profile
-                    </Text>
+                    <Text style={styles.viewProfileText}>View full profile</Text>
                     <Ionicons name="arrow-forward" size={13} color={NAVY} />
                   </View>
                 </TouchableOpacity>
