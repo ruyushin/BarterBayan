@@ -88,7 +88,7 @@ function safeUriList(images: any): string[] {
   return raw.map(safeUri).filter((u) => u !== PLACEHOLDER);
 }
 
-// ── MiniAvatar — letter fallback instead of random pravatar ──────────────────
+// ── MiniAvatar ────────────────────────────────────────────────────────────────
 function MiniAvatar({
   uri,
   name,
@@ -107,10 +107,7 @@ function MiniAvatar({
     return (
       <Image
         source={{ uri }}
-        style={[
-          { width: size, height: size, borderRadius: size / 2 },
-          style,
-        ]}
+        style={[{ width: size, height: size, borderRadius: size / 2 }, style]}
       />
     );
   }
@@ -128,9 +125,7 @@ function MiniAvatar({
         style,
       ]}
     >
-      <Text
-        style={{ color: "#fff", fontSize: size * 0.4, fontWeight: "700" }}
-      >
+      <Text style={{ color: "#fff", fontSize: size * 0.4, fontWeight: "700" }}>
         {initial}
       </Text>
     </View>
@@ -148,17 +143,20 @@ function resolveDisplayName(obj: any): string {
   );
 }
 
-function buildOwnerDisplayName(info: any, fallback: string): string {
-  if (info?.firstName && info?.lastName)
-    return `${info.firstName.trim()} ${info.lastName.trim()}`;
+function buildOwnerDisplayName(info: any, fallback?: string): string {
+  const first = info?.firstName?.trim();
+  const last = info?.lastName?.trim();
+  if (first && last) return `${first} ${last}`;
+  if (first) return first;
+  if (last) return last;
   return (
     info?.displayName?.trim() ||
     info?.name?.trim() ||
     info?.fullName?.trim() ||
     info?.username?.trim() ||
     info?.userName?.trim() ||
-    fallback ||
-    "Unknown User"
+    fallback?.trim() ||
+    "User"
   );
 }
 
@@ -218,6 +216,9 @@ export default function Screen() {
   const [isInitialLoad, setIsInitialLoad] = useState(true);
   const [searchPopupVisible, setSearchPopupVisible] = useState(false);
 
+  const [currentUserDisplayName, setCurrentUserDisplayName] = useState("");
+  const [currentUserAvatarUrl, setCurrentUserAvatarUrl] = useState("");
+
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (user) => {
       if (user) setUserId(user.uid);
@@ -225,13 +226,27 @@ export default function Screen() {
     return () => unsubscribe();
   }, []);
 
+  // FIX: cast to any — getUserInfo returns runtime Firestore fields (avatarUrl,
+  // photo, firstName, etc.) that aren't in the TS return type { id: string }.
+  useEffect(() => {
+    if (!userId) return;
+    getUserInfo(userId)
+      .then((info: any) => {
+        if (!info) return;
+        setCurrentUserDisplayName(buildOwnerDisplayName(info, "User"));
+        setCurrentUserAvatarUrl(
+          info.avatarUrl || info.photo || auth.currentUser?.photoURL || "",
+        );
+      })
+      .catch(() => {});
+  }, [userId]);
+
   useFocusEffect(
     useCallback(() => {
       setRefreshKey((k) => k + 1);
     }, []),
   );
 
-  // ── Sync incoming navigation params (from Home search / category / type links) ──
   useFocusEffect(
     useCallback(() => {
       let didConsume = false;
@@ -255,7 +270,6 @@ export default function Screen() {
         didConsume = true;
       }
 
-      // Clear the params so re-focusing this tab later doesn't re-apply stale values
       if (didConsume) {
         router.setParams({ search: undefined, filter: undefined, type: undefined } as any);
       }
@@ -280,7 +294,7 @@ export default function Screen() {
             userName:
               resolveDisplayName(enrichMap[item.id]) ||
               resolveDisplayName(item) ||
-              "Unknown User",
+              "User",
             userAvatar:
               enrichMap[item.id]?.userAvatar || item.userAvatar || "",
           }));
@@ -294,7 +308,7 @@ export default function Screen() {
             userName:
               resolveDisplayName(enrichMap[item.id]) ||
               resolveDisplayName(item) ||
-              "Unknown User",
+              "User",
             userAvatar:
               enrichMap[item.id]?.userAvatar || item.userAvatar || "",
           }));
@@ -359,8 +373,6 @@ export default function Screen() {
       return 0;
     });
 
-
-
   if (loading) {
     return (
       <SafeAreaView style={styles.container}>
@@ -382,6 +394,8 @@ export default function Screen() {
             item={item}
             onCommentAdded={() => setRefreshKey((p) => p + 1)}
             onDelete={handleItemDeleted}
+            currentUserDisplayName={currentUserDisplayName}
+            currentUserAvatarUrl={currentUserAvatarUrl}
           />
         )}
         refreshControl={
@@ -671,29 +685,42 @@ export default function Screen() {
 }
 
 // ─── ItemCard ─────────────────────────────────────────────────────────────────
-function ItemCard({ item, onCommentAdded, onDelete }: any) {
+function ItemCard({
+  item,
+  onCommentAdded,
+  onDelete,
+  currentUserDisplayName: passedName,
+  currentUserAvatarUrl: passedAvatar,
+}: any) {
   const router = useRouter();
   const { width: screenWidth } = useWindowDimensions();
   const imageHeight = screenWidth * 0.62;
 
   const currentUser = auth.currentUser?.uid;
+
+  // FIX: passedName comes from Firestore (firstName + lastName). Never fall
+  // back to the email prefix — use "User" instead so no gmail names appear.
   const currentUserName =
+    passedName?.trim() ||
     auth.currentUser?.displayName?.trim() ||
-    (auth.currentUser?.email
-      ? auth.currentUser.email.split("@")[0]
-      : `User_${auth.currentUser?.uid?.slice(0, 5) ?? ""}`);
-  const currentUserPhotoURL = auth.currentUser?.photoURL || "";
+    "User";
+
+  const currentUserPhotoURL =
+    passedAvatar || auth.currentUser?.photoURL || "";
+
   const isOwnItem = !!currentUser && currentUser === item?.ownerId;
 
   const [ownerDisplayName, setOwnerDisplayName] = useState<string>(
-    resolveDisplayName(item) || "Unknown User",
+    resolveDisplayName(item) || "User",
   );
 
   useEffect(() => {
     if (!item?.ownerId) return;
     let cancelled = false;
+    // FIX: cast to any — getUserInfo TS return type is { id: string } but the
+    // actual Firestore document has firstName, lastName, avatarUrl, etc.
     getUserInfo(item.ownerId)
-      .then((info) => {
+      .then((info: any) => {
         if (cancelled || !info) return;
         setOwnerDisplayName(
           buildOwnerDisplayName(info, resolveDisplayName(item)),
@@ -721,9 +748,7 @@ function ItemCard({ item, onCommentAdded, onDelete }: any) {
   const [commentText, setCommentText] = useState("");
   const [likeLoading, setLikeLoading] = useState(false);
   const [commentsLoading, setCommentsLoading] = useState(false);
-  const [replyingToCommentId, setReplyingToCommentId] = useState<string | null>(
-    null,
-  );
+  const [replyingToCommentId, setReplyingToCommentId] = useState<string | null>(null);
   const [replyText, setReplyText] = useState("");
   const [deleteToastVisible, setDeleteToastVisible] = useState(false);
   const [deletedCommentData, setDeletedCommentData] = useState<any>(null);
@@ -897,10 +922,7 @@ function ItemCard({ item, onCommentAdded, onDelete }: any) {
     }
   };
 
-  const handleCommentLike = async (
-    commentId: string,
-    commentLiked: boolean,
-  ) => {
+  const handleCommentLike = async (commentId: string, commentLiked: boolean) => {
     if (!currentUser) {
       Alert.alert("Please log in", "You must be logged in to like comments.");
       return;
@@ -977,7 +999,8 @@ function ItemCard({ item, onCommentAdded, onDelete }: any) {
           style: "destructive",
           onPress: async () => {
             try {
-              await deleteItem(item.id);
+              // FIX: deleteItem requires (itemId, requestingUserId)
+              await deleteItem(item.id, currentUser!);
               onDelete?.(item.id);
             } catch {
               Alert.alert("Error", "Failed to delete post. Please try again.");
@@ -1011,13 +1034,15 @@ function ItemCard({ item, onCommentAdded, onDelete }: any) {
     }
     try {
       setReportSubmitting(true);
-
       if (reportTarget === "post") {
         await addDoc(collection(db, "postReports"), {
           postId: item.id,
           postOwnerId: item.ownerId,
           reportedBy: currentUser,
-          reason: selectedReason === "Other" ? `Other: ${otherText.trim()}` : selectedReason,
+          reason:
+            selectedReason === "Other"
+              ? `Other: ${otherText.trim()}`
+              : selectedReason,
           createdAt: serverTimestamp(),
         });
       } else {
@@ -1025,11 +1050,13 @@ function ItemCard({ item, onCommentAdded, onDelete }: any) {
           reportedUserId: item.ownerId,
           relatedItemId: item.id,
           reportedBy: currentUser,
-          reason: selectedReason === "Other" ? `Other: ${otherText.trim()}` : selectedReason,
+          reason:
+            selectedReason === "Other"
+              ? `Other: ${otherText.trim()}`
+              : selectedReason,
           createdAt: serverTimestamp(),
         });
       }
-
       setShowReportModal(false);
       setReportSuccessVisible(true);
     } catch {
@@ -1049,8 +1076,11 @@ function ItemCard({ item, onCommentAdded, onDelete }: any) {
     });
 
   const resolveCommentName = (comment: any): string => {
-    if (comment?.firstName && comment?.lastName)
-      return `${comment.firstName.trim()} ${comment.lastName.trim()}`;
+    const first = comment?.firstName?.trim();
+    const last = comment?.lastName?.trim();
+    if (first && last) return `${first} ${last}`;
+    if (first) return first;
+    if (last) return last;
     return (
       comment?.displayName?.trim() ||
       comment?.name?.trim() ||
@@ -1199,9 +1229,7 @@ function ItemCard({ item, onCommentAdded, onDelete }: any) {
               color={isLiked ? "#FF4444" : "#555"}
             />
           </View>
-          <Text
-            style={[styles.footerCount, isLiked && styles.footerCountLiked]}
-          >
+          <Text style={[styles.footerCount, isLiked && styles.footerCountLiked]}>
             {likes}
           </Text>
         </TouchableOpacity>
@@ -1250,9 +1278,7 @@ function ItemCard({ item, onCommentAdded, onDelete }: any) {
               color={isSaved ? NAVY : "#555"}
             />
           </View>
-          <Text
-            style={[styles.footerCount, isSaved && styles.footerCountSaved]}
-          >
+          <Text style={[styles.footerCount, isSaved && styles.footerCountSaved]}>
             {isSaved ? "Saved" : "Save"}
           </Text>
         </TouchableOpacity>
@@ -1261,9 +1287,7 @@ function ItemCard({ item, onCommentAdded, onDelete }: any) {
       {/* ── COMMENTS ── */}
       {showComments && (
         <View style={styles.commentsSection}>
-          <Text
-            style={styles.commentsTitle}
-          >{`Comments (${getCommentCount()})`}</Text>
+          <Text style={styles.commentsTitle}>{`Comments (${getCommentCount()})`}</Text>
 
           {/* Comment input */}
           <View style={styles.commentInputRow}>
@@ -1298,9 +1322,7 @@ function ItemCard({ item, onCommentAdded, onDelete }: any) {
 
           {/* Comment list */}
           {comments.map((comment) => {
-            const isCommentLiked = (comment.likedBy || []).includes(
-              currentUser,
-            );
+            const isCommentLiked = (comment.likedBy || []).includes(currentUser);
             const commentAuthorName = resolveCommentName(comment);
             return (
               <View key={comment.id} style={styles.commentItem}>
@@ -1342,9 +1364,7 @@ function ItemCard({ item, onCommentAdded, onDelete }: any) {
                   <View style={styles.commentActions}>
                     <TouchableOpacity
                       style={styles.commentActionBtn}
-                      onPress={() =>
-                        handleCommentLike(comment.id, isCommentLiked)
-                      }
+                      onPress={() => handleCommentLike(comment.id, isCommentLiked)}
                       hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
                     >
                       <Ionicons
@@ -1365,21 +1385,13 @@ function ItemCard({ item, onCommentAdded, onDelete }: any) {
                       style={styles.commentActionBtn}
                       onPress={() =>
                         setReplyingToCommentId(
-                          replyingToCommentId === comment.id
-                            ? null
-                            : comment.id,
+                          replyingToCommentId === comment.id ? null : comment.id,
                         )
                       }
                       hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
                     >
-                      <Ionicons
-                        name="arrow-undo-outline"
-                        size={15}
-                        color={NAVY}
-                      />
-                      <Text
-                        style={[styles.commentActionText, { color: NAVY }]}
-                      >
+                      <Ionicons name="arrow-undo-outline" size={15} color={NAVY} />
+                      <Text style={[styles.commentActionText, { color: NAVY }]}>
                         Reply
                       </Text>
                     </TouchableOpacity>
@@ -1389,11 +1401,7 @@ function ItemCard({ item, onCommentAdded, onDelete }: any) {
                         onPress={() => handleDeleteComment(comment.id)}
                         hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
                       >
-                        <Ionicons
-                          name="trash-outline"
-                          size={15}
-                          color="#FF6B6B"
-                        />
+                        <Ionicons name="trash-outline" size={15} color="#FF6B6B" />
                       </TouchableOpacity>
                     )}
                   </View>
@@ -1405,7 +1413,8 @@ function ItemCard({ item, onCommentAdded, onDelete }: any) {
                         const replyAuthorName =
                           reply?.firstName && reply?.lastName
                             ? `${reply.firstName.trim()} ${reply.lastName.trim()}`
-                            : reply?.displayName?.trim() ||
+                            : reply?.firstName?.trim() ||
+                              reply?.displayName?.trim() ||
                               reply?.name?.trim() ||
                               reply?.userName?.trim() ||
                               reply?.username?.trim() ||
@@ -1491,9 +1500,7 @@ function ItemCard({ item, onCommentAdded, onDelete }: any) {
                 style={styles.optionRow}
                 onPress={handleDeletePost}
               >
-                <View
-                  style={[styles.optionIcon, { backgroundColor: "#FFF0F0" }]}
-                >
+                <View style={[styles.optionIcon, { backgroundColor: "#FFF0F0" }]}>
                   <Ionicons name="trash-outline" size={18} color="#FF4444" />
                 </View>
                 <View>
@@ -1511,19 +1518,12 @@ function ItemCard({ item, onCommentAdded, onDelete }: any) {
                   style={styles.optionRow}
                   onPress={() => handleOpenReport("post")}
                 >
-                  <View
-                    style={[
-                      styles.optionIcon,
-                      { backgroundColor: "#FFF8EC" },
-                    ]}
-                  >
+                  <View style={[styles.optionIcon, { backgroundColor: "#FFF8EC" }]}>
                     <Ionicons name="flag-outline" size={18} color={GOLD} />
                   </View>
                   <View>
                     <Text style={styles.optionLabel}>Report Post</Text>
-                    <Text style={styles.optionSub}>
-                      Flag this listing for review
-                    </Text>
+                    <Text style={styles.optionSub}>Flag this listing for review</Text>
                   </View>
                 </TouchableOpacity>
                 <View style={styles.optionDivider} />
@@ -1531,17 +1531,8 @@ function ItemCard({ item, onCommentAdded, onDelete }: any) {
                   style={styles.optionRow}
                   onPress={() => handleOpenReport("user")}
                 >
-                  <View
-                    style={[
-                      styles.optionIcon,
-                      { backgroundColor: "#F0F0FF" },
-                    ]}
-                  >
-                    <Ionicons
-                      name="person-remove-outline"
-                      size={18}
-                      color={NAVY}
-                    />
+                  <View style={[styles.optionIcon, { backgroundColor: "#F0F0FF" }]}>
+                    <Ionicons name="person-remove-outline" size={18} color={NAVY} />
                   </View>
                   <View>
                     <Text style={styles.optionLabel}>Report User</Text>
@@ -1575,10 +1566,12 @@ function ItemCard({ item, onCommentAdded, onDelete }: any) {
           />
           <View style={styles.reportSheet}>
             <View style={styles.optionsHandle} />
+
             <ScrollView
               showsVerticalScrollIndicator={false}
               keyboardShouldPersistTaps="handled"
               bounces={false}
+              contentContainerStyle={{ paddingBottom: 8 }}
             >
               <Text style={styles.reportTitle}>
                 {reportTarget === "post" ? "Report Post" : "Report User"}
@@ -1635,37 +1628,37 @@ function ItemCard({ item, onCommentAdded, onDelete }: any) {
                   </Text>
                 </View>
               )}
-
-              <View style={styles.reportActions}>
-                <TouchableOpacity
-                  style={styles.reportCancelBtn}
-                  onPress={() => setShowReportModal(false)}
-                >
-                  <Text style={styles.reportCancelText}>Cancel</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={[
-                    styles.reportSubmitBtn,
-                    (!selectedReason ||
-                      (selectedReason === "Other" && !otherText.trim()) ||
-                      reportSubmitting) &&
-                      styles.reportSubmitBtnDisabled,
-                  ]}
-                  onPress={handleSubmitReport}
-                  disabled={
-                    !selectedReason ||
-                    (selectedReason === "Other" && !otherText.trim()) ||
-                    reportSubmitting
-                  }
-                >
-                  {reportSubmitting ? (
-                    <ActivityIndicator size="small" color="#fff" />
-                  ) : (
-                    <Text style={styles.reportSubmitText}>Submit Report</Text>
-                  )}
-                </TouchableOpacity>
-              </View>
             </ScrollView>
+
+            <View style={styles.reportActions}>
+              <TouchableOpacity
+                style={styles.reportCancelBtn}
+                onPress={() => setShowReportModal(false)}
+              >
+                <Text style={styles.reportCancelText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[
+                  styles.reportSubmitBtn,
+                  (!selectedReason ||
+                    (selectedReason === "Other" && !otherText.trim()) ||
+                    reportSubmitting) &&
+                    styles.reportSubmitBtnDisabled,
+                ]}
+                onPress={handleSubmitReport}
+                disabled={
+                  !selectedReason ||
+                  (selectedReason === "Other" && !otherText.trim()) ||
+                  reportSubmitting
+                }
+              >
+                {reportSubmitting ? (
+                  <ActivityIndicator size="small" color="#fff" />
+                ) : (
+                  <Text style={styles.reportSubmitText}>Submit Report</Text>
+                )}
+              </TouchableOpacity>
+            </View>
           </View>
         </KeyboardAvoidingView>
       </Modal>
@@ -2220,7 +2213,11 @@ const styles = StyleSheet.create({
   },
   reportReasonText: { fontSize: 14, color: "#333", flex: 1 },
   reportReasonTextSelected: { fontWeight: "600", color: NAVY },
-  reportActions: { flexDirection: "row", gap: 12, marginTop: 20 },
+  reportActions: {
+    flexDirection: "row",
+    gap: 12,
+    marginTop: 16,
+  },
   reportCancelBtn: { flex: 1, paddingVertical: 13, alignItems: "center" },
   reportCancelText: { fontSize: 14, color: "#888", fontWeight: "600" },
   reportSubmitBtn: {
@@ -2296,11 +2293,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 36,
     alignItems: "center",
   },
-  successBtnText: {
-    fontSize: 15,
-    fontWeight: "700",
-    color: "#fff",
-  },
+  successBtnText: { fontSize: 15, fontWeight: "700", color: "#fff" },
 
   loaderContainer: { flex: 1, justifyContent: "center", alignItems: "center" },
   loadingText: { marginTop: 10, fontSize: 14, color: "#777" },

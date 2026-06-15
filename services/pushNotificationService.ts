@@ -15,6 +15,7 @@ Notifications.setNotificationHandler({
   }),
 });
 
+
 export async function registerForPushNotificationsAsync(
   userId: string,
 ): Promise<{ expoToken: string | null; fcmToken: string | null }> {

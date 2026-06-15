@@ -44,6 +44,7 @@ import {
   unmuteConversation,
   uploadToCloudinary,
 } from "../services/messagingService";
+import { markConversationNotificationsAsRead } from "../services/notificationService";
 import { PresenceData, subscribeToPresence } from "../services/presenceService";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -226,6 +227,7 @@ const sheet = StyleSheet.create({
 });
 
 // ─── DeleteConversationModal ──────────────────────────────────────────────────
+// FIX #4: Updated body text to clarify deletion is only on your side.
 function DeleteConversationModal({ visible, onCancel, onConfirm }: {
   visible: boolean; onCancel: () => void; onConfirm: () => void;
 }) {
@@ -238,7 +240,7 @@ function DeleteConversationModal({ visible, onCancel, onConfirm }: {
           </View>
           <Text style={delModal.title}>Delete Conversation</Text>
           <Text style={delModal.body}>
-            Are you sure you want to delete this conversation? All messages will be removed.
+            This conversation will be removed from your inbox only. The other person will still be able to see the messages on their end.
           </Text>
           <View style={delModal.actions}>
             <TouchableOpacity style={delModal.cancelBtn} onPress={onCancel} activeOpacity={0.8}>
@@ -439,7 +441,7 @@ const eh = StyleSheet.create({
   closeLabel: { fontSize: 15, fontWeight: "600", color: "#333" },
 });
 
-// ─── EditMessageModal — Android keyboard fix ──────────────────────────────────
+// ─── EditMessageModal ─────────────────────────────────────────────────────────
 function EditMessageModal({
   visible,
   initialText,
@@ -621,12 +623,18 @@ const reactModal = StyleSheet.create({
 });
 
 // ─── MultiSelectBar ───────────────────────────────────────────────────────────
-function MultiSelectBar({ count, onCancel, onDeleteForMe, onDeleteForEveryone }: {
-  count: number; onCancel: () => void; onDeleteForMe: () => void; onDeleteForEveryone: () => void;
+// FIX #2 & #3: Only show "Delete for Everyone" icon when all selected messages
+// are sent by the current user AND are within the 15-minute delete window.
+function MultiSelectBar({ count, canDeleteForEveryone, onCancel, onDeleteForMe, onDeleteForEveryone }: {
+  count: number;
+  canDeleteForEveryone: boolean;
+  onCancel: () => void;
+  onDeleteForMe: () => void;
+  onDeleteForEveryone: () => void;
 }) {
   const insets = useSafeAreaInsets();
   return (
-    <View style={[styles.header, styles.floatingHeaderInner, { paddingVertical: 16, backgroundColor: NAVY }]}>
+    <View style={[styles.floatingHeaderWrap, { paddingTop: insets.top }]} pointerEvents="box-none">
       <View style={[styles.header, styles.floatingHeaderInner]}>
         <TouchableOpacity onPress={onCancel} style={styles.backBtn}>
           <Ionicons name="close" size={24} color="white" />
@@ -646,28 +654,35 @@ function MultiSelectBar({ count, onCancel, onDeleteForMe, onDeleteForEveryone }:
         >
           <Ionicons name="trash-outline" size={20} color="white" />
         </TouchableOpacity>
-        <TouchableOpacity
-          onPress={onDeleteForEveryone}
-          hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
-        >
-          <Ionicons name="trash-bin-outline" size={20} color="white" />
-        </TouchableOpacity>
+        {canDeleteForEveryone && (
+          <TouchableOpacity
+            onPress={onDeleteForEveryone}
+            hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+          >
+            <Ionicons name="trash-bin-outline" size={20} color="white" />
+          </TouchableOpacity>
+        )}
       </View>
     </View>
   );
 }
 
-// FIX: MultiSelectFooter now calls useSafeAreaInsets() internally so the
-// delete buttons are never hidden behind the phone's navigation bar.
-function MultiSelectFooter({ count, onDeleteForMe, onDeleteForEveryone }: {
-  count: number; onDeleteForMe: () => void; onDeleteForEveryone: () => void;
+// FIX #2 & #3: Only show "Delete for Everyone" footer button when all selected
+// messages are mine and within the 15-minute delete window.
+function MultiSelectFooter({ count, canDeleteForEveryone, onDeleteForMe, onDeleteForEveryone }: {
+  count: number;
+  canDeleteForEveryone: boolean;
+  onDeleteForMe: () => void;
+  onDeleteForEveryone: () => void;
 }) {
   const insets = useSafeAreaInsets();
   return (
     <View style={[msb.footer, { paddingBottom: Math.max(insets.bottom, 12) }]}>
-      <TouchableOpacity onPress={onDeleteForEveryone} style={msb.footerBtn}>
-        <Text style={msb.footerLabel}>Delete for Everyone ({count})</Text>
-      </TouchableOpacity>
+      {canDeleteForEveryone && (
+        <TouchableOpacity onPress={onDeleteForEveryone} style={msb.footerBtn}>
+          <Text style={msb.footerLabel}>Delete for Everyone ({count})</Text>
+        </TouchableOpacity>
+      )}
       <TouchableOpacity onPress={onDeleteForMe} style={[msb.footerBtn, msb.footerBtnSecondary]}>
         <Text style={[msb.footerLabel, msb.footerLabelSecondary]}>Delete for Me ({count})</Text>
       </TouchableOpacity>
@@ -676,14 +691,6 @@ function MultiSelectFooter({ count, onDeleteForMe, onDeleteForEveryone }: {
 }
 
 const msb = StyleSheet.create({
-  // FIX: removed paddingVertical — top padding is now set dynamically via
-  // insets.top inside MultiSelectBar; bottom padding in MultiSelectFooter.
-  wrap: {
-  flexDirection: "row", alignItems: "center", justifyContent: "space-between",
-  backgroundColor: NAVY, paddingHorizontal: 16, paddingBottom: 18, paddingTop: 20,
-  },
-  cancelLabel: { color: "#fff", fontSize: 15 },
-  count: { color: "#fff", fontWeight: "700", fontSize: 16, },
   footer: {
     backgroundColor: "#fff", borderTopWidth: 1, borderTopColor: "#eee",
     paddingHorizontal: 16, paddingTop: 20, gap: 8,
@@ -1116,6 +1123,8 @@ export default function ChatScreen() {
   const isMuted = muteUntil !== null && new Date() < muteUntil;
   const showVoiceBar = isRecording || !!voiceDraftUri;
 
+  const prevMessageCountRef = useRef(0);
+
   const conversationId = useMemo(
     () => [currentUserId, ownerUserId as string].sort().join("_"),
     [currentUserId, ownerUserId],
@@ -1143,6 +1152,18 @@ export default function ChatScreen() {
   const ownerFirstName = useMemo(() => ownerName.split(" ")[0], [ownerName]);
   const avatarUri = resolveAvatar(ownerInfo);
 
+  // FIX #2 & #3: Compute whether all selected messages qualify for "delete for everyone".
+  // Conditions: (a) message was sent by me, AND (b) message is within the 15-min delete window.
+  const canMultiDeleteForEveryone = useMemo(() => {
+    if (selectedIds.size === 0) return false;
+    const selectedMessages = messages.filter((m) => selectedIds.has(m.id));
+    return selectedMessages.every(
+      (m) =>
+        (m.senderId === currentUserId || m.sender === "me") &&
+        withinWindow(m.timestamp, DELETE_WINDOW_MS),
+    );
+  }, [selectedIds, messages, currentUserId]);
+
   // ── Focus effect ──
   useFocusEffect(
     useCallback(() => {
@@ -1166,19 +1187,29 @@ export default function ChatScreen() {
           }
           await markConversationAsRead(conversationId, currentUserId!).catch(console.error);
           await markMessagesAsRead(conversationId, currentUserId!).catch(console.error);
+          await markConversationNotificationsAsRead(currentUserId!, conversationId).catch(console.error);
         } catch (err) {
           console.error("Error loading chat metadata:", err);
         } finally {
           setLoading(false);
         }
 
+        prevMessageCountRef.current = 0;
+
         unsubscribe = subscribeToMessages(
           currentUserId!, ownerUserId as string,
           (newMessages) => {
+            const isNewMessage = newMessages.length > prevMessageCountRef.current;
+            prevMessageCountRef.current = newMessages.length;
+
             setMessages(newMessages);
             markConversationAsRead(conversationId, currentUserId!).catch(console.error);
             markMessagesAsRead(conversationId, currentUserId!).catch(console.error);
-            setTimeout(() => flatListRef.current?.scrollToEnd({ animated: true }), 100);
+            markConversationNotificationsAsRead(currentUserId!, conversationId).catch(console.error);
+
+            if (isNewMessage) {
+              setTimeout(() => flatListRef.current?.scrollToEnd({ animated: true }), 100);
+            }
           },
         );
       };
@@ -1549,16 +1580,30 @@ export default function ChatScreen() {
     catch { Alert.alert("Error", "Failed to delete message."); }
   };
 
+  // FIX #2 & #3: Multi-delete for me — deletes all selected messages for current user only.
   const handleMultiDeleteForMe = async () => {
     const ids = Array.from(selectedIds);
     setSelectedIds(new Set()); setMultiSelect(false);
     await Promise.all(ids.map((id) => deleteMessageForMe(conversationId, id, currentUserId!).catch(console.error)));
   };
 
+  // FIX #2 & #3: Multi-delete for everyone — only deletes messages that are mine
+  // AND within the 15-minute window. Any others are silently skipped (they can't
+  // be deleted for everyone by the current user).
   const handleMultiDeleteForEveryone = async () => {
     const ids = Array.from(selectedIds);
     setSelectedIds(new Set()); setMultiSelect(false);
-    await Promise.all(ids.map((id) => deleteMessageForEveryone(conversationId, id, currentUserId!).catch(console.error)));
+    const eligibleMessages = messages.filter(
+      (m) =>
+        ids.includes(m.id) &&
+        (m.senderId === currentUserId || m.sender === "me") &&
+        withinWindow(m.timestamp, DELETE_WINDOW_MS),
+    );
+    await Promise.all(
+      eligibleMessages.map((m) =>
+        deleteMessageForEveryone(conversationId, m.id, currentUserId!).catch(console.error),
+      ),
+    );
   };
 
   const toggleSelect = (msgId: string) => {
@@ -1613,6 +1658,10 @@ export default function ChatScreen() {
     openSheet(ownerName || "Options", options);
   };
 
+  // FIX #4: deleteConversation should only remove it from the current user's side.
+  // The service call is unchanged — ensure your messagingService.deleteConversation
+  // marks it deleted for currentUserId only (e.g. sets deletedFor array / map on
+  // the conversation doc), rather than actually deleting Firestore documents.
   const confirmDeleteConversation = async () => {
     setDeleteConvModalVisible(false);
     try { await deleteConversation(conversationId, currentUserId!); router.back(); }
@@ -1789,7 +1838,9 @@ export default function ChatScreen() {
           </View>
         </View>
 
-        {showTimestamps && !isDeletedForEveryone && (
+        {/* FIX #1: Timestamps now show for ALL messages including deleted ones.
+            Removed the !isDeletedForEveryone guard. */}
+        {showTimestamps && (
           <View style={styles.timestampCol}>
             <Text style={styles.timestampText} numberOfLines={1}>{timeStr}</Text>
           </View>
@@ -1870,14 +1921,10 @@ export default function ChatScreen() {
           onCancel={() => setEditingMessage(null)} />
       )}
 
-      {/*
-        FIX: Multi-select bar — no longer wrapped in a View with paddingTop.
-        MultiSelectBar handles its own safe-area top padding internally via
-        useSafeAreaInsets(), so the outer wrapper has been removed entirely.
-      */}
       {multiSelect && (
         <MultiSelectBar
           count={selectedIds.size}
+          canDeleteForEveryone={canMultiDeleteForEveryone}
           onCancel={() => { setMultiSelect(false); setSelectedIds(new Set()); }}
           onDeleteForMe={handleMultiDeleteForMe}
           onDeleteForEveryone={handleMultiDeleteForEveryone}
@@ -1899,7 +1946,6 @@ export default function ChatScreen() {
             Platform.OS === "android" && keyboardHeight > 0 ? { paddingBottom: keyboardHeight - 10 } : {},
           ]}
           showsVerticalScrollIndicator={false}
-          onContentSizeChange={() => flatListRef.current?.scrollToEnd({ animated: false })}
           onScrollToIndexFailed={(info) => {
             setTimeout(() => flatListRef.current?.scrollToIndex({ index: info.index, animated: true }), 200);
           }}
@@ -1923,14 +1969,10 @@ export default function ChatScreen() {
           </View>
         )}
 
-        {/*
-          FIX: MultiSelectFooter now handles its own bottom safe-area padding
-          internally via useSafeAreaInsets(), so the delete buttons are never
-          hidden behind the phone's navigation / gesture bar.
-        */}
         {multiSelect && selectedIds.size > 0 && (
           <MultiSelectFooter
             count={selectedIds.size}
+            canDeleteForEveryone={canMultiDeleteForEveryone}
             onDeleteForMe={handleMultiDeleteForMe}
             onDeleteForEveryone={handleMultiDeleteForEveryone}
           />
@@ -1993,7 +2035,7 @@ export default function ChatScreen() {
         )}
       </KeyboardAvoidingView>
 
-      {/* ── Floating header (FB Marketplace style) ── */}
+      {/* ── Floating header ── */}
       {!multiSelect && (
         <View style={[styles.floatingHeaderWrap, { paddingTop: insets.top }]} pointerEvents="box-none">
           <View style={[styles.header, styles.floatingHeaderInner]}>
@@ -2052,9 +2094,9 @@ const styles = StyleSheet.create({
   headerStatic: { paddingTop: 32 },
   floatingHeaderWrap: {
     position: "absolute", top: 0, left: 0, right: 0, zIndex: 20, overflow: "hidden",
+    backgroundColor: NAVY,
   },
-  floatingHeaderInner: { backgroundColor: "rgba(47,47,111,0.55)" },
-  multiSelectWrap: { backgroundColor: NAVY },
+  floatingHeaderInner: { backgroundColor: NAVY },
   backBtn: { padding: 2 },
   headerContent: { flex: 1, flexDirection: "row", alignItems: "center", gap: 10 },
   headerAvatar: {},

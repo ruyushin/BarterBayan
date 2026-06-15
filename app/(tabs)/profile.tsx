@@ -5,6 +5,9 @@
 // FIX: Review comments are now collapsible.
 // FIX: Email no longer shown as display name.
 // FIX: Ratings & Reviews section is now collapsible (collapsed by default).
+// FIX: Contact number no longer shown on profile.
+// FIX: FeedbackModal keyboard space gap resolved.
+// FIX: Rating filter redesigned as compact pill row; close button safe-area padded.
 
 import { Ionicons } from "@expo/vector-icons";
 import * as ImagePicker from "expo-image-picker";
@@ -44,6 +47,7 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { auth, db } from "../../firebaseConfig";
 import { getUserSavedItems } from "../../services/itemService";
 import { setUserOfflineBeforeSignOut } from "../../services/presenceService";
@@ -129,15 +133,18 @@ function CollapsibleComment({
 
   return (
     <View style={containerStyle}>
-      {quoteStyle && (
-        <Text style={quoteStyle}>"</Text>
-      )}
+      {quoteStyle && <Text style={quoteStyle}>"</Text>}
       <View style={{ flex: 1 }}>
         <Text style={style}>
-          {isLong && !expanded ? comment.slice(0, COLLAPSE_THRESHOLD) + "…" : comment}
+          {isLong && !expanded
+            ? comment.slice(0, COLLAPSE_THRESHOLD) + "…"
+            : comment}
         </Text>
         {isLong && (
-          <TouchableOpacity onPress={() => setExpanded((p) => !p)} activeOpacity={0.7}>
+          <TouchableOpacity
+            onPress={() => setExpanded((p) => !p)}
+            activeOpacity={0.7}
+          >
             <Text style={collapsibleStyles.toggle}>
               {expanded ? "Show less" : "Show more"}
             </Text>
@@ -392,6 +399,7 @@ function OverviewModal({
   userData: UserData | null;
   onClose: () => void;
 }) {
+  const insets = useSafeAreaInsets();
   const [reviews, setReviews] = useState<Review[]>([]);
   const [loadingReviews, setLoadingReviews] = useState(false);
   const [filter, setFilter] = useState<number | null>(null);
@@ -437,6 +445,9 @@ function OverviewModal({
       ? reviews
       : reviews.filter((r) => Math.round(r.rating) === filter);
 
+  // Safe bottom padding so close button clears the phone nav bar
+  const closeBtnBottom = Math.max(insets.bottom, 16);
+
   return (
     <Modal
       visible={visible}
@@ -445,8 +456,10 @@ function OverviewModal({
       onRequestClose={onClose}
     >
       <View style={ovStyles.overlay}>
-        <View style={ovStyles.sheet}>
+        <View style={[ovStyles.sheet, { paddingBottom: closeBtnBottom }]}>
           <View style={ovStyles.handle} />
+
+          {/* ── Rating hero (bars are visual-only, not interactive) ── */}
           <View style={ovStyles.hero}>
             <View style={ovStyles.heroLeft}>
               <Text style={ovStyles.heroNumber}>
@@ -479,24 +492,13 @@ function OverviewModal({
                 const count = distribution[star - 1];
                 const pct = ratingCount > 0 ? count / maxCount : 0;
                 return (
-                  <TouchableOpacity
-                    key={star}
-                    style={ovStyles.heroBarRow}
-                    onPress={() => setFilter(filter === star ? null : star)}
-                    activeOpacity={0.7}
-                  >
-                    <Text
-                      style={[
-                        ovStyles.heroBarLabel,
-                        filter === star && ovStyles.heroBarLabelActive,
-                      ]}
-                    >
-                      {star}
-                    </Text>
+                  // ── bars are display only now; filtering is via pill buttons ──
+                  <View key={star} style={ovStyles.heroBarRow}>
+                    <Text style={ovStyles.heroBarLabel}>{star}</Text>
                     <Ionicons
                       name="star"
                       size={9}
-                      color={filter === star ? STAR_FILLED : "#CCC"}
+                      color="#CCC"
                       style={{ marginRight: 5 }}
                     />
                     <View style={ovStyles.heroBarTrack}>
@@ -516,24 +518,23 @@ function OverviewModal({
                       />
                     </View>
                     <Text style={ovStyles.heroBarCount}>{count}</Text>
-                  </TouchableOpacity>
+                  </View>
                 );
               })}
             </View>
           </View>
 
+          {/* ── Filter pill row — compact horizontal buttons like the reference ── */}
           {reviews.length > 0 && (
-            <ScrollView
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              contentContainerStyle={ovStyles.filterRow}
-            >
+            <View style={ovStyles.filterRow}>
+              {/* "All" pill */}
               <TouchableOpacity
                 style={[
                   ovStyles.filterPill,
                   filter === null && ovStyles.filterPillActive,
                 ]}
                 onPress={() => setFilter(null)}
+                activeOpacity={0.75}
               >
                 <Text
                   style={[
@@ -544,6 +545,8 @@ function OverviewModal({
                   All
                 </Text>
               </TouchableOpacity>
+
+              {/* Star pills: 5 → 1 */}
               {[5, 4, 3, 2, 1].map((s) => (
                 <TouchableOpacity
                   key={s}
@@ -552,10 +555,11 @@ function OverviewModal({
                     filter === s && ovStyles.filterPillActive,
                   ]}
                   onPress={() => setFilter(filter === s ? null : s)}
+                  activeOpacity={0.75}
                 >
                   <Ionicons
                     name="star"
-                    size={11}
+                    size={10}
                     color={filter === s ? "#fff" : STAR_FILLED}
                     style={{ marginRight: 3 }}
                   />
@@ -569,9 +573,10 @@ function OverviewModal({
                   </Text>
                 </TouchableOpacity>
               ))}
-            </ScrollView>
+            </View>
           )}
 
+          {/* ── Review list ── */}
           {loadingReviews ? (
             <ActivityIndicator
               color={DARK_BLUE}
@@ -590,7 +595,7 @@ function OverviewModal({
             <ScrollView
               style={{ flex: 1 }}
               showsVerticalScrollIndicator={false}
-              contentContainerStyle={{ paddingBottom: 20 }}
+              contentContainerStyle={{ paddingBottom: 12 }}
             >
               {filtered.map((r) => (
                 <View key={r.id} style={ovStyles.reviewCard}>
@@ -627,13 +632,11 @@ function OverviewModal({
                     </View>
                     {r.createdAt?.toDate && (
                       <Text style={ovStyles.reviewDate}>
-                        {r.createdAt
-                          .toDate()
-                          .toLocaleDateString("en-PH", {
-                            month: "short",
-                            day: "numeric",
-                            year: "numeric",
-                          })}
+                        {r.createdAt.toDate().toLocaleDateString("en-PH", {
+                          month: "short",
+                          day: "numeric",
+                          year: "numeric",
+                        })}
                       </Text>
                     )}
                   </View>
@@ -652,6 +655,7 @@ function OverviewModal({
             </ScrollView>
           )}
 
+          {/* ── Close button with safe-area bottom padding ── */}
           <TouchableOpacity style={ovStyles.closeBtn} onPress={onClose}>
             <Text style={ovStyles.closeBtnText}>Close</Text>
           </TouchableOpacity>
@@ -662,6 +666,9 @@ function OverviewModal({
 }
 
 // ─── Feedback Modal ───────────────────────────────────────────────────────────
+// FIX: Restructured to avoid residual keyboard gap. The KeyboardAvoidingView now
+// wraps only the inner content rather than the full overlay so Android's
+// `height` mode doesn't leave white space after the keyboard dismisses.
 function FeedbackModal({
   visible,
   onClose,
@@ -731,12 +738,18 @@ function FeedbackModal({
       animationType="slide"
       onRequestClose={handleClose}
     >
-      <KeyboardAvoidingView
-        style={{ flex: 1 }}
-        behavior={Platform.OS === "ios" ? "padding" : "height"}
-        keyboardVerticalOffset={Platform.OS === "ios" ? 0 : 24}
-      >
-        <View style={modalStyles.overlay}>
+      {/*
+        The overlay sits behind the sheet and fills the screen.
+        KeyboardAvoidingView is placed INSIDE the overlay, wrapping only the
+        sheet, so it pushes the sheet up when the keyboard appears but does
+        not leave a gap beneath it after the keyboard is dismissed.
+      */}
+      <View style={modalStyles.overlay}>
+        <KeyboardAvoidingView
+          behavior={Platform.OS === "ios" ? "padding" : "height"}
+          keyboardVerticalOffset={Platform.OS === "ios" ? 0 : 0}
+          style={{ width: "100%", justifyContent: "flex-end" }}
+        >
           <View style={modalStyles.sheet}>
             <Text style={modalStyles.title}>Send Feedback</Text>
             <Text style={modalStyles.subtitle}>
@@ -744,8 +757,15 @@ function FeedbackModal({
             </Text>
             {submitted ? (
               <View style={modalStyles.successBox}>
-                <Ionicons name="checkmark-circle" size={48} color="#27AE60" style={{ marginBottom: 8 }} />
-                <Text style={modalStyles.successText}>Thanks for your feedback!</Text>
+                <Ionicons
+                  name="checkmark-circle"
+                  size={48}
+                  color="#27AE60"
+                  style={{ marginBottom: 8 }}
+                />
+                <Text style={modalStyles.successText}>
+                  Thanks for your feedback!
+                </Text>
               </View>
             ) : (
               <>
@@ -765,18 +785,28 @@ function FeedbackModal({
                 <Text
                   style={[
                     reportStyles.charCount,
-                    feedback.length >= MAX_FEEDBACK_CHARS && reportStyles.charCountLimit,
+                    feedback.length >= MAX_FEEDBACK_CHARS &&
+                      reportStyles.charCountLimit,
                   ]}
                 >
                   {feedback.length}/{MAX_FEEDBACK_CHARS}
                 </Text>
                 <TouchableOpacity
-                  style={[modalStyles.submitBtn, submitting && { opacity: 0.6 }]}
+                  style={[
+                    modalStyles.submitBtn,
+                    submitting && { opacity: 0.6 },
+                  ]}
                   onPress={handleSubmit}
                   disabled={submitting}
                 >
                   {submitting ? (
-                    <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+                    <View
+                      style={{
+                        flexDirection: "row",
+                        alignItems: "center",
+                        gap: 8,
+                      }}
+                    >
                       <ActivityIndicator color="#fff" size="small" />
                       <Text style={modalStyles.submitText}>Submitting…</Text>
                     </View>
@@ -791,13 +821,18 @@ function FeedbackModal({
               onPress={handleClose}
               disabled={submitting}
             >
-              <Text style={[modalStyles.cancelText, submitting && { opacity: 0.4 }]}>
+              <Text
+                style={[
+                  modalStyles.cancelText,
+                  submitting && { opacity: 0.4 },
+                ]}
+              >
                 Cancel
               </Text>
             </TouchableOpacity>
           </View>
-        </View>
-      </KeyboardAvoidingView>
+        </KeyboardAvoidingView>
+      </View>
     </Modal>
   );
 }
@@ -839,7 +874,10 @@ function ReportModal({
 
   const handlePickPhoto = async () => {
     if (photos.length >= MAX_PHOTOS) {
-      Alert.alert("Limit reached", `You can attach up to ${MAX_PHOTOS} photos.`);
+      Alert.alert(
+        "Limit reached",
+        `You can attach up to ${MAX_PHOTOS} photos.`,
+      );
       return;
     }
     const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
@@ -971,7 +1009,12 @@ function ReportModal({
 
             {submitted ? (
               <View style={modalStyles.successBox}>
-                <Ionicons name="checkmark-circle" size={48} color="#27AE60" style={{ marginBottom: 8 }} />
+                <Ionicons
+                  name="checkmark-circle"
+                  size={48}
+                  color="#27AE60"
+                  style={{ marginBottom: 8 }}
+                />
                 <Text style={modalStyles.successText}>
                   Report submitted. Thank you!
                 </Text>
@@ -981,7 +1024,9 @@ function ReportModal({
                 <Text
                   style={[
                     reportStyles.sectionLabel,
-                    showValidation && !selectedCategory && reportStyles.sectionLabelError,
+                    showValidation &&
+                      !selectedCategory &&
+                      reportStyles.sectionLabelError,
                   ]}
                 >
                   Reason <Text style={{ color: ACCENT_RED }}>*</Text>
@@ -1018,7 +1063,11 @@ function ReportModal({
 
                 {showValidation && !selectedCategory && (
                   <View style={reportStyles.validationRow}>
-                    <Ionicons name="alert-circle" size={14} color={ACCENT_RED} />
+                    <Ionicons
+                      name="alert-circle"
+                      size={14}
+                      color={ACCENT_RED}
+                    />
                     <Text style={reportStyles.validationText}>
                       Please select a reason before submitting.
                     </Text>
@@ -1055,8 +1104,14 @@ function ReportModal({
                 </Text>
                 <View style={reportStyles.photoRow}>
                   {photos.map((uri, index) => (
-                    <View key={`${uri}-${index}`} style={reportStyles.photoThumbWrapper}>
-                      <Image source={{ uri }} style={reportStyles.photoThumb} />
+                    <View
+                      key={`${uri}-${index}`}
+                      style={reportStyles.photoThumbWrapper}
+                    >
+                      <Image
+                        source={{ uri }}
+                        style={reportStyles.photoThumb}
+                      />
                       <TouchableOpacity
                         style={reportStyles.photoRemoveBtn}
                         onPress={() =>
@@ -1081,12 +1136,21 @@ function ReportModal({
                 </View>
 
                 <TouchableOpacity
-                  style={[modalStyles.submitBtnR, uploading && { opacity: 0.6 }]}
+                  style={[
+                    modalStyles.submitBtnR,
+                    uploading && { opacity: 0.6 },
+                  ]}
                   onPress={handleSubmit}
                   disabled={uploading}
                 >
                   {uploading ? (
-                    <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+                    <View
+                      style={{
+                        flexDirection: "row",
+                        alignItems: "center",
+                        gap: 8,
+                      }}
+                    >
                       <ActivityIndicator color="#fff" size="small" />
                       <Text style={modalStyles.submitText}>
                         {photos.length > 0 ? "Uploading photos…" : "Submitting…"}
@@ -1104,7 +1168,12 @@ function ReportModal({
               onPress={handleClose}
               disabled={uploading}
             >
-              <Text style={[modalStyles.cancelText, uploading && { opacity: 0.4 }]}>
+              <Text
+                style={[
+                  modalStyles.cancelText,
+                  uploading && { opacity: 0.4 },
+                ]}
+              >
                 Cancel
               </Text>
             </TouchableOpacity>
@@ -1164,11 +1233,20 @@ function RecentReviewsSection({
         onPress={() => setExpanded((v) => !v)}
         activeOpacity={0.7}
       >
-        <View style={{ flexDirection: "row", alignItems: "center", gap: 8, flex: 1 }}>
+        <View
+          style={{
+            flexDirection: "row",
+            alignItems: "center",
+            gap: 8,
+            flex: 1,
+          }}
+        >
           <Text style={reviewSectionStyles.title}>Ratings & Reviews</Text>
           {ratingCount > 0 && (
             <View style={reviewSectionStyles.countPill}>
-              <Text style={reviewSectionStyles.countPillText}>{ratingCount}</Text>
+              <Text style={reviewSectionStyles.countPillText}>
+                {ratingCount}
+              </Text>
             </View>
           )}
         </View>
@@ -1234,18 +1312,18 @@ function RecentReviewsSection({
                             key={i}
                             name={i + 1 <= r.rating ? "star" : "star-outline"}
                             size={12}
-                            color={i + 1 <= r.rating ? STAR_FILLED : STAR_EMPTY}
+                            color={
+                              i + 1 <= r.rating ? STAR_FILLED : STAR_EMPTY
+                            }
                           />
                         ))}
                       </View>
                       {r.createdAt?.toDate && (
                         <Text style={reviewSectionStyles.date}>
-                          {r.createdAt
-                            .toDate()
-                            .toLocaleDateString("en-PH", {
-                              month: "short",
-                              day: "numeric",
-                            })}
+                          {r.createdAt.toDate().toLocaleDateString("en-PH", {
+                            month: "short",
+                            day: "numeric",
+                          })}
                         </Text>
                       )}
                     </View>
@@ -1269,7 +1347,11 @@ function RecentReviewsSection({
                   <Text style={reviewSectionStyles.seeAllText}>
                     See all {ratingCount} reviews
                   </Text>
-                  <Ionicons name="chevron-forward" size={14} color={DARK_BLUE} />
+                  <Ionicons
+                    name="chevron-forward"
+                    size={14}
+                    color={DARK_BLUE}
+                  />
                 </TouchableOpacity>
               )}
             </>
@@ -1331,7 +1413,6 @@ export default function ProfileScreen() {
         (snap) => {
           if (snap.exists()) {
             const data = snap.data();
-            // ── FIX: resolve display name without ever showing an email ──
             const resolvedUsername = resolveDisplayName(data, "Unknown User");
             setUserData({
               ...data,
@@ -1349,7 +1430,9 @@ export default function ProfileScreen() {
                   ? data.exchangedCount
                   : 0,
               followerCount:
-                typeof data.followerCount === "number" ? data.followerCount : 0,
+                typeof data.followerCount === "number"
+                  ? data.followerCount
+                  : 0,
               followingCount:
                 typeof data.followingCount === "number"
                   ? data.followingCount
@@ -1357,9 +1440,11 @@ export default function ProfileScreen() {
             } as UserData);
             setError(null);
           } else {
-            // Doc doesn't exist — fall back to Auth display name (strip email)
             const rawDisplay = currentUser.displayName?.trim() ?? "";
-            const safeDisplay = rawDisplay.includes("@") ? "Unknown User" : rawDisplay || "Unknown User";
+            const safeDisplay =
+              rawDisplay.includes("@")
+                ? "Unknown User"
+                : rawDisplay || "Unknown User";
             setUserData({
               email: currentUser.email ?? undefined,
               username: safeDisplay,
@@ -1384,7 +1469,10 @@ export default function ProfileScreen() {
               : "Failed to load profile.",
           );
           const rawDisplay = currentUser.displayName?.trim() ?? "";
-          const safeDisplay = rawDisplay.includes("@") ? "Offline User" : rawDisplay || "Offline User";
+          const safeDisplay =
+            rawDisplay.includes("@")
+              ? "Offline User"
+              : rawDisplay || "Offline User";
           setUserData({
             email: currentUser.email ?? undefined,
             username: safeDisplay,
@@ -1434,7 +1522,6 @@ export default function ProfileScreen() {
     });
   }, [userId]);
 
-  // ── FIX: setUserOfflineBeforeSignOut called before signOut ─────────────────
   const handleLogout = async () => {
     setLoggingOut(true);
     try {
@@ -1600,9 +1687,8 @@ export default function ProfileScreen() {
               )}
             </View>
 
-            <Text style={styles.contactLine}>
-              {userData?.phone ?? userData?.email ?? ""}
-            </Text>
+            {/* ── Contact number intentionally hidden ── */}
+
             {userData?.bio ? (
               <Text style={styles.bioText}>{userData.bio}</Text>
             ) : null}
@@ -1861,7 +1947,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   verifiedText: { color: "#fff", fontSize: 11, fontWeight: "800" },
-  contactLine: { color: "#888", fontSize: 13.5, marginTop: 3 },
+  // contactLine removed — phone/email no longer shown on profile
   bioText: {
     color: "#555",
     fontSize: 13.5,
@@ -2223,7 +2309,7 @@ const ovStyles = StyleSheet.create({
     borderTopLeftRadius: 28,
     borderTopRightRadius: 28,
     paddingHorizontal: 20,
-    paddingBottom: 12,
+    // paddingBottom is dynamic (safe area inset) — set inline
     maxHeight: "88%",
     flex: 1,
   },
@@ -2242,7 +2328,7 @@ const ovStyles = StyleSheet.create({
     backgroundColor: "#F7F8FC",
     borderRadius: 16,
     padding: 18,
-    marginBottom: 16,
+    marginBottom: 14,
   },
   heroLeft: { alignItems: "center", width: 88, gap: 4 },
   heroNumber: {
@@ -2276,7 +2362,6 @@ const ovStyles = StyleSheet.create({
     textAlign: "right",
     marginRight: 2,
   },
-  heroBarLabelActive: { color: "#1A1A2E" },
   heroBarTrack: {
     flex: 1,
     height: 7,
@@ -2291,20 +2376,37 @@ const ovStyles = StyleSheet.create({
     width: 18,
     textAlign: "right",
   },
-  filterRow: { flexDirection: "row", gap: 8, paddingBottom: 14 },
+
+  // ── Compact horizontal pill filter row ──────────────────────────────────
+  filterRow: {
+    flexDirection: "row",
+    flexWrap: "nowrap",
+    gap: 6,
+    marginBottom: 12,
+  },
   filterPill: {
     flexDirection: "row",
     alignItems: "center",
-    paddingHorizontal: 14,
-    paddingVertical: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 5,
     borderRadius: 20,
-    backgroundColor: "#F0F0F0",
-    borderWidth: 1.5,
+    backgroundColor: "#F0F0F4",
+    borderWidth: 1,
     borderColor: "transparent",
   },
-  filterPillActive: { backgroundColor: DARK_BLUE, borderColor: DARK_BLUE },
-  filterPillText: { fontSize: 13, fontWeight: "600", color: "#555" },
+  filterPillActive: {
+    backgroundColor: DARK_BLUE,
+    borderColor: DARK_BLUE,
+  },
+  filterPillText: {
+    fontSize: 12,
+    fontWeight: "700",
+    color: "#555",
+    letterSpacing: 0.1,
+  },
   filterPillTextActive: { color: "#fff" },
+
+  // ── Review cards ─────────────────────────────────────────────────────────
   reviewCard: {
     backgroundColor: "#F9F9FB",
     borderRadius: 14,
@@ -2379,6 +2481,8 @@ const ovStyles = StyleSheet.create({
     paddingHorizontal: 24,
     fontStyle: "italic",
   },
+
+  // ── Close button — sits above phone navigation bar ────────────────────────
   closeBtn: {
     paddingVertical: 14,
     alignItems: "center",
@@ -2541,7 +2645,11 @@ const logoutModalStyles = StyleSheet.create({
     alignItems: "center",
     minHeight: 44,
   },
-  btnCancel: { backgroundColor: "#F0F0F0", borderWidth: 1, borderColor: "#E0E0E0" },
+  btnCancel: {
+    backgroundColor: "#F0F0F0",
+    borderWidth: 1,
+    borderColor: "#E0E0E0",
+  },
   btnCancelText: { fontSize: 14, fontWeight: "600", color: "#555" },
   btnLogout: { backgroundColor: "#C0392B" },
   btnLogoutText: { fontSize: 14, fontWeight: "700", color: "#fff" },

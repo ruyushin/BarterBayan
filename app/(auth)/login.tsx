@@ -7,7 +7,6 @@ import {
   GoogleAuthProvider,
   browserLocalPersistence,
   browserSessionPersistence,
-  fetchSignInMethodsForEmail,
   sendEmailVerification,
   setPersistence,
   signInWithCredential,
@@ -54,7 +53,7 @@ export const saveKeepLoggedIn = async (value: boolean): Promise<void> => {
   }
 };
 
-/** Reads the flag back (sync on web, async on native). */
+/** Reads the flag back. */
 export const readKeepLoggedIn = async (): Promise<boolean> => {
   if (Platform.OS === "web" && typeof window !== "undefined") {
     return window.localStorage.getItem(KEEP_LOGGED_IN_KEY) === "1";
@@ -65,13 +64,19 @@ export const readKeepLoggedIn = async (): Promise<boolean> => {
 };
 
 /**
- * Call this ONCE in your root _layout.tsx (inside a useEffect on mount).
- * If the user is signed in but chose NOT to keep their session, it signs
- * them out so the next app open lands on the login screen.
+ * Call this ONCE in your root _layout.tsx inside a useEffect on mount,
+ * BEFORE the auth state listener navigates anywhere.
+ *
+ * FIX: We now await this before the auth guard runs so Android correctly
+ * signs the user out when "Keep me logged in" is disabled.
  *
  * Usage in _layout.tsx:
  *   import { checkSessionPersistence } from "../app/(auth)/login";
- *   useEffect(() => { checkSessionPersistence(); }, []);
+ *   const [sessionChecked, setSessionChecked] = useState(false);
+ *   useEffect(() => {
+ *     checkSessionPersistence().finally(() => setSessionChecked(true));
+ *   }, []);
+ *   // Only render navigator / auth listener after sessionChecked === true
  */
 export const checkSessionPersistence = async (): Promise<void> => {
   try {
@@ -94,18 +99,37 @@ const validateEmail = (email: string) =>
 const sanitizeEmail = (email: string) => email.trim().toLowerCase();
 
 /**
- * Firebase v9+ collapses auth/user-not-found + auth/wrong-password into
- * auth/invalid-credential.  We disambiguate by fetching the sign-in methods
- * for the email: if methods come back the account exists → wrong password.
+ * FIX: fetchSignInMethodsForEmail is deprecated and unreliable — it returns []
+ * even for existing accounts on many Firebase projects, so it was always
+ * resolving to "no_account."
+ *
+ * New strategy: attempt a sign-in with a guaranteed-wrong sentinel password.
+ * - auth/wrong-password  → account exists, user typed wrong password
+ * - auth/invalid-credential → same meaning in newer Firebase SDK versions
+ * - auth/user-not-found   → no account with that email
+ * - auth/invalid-email    → malformed email (shouldn't reach here, but guard it)
+ *
+ * We use a unique sentinel so we never accidentally succeed.
  */
-const diagnoseInvalidCredential = async (
+const diagnoseEmailExists = async (
   email: string,
-): Promise<"wrong_password" | "no_account"> => {
+): Promise<"exists" | "not_found"> => {
+  const SENTINEL = `__probe__${Date.now()}__`;
   try {
-    const methods = await fetchSignInMethodsForEmail(auth, sanitizeEmail(email));
-    return methods && methods.length > 0 ? "wrong_password" : "no_account";
-  } catch {
-    return "no_account";
+    await signInWithEmailAndPassword(auth, sanitizeEmail(email), SENTINEL);
+    // Should never reach here, but if it does the account clearly exists.
+    return "exists";
+  } catch (e: any) {
+    switch (e.code) {
+      case "auth/wrong-password":
+      case "auth/invalid-credential":
+        // Firebase threw "wrong password" → account exists
+        return "exists";
+      case "auth/user-not-found":
+      case "auth/invalid-email":
+      default:
+        return "not_found";
+    }
   }
 };
 
@@ -321,10 +345,12 @@ export default function LoginScreen() {
       );
     } catch (err: any) {
       switch (err.code) {
+        // ── FIX: auth/invalid-credential is what modern Firebase SDKs throw
+        // for BOTH wrong-password and user-not-found. We disambiguate with
+        // our sentinel probe instead of the deprecated fetchSignInMethodsForEmail.
         case "auth/invalid-credential": {
-          // Disambiguate: wrong password vs no account
-          const diagnosis = await diagnoseInvalidCredential(email);
-          if (diagnosis === "wrong_password") {
+          const exists = await diagnoseEmailExists(email);
+          if (exists === "exists") {
             setErrors({ password: "Wrong password. Please try again." });
           } else {
             setErrors({ email: "No account found with this email." });

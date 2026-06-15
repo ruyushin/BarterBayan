@@ -69,7 +69,6 @@ interface Notification {
   conversationId?: string;
   otherUserId?: string;
   senderId?: string;
-  // resolved at runtime — not stored in Firestore
   _resolvedName?: string;
   _resolvedAvatar?: string | null;
 }
@@ -109,6 +108,22 @@ const formatTime = (timestamp: any): string => {
   } catch {
     return "";
   }
+};
+
+// FIX BUG 1: formatLastSeen was missing from inbox.tsx — copied from chat.tsx
+const formatLastSeen = (timestamp: any): string => {
+  const date = tsToDate(timestamp);
+  if (date.getTime() === 0) return "Offline";
+  const diffMs = Date.now() - date.getTime();
+  const diffMin = Math.floor(diffMs / 60000);
+  if (diffMin < 1) return "Last seen just now";
+  if (diffMin < 60) return `Last seen ${diffMin}m ago`;
+  const diffHr = Math.floor(diffMin / 60);
+  if (diffHr < 24) return `Last seen ${diffHr}h ago`;
+  const diffDays = Math.floor(diffHr / 24);
+  if (diffDays === 1) return "Last seen yesterday";
+  if (diffDays < 7) return `Last seen ${diffDays}d ago`;
+  return `Last seen ${date.toLocaleDateString([], { month: "short", day: "numeric" })}`;
 };
 
 const AVATAR_COLORS = [
@@ -154,11 +169,6 @@ const resolveAvatar = (info: any): string | null => {
   return null;
 };
 
-/**
- * Resolve a human-readable display name from a Firestore user doc.
- * Firebase Auth sometimes writes the user's email into `displayName`,
- * so we strip anything that looks like an email address.
- */
 const resolveDisplayName = (info: any): string => {
   const raw =
     info?.displayName?.trim() ||
@@ -166,14 +176,10 @@ const resolveDisplayName = (info: any): string => {
     info?.fullName?.trim() ||
     info?.username?.trim() ||
     "";
-  // If the resolved value looks like an email, discard it
   if (raw.includes("@")) return "";
   return raw;
 };
 
-/**
- * Build the best possible display name for a user doc, with a fallback.
- */
 const buildDisplayName = (info: any, fallback = "User"): string => {
   if (info?.firstName && info?.lastName)
     return `${info.firstName.trim()} ${info.lastName.trim()}`;
@@ -181,10 +187,6 @@ const buildDisplayName = (info: any, fallback = "User"): string => {
   return resolved || fallback;
 };
 
-/**
- * Replace placeholder words like "Someone" / "A user" in a notification
- * body string with the given real name.
- */
 const injectNameIntoBody = (body: string, name: string): string => {
   if (!name || name === "User") return body;
   return body
@@ -378,7 +380,7 @@ export default function InboxScreen() {
     "messages" | "archived" | "notifications"
   >("messages");
 
-const [presenceMap, setPresenceMap] = useState<Record<string, PresenceData | null>>({});
+  const [presenceMap, setPresenceMap] = useState<Record<string, PresenceData | null>>({});
 
   // ── Messages state
   const [conversations, setConversations] = useState<any[]>([]);
@@ -453,7 +455,6 @@ const [presenceMap, setPresenceMap] = useState<Record<string, PresenceData | nul
               () => null,
             );
             const avatarUri = resolveAvatar(userInfo);
-            // Strip email-looking values; fall back to "User"
             const displayName = buildDisplayName(userInfo, "User");
             const unreadCount = await getUnreadMessageCount(
               conv.id,
@@ -465,6 +466,9 @@ const [presenceMap, setPresenceMap] = useState<Record<string, PresenceData | nul
               userName: displayName,
               userAvatar: avatarUri,
               unreadCount,
+              // FIX BUG 2: carry through the manuallyUnreadBy map so
+              // renderMessage can check it when computing isRead
+              manuallyUnreadBy: conv.manuallyUnreadBy ?? {},
             };
           } catch {
             return {
@@ -472,6 +476,7 @@ const [presenceMap, setPresenceMap] = useState<Record<string, PresenceData | nul
               userName: "User",
               userAvatar: null,
               unreadCount: 0,
+              manuallyUnreadBy: {},
             };
           }
         }),
@@ -505,33 +510,27 @@ const [presenceMap, setPresenceMap] = useState<Record<string, PresenceData | nul
   }, [currentUserId]);
 
   useEffect(() => {
-  const allConvs = [...conversations, ...archivedConversations];
-  const otherUserIds = Array.from(
-    new Set(allConvs.map((c) => c.otherUserId).filter(Boolean)),
-  );
+    const allConvs = [...conversations, ...archivedConversations];
+    const otherUserIds = Array.from(
+      new Set(allConvs.map((c) => c.otherUserId).filter(Boolean)),
+    );
 
-  const unsubscribers = otherUserIds.map((uid) =>
-    subscribeToPresence(uid, (presence) => {
-      setPresenceMap((prev) => ({ ...prev, [uid]: presence }));
-    }),
-  );
+    const unsubscribers = otherUserIds.map((uid) =>
+      subscribeToPresence(uid, (presence) => {
+        setPresenceMap((prev) => ({ ...prev, [uid]: presence }));
+      }),
+    );
 
-  return () => {
-    unsubscribers.forEach((unsub) => unsub());
-  };
-}, [conversations, archivedConversations]);
+    return () => {
+      unsubscribers.forEach((unsub) => unsub());
+    };
+  }, [conversations, archivedConversations]);
 
-  /**
-   * Load notifications, then for each one that has a senderId / otherUserId,
-   * fetch the user's real display name and avatar so we can replace "Someone".
-   */
   const loadNotifications = useCallback(async () => {
     try {
       setNotifLoading(true);
       const raw: Notification[] = (await getNotifications(currentUserId!)) ?? [];
 
-      // Enrich in parallel — resolve the sender name for every notif that has
-      // a user id attached to it.
       const enriched = await Promise.all(
         raw.map(async (notif) => {
           const userId = notif.senderId || notif.otherUserId;
@@ -582,7 +581,6 @@ const [presenceMap, setPresenceMap] = useState<Record<string, PresenceData | nul
     try {
       const trade = await getTradeOffer(tradeId);
       if (trade) {
-        // Determine the other party's userId
         const otherUserId =
           auth.currentUser?.uid === trade.ownerId
             ? trade.offererId
@@ -680,8 +678,12 @@ const [presenceMap, setPresenceMap] = useState<Record<string, PresenceData | nul
   const handleConversationMenu = (item: any) => {
     const isMuted = mutedConversations[item.id];
     const isMutedActive = isMuted && new Date() < isMuted;
-    const isRead =
-      item.readBy?.includes(currentUserId!) || item.isRead === true;
+
+    // FIX BUG 2: Use the same isRead logic as renderMessage so the menu
+    // label ("Mark as Read" / "Mark as Unread") always matches the visual state.
+    const manuallyUnread = item.manuallyUnreadBy?.[currentUserId!] === true;
+    const isRead = (item.unreadCount || 0) === 0 && !manuallyUnread;
+
     const options: SheetOption[] = [
       {
         label: isRead ? "Mark as Unread" : "Mark as Read",
@@ -844,15 +846,25 @@ const [presenceMap, setPresenceMap] = useState<Record<string, PresenceData | nul
   const unreadNotificationBadge =
     unreadCount > 99 ? "99+" : unreadCount.toString();
 
-  const unreadConversationsCount = conversations.filter(
+  // FIX BUG 2: A conversation counts as unread if it has real unread messages
+  // OR if it has been manually marked as unread (manuallyUnreadBy flag).
+  // We do NOT count manually-unread ones toward the number badge though —
+  // only real unread message counts get the number badge.
+  const unreadConversationsCount = conversations.filter((conv) => {
+    const manuallyUnread = conv.manuallyUnreadBy?.[currentUserId!] === true;
+    return (conv.unreadCount || 0) > 0 || manuallyUnread;
+  }).length;
+
+  // Real message unread count (for the number badge only)
+  const realUnreadConversationsCount = conversations.filter(
     (conv) => (conv.unreadCount || 0) > 0,
   ).length;
 
   useEffect(() => {
-    const total = unreadConversationsCount + unreadCount;
+    const total = realUnreadConversationsCount + unreadCount;
     badgeStore.setCount(total);
     Notifications.setBadgeCountAsync(total).catch(() => {});
-  }, [unreadConversationsCount, unreadCount]);
+  }, [realUnreadConversationsCount, unreadCount]);
 
   useEffect(() => {
     if (!currentUserId) return;
@@ -886,23 +898,40 @@ const [presenceMap, setPresenceMap] = useState<Record<string, PresenceData | nul
     };
   }, [currentUserId]);
 
+  // Badge pill shows only real unread message conversations, not manual ones
   const totalUnreadBadge =
-    unreadConversationsCount > 99 ? "99+" : unreadConversationsCount.toString();
+    realUnreadConversationsCount > 99 ? "99+" : realUnreadConversationsCount.toString();
 
   // ─── Renders
   const renderMessage = ({ item }: any) => {
     const isMuted = mutedConversations[item.id];
     const isMutedActive = isMuted && new Date() < isMuted;
-    const isRead = (item.unreadCount || 0) === 0;
+
+    // FIX BUG 2: A row is "unread" if it has real unread messages OR was
+    // manually marked as unread. The number badge only shows for real unread.
+    const manuallyUnread = item.manuallyUnreadBy?.[currentUserId!] === true;
+    const isRead = (item.unreadCount || 0) === 0 && !manuallyUnread;
+
     const name = item.userName || "User";
     const timeStr = item.lastMessageTime
       ? formatTime(item.lastMessageTime)
       : "";
-    const lastLine = timeStr
-      ? `${item.lastMessage || "No messages"} · ${timeStr}`
+
+    // FIX BUG 1: Show "Message was deleted" when lastMessageDeleted is true.
+    // Previously the raw text stored in Firestore ("Message was deleted") was
+    // being rendered but we also add italic styling to make it obvious.
+    const rawLastMessage = item.lastMessageDeleted
+      ? "Message was deleted"
       : item.lastMessage || "No messages";
+
+    const lastLine = timeStr
+      ? `${rawLastMessage} · ${timeStr}`
+      : rawLastMessage;
+
+    // Only show the number badge for real unread messages, not manual ones
     const unreadCount = item.unreadCount || 0;
     const unreadBadgeText = unreadCount > 99 ? "99+" : unreadCount.toString();
+
     return (
       <View
         style={[styles.messageRowContainer, !isRead && styles.messageRowUnread]}
@@ -935,6 +964,7 @@ const [presenceMap, setPresenceMap] = useState<Record<string, PresenceData | nul
                   },
                 ]}
               />
+              {/* FIX BUG 2: Only show the number badge for real unread messages */}
               {unreadCount > 0 && (
                 <View style={styles.unreadBadgeMessage}>
                   <Text style={styles.unreadBadgeMessageText}>
@@ -943,7 +973,7 @@ const [presenceMap, setPresenceMap] = useState<Record<string, PresenceData | nul
                 </View>
               )}
             </View>
-             <View style={styles.messageInfo}>
+            <View style={styles.messageInfo}>
               <View style={styles.messageNameRow}>
                 <Text
                   style={[
@@ -962,10 +992,31 @@ const [presenceMap, setPresenceMap] = useState<Record<string, PresenceData | nul
                   />
                 )}
               </View>
+              {(() => {
+                const presence = presenceMap[item.otherUserId];
+                const statusText = presence?.isOnline
+                  ? "Active"
+                  : presence?.lastSeen
+                    ? formatLastSeen(presence.lastSeen)
+                    : null;
+                return statusText ? (
+                  <Text
+                    style={[
+                      styles.presenceStatus,
+                      presence?.isOnline && styles.presenceStatusOnline,
+                    ]}
+                    numberOfLines={1}
+                  >
+                    {statusText}
+                  </Text>
+                ) : null;
+              })()}
               <Text
                 style={[
                   styles.messageLast,
                   !isRead && styles.messageLastUnread,
+                  // FIX BUG 1: Italicise the "Message was deleted" preview
+                  item.lastMessageDeleted && styles.messageLastDeleted,
                 ]}
                 numberOfLines={1}
               >
@@ -992,15 +1043,11 @@ const [presenceMap, setPresenceMap] = useState<Record<string, PresenceData | nul
   const renderNotification = ({ item }: { item: Notification }) => {
     const isSelected = selectedIds.has(item.id);
 
-    // Use the runtime-resolved name if available, otherwise fall back to
-    // whatever was stored in the notification document's title field.
     const senderName = item._resolvedName || "";
     const displayTitle = senderName || item.title;
-    // Inject the real name into body text that says "Someone" etc.
     const displayBody = senderName
       ? injectNameIntoBody(item.body, senderName)
       : item.body;
-    // Prefer the freshly-resolved avatar over the stored one
     const avatarUri =
       item._resolvedAvatar !== undefined
         ? item._resolvedAvatar
@@ -1142,7 +1189,8 @@ const [presenceMap, setPresenceMap] = useState<Record<string, PresenceData | nul
               size={24}
               color={activeTab === "messages" ? "#fff" : "#999"}
             />
-            {unreadConversationsCount > 0 && (
+            {/* FIX BUG 2: badge uses realUnreadConversationsCount only */}
+            {realUnreadConversationsCount > 0 && (
               <View style={styles.badgePill}>
                 <Text style={styles.badgePillText}>{totalUnreadBadge}</Text>
               </View>
@@ -1439,6 +1487,10 @@ const styles = StyleSheet.create({
   messageNameUnread: { fontWeight: "700", color: "#000" },
   messageLast: { fontSize: 12, color: "#777" },
   messageLastUnread: { color: "#333", fontWeight: "700" },
+  // FIX BUG 1: Italic style for deleted message previews
+  messageLastDeleted: { fontStyle: "italic", color: "#aaa" },
+  presenceStatus: { fontSize: 11, color: "#999", marginTop: 1 },
+  presenceStatusOnline: { color: "#4CAF50", fontWeight: "600" },
   unreadBadgeMessage: {
     position: "absolute",
     top: -4,

@@ -8,6 +8,7 @@ import {
   KeyboardAvoidingView,
   Modal,
   Platform,
+  ScrollView,
   StyleSheet,
   Text,
   TextInput,
@@ -22,12 +23,9 @@ import {
   proposeTrade,
 } from "../services/tradeService";
 
-// ─── Constants ────────────────────────────────────────────────────────────────
 const NAVY = "#2f2f6f";
 const GOLD = "#C9A227";
-const ACCENT_RED = "#C0392B";
 
-// ─── Types ────────────────────────────────────────────────────────────────────
 interface TargetItem {
   id: string;
   title: string;
@@ -54,14 +52,12 @@ interface ProposeTradeModalProps {
   onSuccess?: () => void;
 }
 
-// ─── Helper ───────────────────────────────────────────────────────────────────
 function resolveImage(item: { images?: string[]; image?: string }): string {
   if (Array.isArray(item.images) && item.images.length > 0)
     return item.images[0];
   return item.image ?? "";
 }
 
-// ─── Component ────────────────────────────────────────────────────────────────
 export const ProposeTradeModal: React.FC<ProposeTradeModalProps> = ({
   visible,
   targetItem,
@@ -77,7 +73,6 @@ export const ProposeTradeModal: React.FC<ProposeTradeModalProps> = ({
   const [hasExistingOffer, setHasExistingOffer] = useState(false);
   const [checkingOffer, setCheckingOffer] = useState(false);
 
-  // Fetch the current user's own posted items whenever modal opens
   useEffect(() => {
     if (!visible) return;
     setSelectedItemId(null);
@@ -88,7 +83,6 @@ export const ProposeTradeModal: React.FC<ProposeTradeModalProps> = ({
     const uid = auth.currentUser?.uid;
     if (!uid) return;
 
-    // Check if user already has a pending offer on this item
     if (targetItem?.id) {
       setCheckingOffer(true);
       getOffersForItem(targetItem.id)
@@ -105,8 +99,6 @@ export const ProposeTradeModal: React.FC<ProposeTradeModalProps> = ({
     setLoadingItems(true);
     Promise.all([
       getUserPostedItems(uid) as Promise<OwnItem[]>,
-      // PATCH: fetch this user's own trade offers so we can exclude items
-      // that have already been part of a completed trade.
       getOffersByUser(uid).catch(() => []),
     ])
       .then(([items, sentOffers]) => {
@@ -116,15 +108,9 @@ export const ProposeTradeModal: React.FC<ProposeTradeModalProps> = ({
             .map((o) => o.offeredItemId)
             .filter(Boolean),
         );
-
-        // PATCH: remove items that are already marked as traded, or that
-        // were offered in a now-completed trade — these are no longer
-        // available to offer and showing them would be misleading.
         const availableItems = items.filter(
-          (item) =>
-            !item.isTraded && !completedOfferedItemIds.has(item.id),
+          (item) => !item.isTraded && !completedOfferedItemIds.has(item.id),
         );
-
         setOwnItems(availableItems);
       })
       .catch(() => setOwnItems([]))
@@ -133,10 +119,7 @@ export const ProposeTradeModal: React.FC<ProposeTradeModalProps> = ({
 
   const handleSubmit = async () => {
     if (!selectedItemId) {
-      Alert.alert(
-        "No item selected",
-        "Please choose one of your items to offer.",
-      );
+      Alert.alert("No item selected", "Please choose one of your items to offer.");
       return;
     }
     if (!targetItem) return;
@@ -146,8 +129,6 @@ export const ProposeTradeModal: React.FC<ProposeTradeModalProps> = ({
       Alert.alert("Not logged in", "You must be logged in to propose a trade.");
       return;
     }
-
-    // Guard: cannot trade for your own item
     if (currentUser.uid === targetItem.ownerId) {
       Alert.alert("Oops", "You cannot propose a trade for your own item.");
       return;
@@ -168,8 +149,6 @@ export const ProposeTradeModal: React.FC<ProposeTradeModalProps> = ({
         },
         message,
       );
-
-      // Show inline success screen, then auto-close after 2.5 s
       setSucceeded(true);
       setTimeout(() => {
         onClose();
@@ -194,21 +173,27 @@ export const ProposeTradeModal: React.FC<ProposeTradeModalProps> = ({
       animationType="slide"
       onRequestClose={onClose}
     >
+      {/* KAV lifts the sheet when keyboard opens */}
       <KeyboardAvoidingView
         style={styles.overlay}
-        behavior={Platform.OS === "ios" ? "padding" : "height"}
+        behavior={Platform.OS === "ios" ? "padding" : "padding"}
+        keyboardVerticalOffset={Platform.OS === "ios" ? 0 : 0}
       >
         <View style={styles.sheet}>
-          {/* ── Handle ── */}
+          {/* Handle — always visible above scroll */}
           <View style={styles.handle} />
 
-          {/* ── SUCCESS SCREEN ── */}
+          {/* ── SUCCESS ── */}
           {succeeded ? (
             <View style={styles.successContainer}>
               <View style={styles.successIconCircle}>
                 <Ionicons name="checkmark" size={48} color="#fff" />
               </View>
-              <Text style={styles.successTitle}>Trade Proposal Sent! 🤝</Text>
+              <View style={styles.successTitleRow}>
+                <Ionicons name="swap-horizontal" size={22} color={NAVY} />
+                <Text style={styles.successTitle}>Trade Proposal Sent!</Text>
+                <Ionicons name="swap-horizontal" size={22} color={NAVY} />
+              </View>
               <Text style={styles.successBody}>
                 Your offer has been sent to the owner of{" "}
                 <Text style={styles.successItemName}>
@@ -244,197 +229,215 @@ export const ProposeTradeModal: React.FC<ProposeTradeModalProps> = ({
             </View>
           ) : (
             <>
-              {/* ── Header ── */}
-              <View style={styles.header}>
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.title}>Propose a Trade</Text>
-                  <Text style={styles.subtitle} numberOfLines={1}>
-                    For:{" "}
-                    <Text style={styles.targetTitle}>
+              {/*
+                FIX: ScrollView wraps all content above the pinned buttons.
+                This ensures the message TextInput scrolls into view when the
+                keyboard opens, and there's no blank gap left behind when it
+                dismisses — the ScrollView collapses naturally with the content.
+              */}
+              <ScrollView
+                bounces={false}
+                keyboardShouldPersistTaps="handled"
+                showsVerticalScrollIndicator={false}
+                contentContainerStyle={styles.scrollContent}
+              >
+                {/* Header */}
+                <View style={styles.header}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.title}>Propose a Trade</Text>
+                    <Text style={styles.subtitle} numberOfLines={1}>
+                      For:{" "}
+                      <Text style={styles.targetTitle}>
+                        {targetItem?.title ?? ""}
+                      </Text>
+                    </Text>
+                  </View>
+                  <TouchableOpacity
+                    onPress={onClose}
+                    style={styles.closeBtn}
+                    disabled={submitting}
+                  >
+                    <Ionicons name="close" size={22} color="#555" />
+                  </TouchableOpacity>
+                </View>
+
+                {/* Trade preview */}
+                <View style={styles.tradePreview}>
+                  <View style={styles.previewSide}>
+                    <View
+                      style={[
+                        styles.previewImageBox,
+                        !selectedItem && styles.previewImageBoxEmpty,
+                      ]}
+                    >
+                      {selectedItem ? (
+                        <Image
+                          source={{ uri: resolveImage(selectedItem) }}
+                          style={styles.previewImage}
+                        />
+                      ) : (
+                        <Ionicons name="cube-outline" size={28} color="#CCCCCC" />
+                      )}
+                    </View>
+                    <Text style={styles.previewLabel} numberOfLines={2}>
+                      {selectedItem ? selectedItem.title : "Select below ↓"}
+                    </Text>
+                  </View>
+
+                  <View style={styles.previewArrow}>
+                    <Ionicons name="swap-horizontal" size={26} color={NAVY} />
+                  </View>
+
+                  <View style={styles.previewSide}>
+                    <View style={styles.previewImageBox}>
+                      {targetItem ? (
+                        <Image
+                          source={{ uri: resolveImage(targetItem) }}
+                          style={styles.previewImage}
+                        />
+                      ) : (
+                        <View style={styles.previewImageBoxEmpty} />
+                      )}
+                    </View>
+                    <Text style={styles.previewLabel} numberOfLines={2}>
                       {targetItem?.title ?? ""}
                     </Text>
-                  </Text>
+                  </View>
                 </View>
+
+                {/* Pick item */}
+                <Text style={styles.sectionLabel}>Choose your item to offer</Text>
+
+                {loadingItems ? (
+                  <View style={styles.loaderBox}>
+                    <ActivityIndicator size="small" color={NAVY} />
+                    <Text style={styles.loaderText}>Loading your items…</Text>
+                  </View>
+                ) : ownItems.length === 0 ? (
+                  <View style={styles.emptyBox}>
+                    <Ionicons name="cube-outline" size={36} color="#CCCCCC" />
+                    <Text style={styles.emptyTitle}>No items available</Text>
+                    <Text style={styles.emptyText}>
+                      Add new items in the Trade tab, or wait — items already
+                      traded away can't be offered again.
+                    </Text>
+                  </View>
+                ) : (
+                  <FlatList
+                    data={ownItems}
+                    keyExtractor={(item) => item.id}
+                    horizontal
+                    showsHorizontalScrollIndicator={false}
+                    contentContainerStyle={styles.itemList}
+                    scrollEnabled
+                    nestedScrollEnabled
+                    renderItem={({ item }) => {
+                      const isSelected = selectedItemId === item.id;
+                      const imgUri = resolveImage(item);
+                      return (
+                        <TouchableOpacity
+                          style={[
+                            styles.itemCard,
+                            isSelected && styles.itemCardSelected,
+                          ]}
+                          onPress={() => setSelectedItemId(item.id)}
+                          activeOpacity={0.8}
+                        >
+                          <View style={styles.itemImageBox}>
+                            {imgUri ? (
+                              <Image
+                                source={{ uri: imgUri }}
+                                style={styles.itemImage}
+                              />
+                            ) : (
+                              <View style={styles.itemImagePlaceholder}>
+                                <Ionicons
+                                  name="image-outline"
+                                  size={22}
+                                  color="#CCC"
+                                />
+                              </View>
+                            )}
+                            {isSelected && (
+                              <View style={styles.itemSelectedOverlay}>
+                                <Ionicons
+                                  name="checkmark-circle"
+                                  size={24}
+                                  color="#fff"
+                                />
+                              </View>
+                            )}
+                          </View>
+                          <Text
+                            style={[
+                              styles.itemTitle,
+                              isSelected && styles.itemTitleSelected,
+                            ]}
+                            numberOfLines={2}
+                          >
+                            {item.title}
+                          </Text>
+                          {item.category ? (
+                            <Text style={styles.itemCategory} numberOfLines={1}>
+                              {item.category}
+                            </Text>
+                          ) : null}
+                        </TouchableOpacity>
+                      );
+                    }}
+                  />
+                )}
+
+                {/* Message input */}
+                <Text style={styles.sectionLabel}>Add a message (optional)</Text>
+                <TextInput
+                  style={styles.messageInput}
+                  placeholder="Hi! I'd love to trade my item for yours…"
+                  placeholderTextColor="#AAAAAA"
+                  multiline
+                  numberOfLines={3}
+                  maxLength={200}
+                  value={message}
+                  onChangeText={setMessage}
+                  textAlignVertical="top"
+                  editable={!submitting}
+                />
+                <Text style={styles.charCount}>{message.length}/200</Text>
+              </ScrollView>
+
+              {/*
+                Buttons pinned OUTSIDE the ScrollView — they stay flush at
+                the bottom and never float up with the keyboard, and there
+                is no leftover gap when the keyboard dismisses.
+              */}
+              <View style={styles.actions}>
                 <TouchableOpacity
+                  style={[
+                    styles.submitBtn,
+                    (!selectedItemId || submitting) && styles.submitBtnDisabled,
+                  ]}
+                  onPress={handleSubmit}
+                  disabled={!selectedItemId || submitting}
+                  activeOpacity={0.85}
+                >
+                  {submitting ? (
+                    <ActivityIndicator size="small" color="#fff" />
+                  ) : (
+                    <>
+                      <Ionicons name="swap-horizontal" size={18} color="#fff" />
+                      <Text style={styles.submitText}>Send Trade Offer</Text>
+                    </>
+                  )}
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={styles.cancelBtn}
                   onPress={onClose}
-                  style={styles.closeBtn}
                   disabled={submitting}
                 >
-                  <Ionicons name="close" size={22} color="#555" />
+                  <Text style={styles.cancelText}>Cancel</Text>
                 </TouchableOpacity>
               </View>
-
-              {/* ── Trade visual: your item ⇄ their item ── */}
-              <View style={styles.tradePreview}>
-                {/* Your side */}
-                <View style={styles.previewSide}>
-                  <View
-                    style={[
-                      styles.previewImageBox,
-                      !selectedItem && styles.previewImageBoxEmpty,
-                    ]}
-                  >
-                    {selectedItem ? (
-                      <Image
-                        source={{ uri: resolveImage(selectedItem) }}
-                        style={styles.previewImage}
-                      />
-                    ) : (
-                      <Ionicons name="cube-outline" size={28} color="#CCCCCC" />
-                    )}
-                  </View>
-                  <Text style={styles.previewLabel} numberOfLines={2}>
-                    {selectedItem ? selectedItem.title : "Select below ↓"}
-                  </Text>
-                </View>
-
-                {/* Arrow */}
-                <View style={styles.previewArrow}>
-                  <Ionicons name="swap-horizontal" size={26} color={NAVY} />
-                </View>
-
-                {/* Their side */}
-                <View style={styles.previewSide}>
-                  <View style={styles.previewImageBox}>
-                    {targetItem ? (
-                      <Image
-                        source={{ uri: resolveImage(targetItem) }}
-                        style={styles.previewImage}
-                      />
-                    ) : (
-                      <View style={styles.previewImageBoxEmpty} />
-                    )}
-                  </View>
-                  <Text style={styles.previewLabel} numberOfLines={2}>
-                    {targetItem?.title ?? ""}
-                  </Text>
-                </View>
-              </View>
-
-              {/* ── Pick your item ── */}
-              <Text style={styles.sectionLabel}>Choose your item to offer</Text>
-
-              {loadingItems ? (
-                <View style={styles.loaderBox}>
-                  <ActivityIndicator size="small" color={NAVY} />
-                  <Text style={styles.loaderText}>Loading your items…</Text>
-                </View>
-              ) : ownItems.length === 0 ? (
-                <View style={styles.emptyBox}>
-                  <Ionicons name="cube-outline" size={36} color="#CCCCCC" />
-                  <Text style={styles.emptyTitle}>No items available</Text>
-                  <Text style={styles.emptyText}>
-                    Add new items in the Trade tab, or wait — items already
-                    traded away can't be offered again.
-                  </Text>
-                </View>
-              ) : (
-                <FlatList
-                  data={ownItems}
-                  keyExtractor={(item) => item.id}
-                  horizontal
-                  showsHorizontalScrollIndicator={false}
-                  contentContainerStyle={styles.itemList}
-                  renderItem={({ item }) => {
-                    const isSelected = selectedItemId === item.id;
-                    const imgUri = resolveImage(item);
-                    return (
-                      <TouchableOpacity
-                        style={[
-                          styles.itemCard,
-                          isSelected && styles.itemCardSelected,
-                        ]}
-                        onPress={() => setSelectedItemId(item.id)}
-                        activeOpacity={0.8}
-                      >
-                        <View style={styles.itemImageBox}>
-                          {imgUri ? (
-                            <Image
-                              source={{ uri: imgUri }}
-                              style={styles.itemImage}
-                            />
-                          ) : (
-                            <View style={styles.itemImagePlaceholder}>
-                              <Ionicons
-                                name="image-outline"
-                                size={22}
-                                color="#CCC"
-                              />
-                            </View>
-                          )}
-                          {isSelected && (
-                            <View style={styles.itemSelectedOverlay}>
-                              <Ionicons
-                                name="checkmark-circle"
-                                size={24}
-                                color="#fff"
-                              />
-                            </View>
-                          )}
-                        </View>
-                        <Text
-                          style={[
-                            styles.itemTitle,
-                            isSelected && styles.itemTitleSelected,
-                          ]}
-                          numberOfLines={2}
-                        >
-                          {item.title}
-                        </Text>
-                        {item.category ? (
-                          <Text style={styles.itemCategory} numberOfLines={1}>
-                            {item.category}
-                          </Text>
-                        ) : null}
-                      </TouchableOpacity>
-                    );
-                  }}
-                />
-              )}
-
-              {/* ── Optional message ── */}
-              <Text style={styles.sectionLabel}>Add a message (optional)</Text>
-              <TextInput
-                style={styles.messageInput}
-                placeholder="Hi! I'd love to trade my item for yours…"
-                placeholderTextColor="#AAAAAA"
-                multiline
-                numberOfLines={3}
-                maxLength={200}
-                value={message}
-                onChangeText={setMessage}
-                textAlignVertical="top"
-                editable={!submitting}
-              />
-              <Text style={styles.charCount}>{message.length}/200</Text>
-
-              {/* ── Submit ── */}
-              <TouchableOpacity
-                style={[
-                  styles.submitBtn,
-                  (!selectedItemId || submitting) && styles.submitBtnDisabled,
-                ]}
-                onPress={handleSubmit}
-                disabled={!selectedItemId || submitting}
-                activeOpacity={0.85}
-              >
-                {submitting ? (
-                  <ActivityIndicator size="small" color="#fff" />
-                ) : (
-                  <>
-                    <Ionicons name="swap-horizontal" size={18} color="#fff" />
-                    <Text style={styles.submitText}>Send Trade Offer</Text>
-                  </>
-                )}
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={styles.cancelBtn}
-                onPress={onClose}
-                disabled={submitting}
-              >
-                <Text style={styles.cancelText}>Cancel</Text>
-              </TouchableOpacity>
             </>
           )}
         </View>
@@ -443,7 +446,6 @@ export const ProposeTradeModal: React.FC<ProposeTradeModalProps> = ({
   );
 };
 
-// ─── Styles ───────────────────────────────────────────────────────────────────
 const styles = StyleSheet.create({
   overlay: {
     flex: 1,
@@ -454,9 +456,8 @@ const styles = StyleSheet.create({
     backgroundColor: "#fff",
     borderTopLeftRadius: 26,
     borderTopRightRadius: 26,
-    paddingHorizontal: 20,
     paddingTop: 10,
-    paddingBottom: 36,
+    // No paddingBottom here — actions block handles its own spacing
     maxHeight: "92%",
   },
   handle: {
@@ -468,7 +469,21 @@ const styles = StyleSheet.create({
     marginBottom: 14,
   },
 
-  // ── Header ──
+  // Scrollable area
+  scrollContent: {
+    paddingHorizontal: 20,
+    paddingBottom: 8,
+  },
+
+  // Pinned actions
+  actions: {
+    paddingHorizontal: 20,
+    paddingTop: 8,
+    paddingBottom: 36,
+    backgroundColor: "#fff",
+  },
+
+  // Header
   header: {
     flexDirection: "row",
     alignItems: "flex-start",
@@ -488,7 +503,7 @@ const styles = StyleSheet.create({
     marginTop: 2,
   },
 
-  // ── Trade Preview ──
+  // Trade Preview
   tradePreview: {
     flexDirection: "row",
     alignItems: "center",
@@ -530,7 +545,7 @@ const styles = StyleSheet.create({
     padding: 8,
   },
 
-  // ── Section Labels ──
+  // Section Labels
   sectionLabel: {
     fontSize: 13,
     fontWeight: "700",
@@ -540,7 +555,7 @@ const styles = StyleSheet.create({
     letterSpacing: 0.5,
   },
 
-  // ── Loader / Empty ──
+  // Loader / Empty
   loaderBox: {
     alignItems: "center",
     paddingVertical: 24,
@@ -567,7 +582,7 @@ const styles = StyleSheet.create({
     lineHeight: 18,
   },
 
-  // ── Item list ──
+  // Item list
   itemList: { paddingBottom: 4, gap: 10, marginBottom: 18 },
   itemCard: {
     width: 100,
@@ -618,7 +633,7 @@ const styles = StyleSheet.create({
     letterSpacing: 0.3,
   },
 
-  // ── Message ──
+  // Message
   messageInput: {
     borderWidth: 1.5,
     borderColor: "#E0E0E0",
@@ -629,16 +644,15 @@ const styles = StyleSheet.create({
     minHeight: 72,
     backgroundColor: "#FAFAFA",
     marginBottom: 4,
-    placeholderTextColor: "#AAAAAA",
   },
   charCount: {
     fontSize: 11,
     color: "#BBBBBB",
     textAlign: "right",
-    marginBottom: 16,
+    marginBottom: 8,
   },
 
-  // ── Buttons ──
+  // Buttons
   submitBtn: {
     backgroundColor: NAVY,
     flexDirection: "row",
@@ -664,7 +678,7 @@ const styles = StyleSheet.create({
   cancelBtn: { paddingVertical: 12, alignItems: "center" },
   cancelText: { color: "#888", fontWeight: "600", fontSize: 14 },
 
-  // ── Checking state ──
+  // Checking state
   checkingBox: {
     flexDirection: "row",
     alignItems: "center",
@@ -674,7 +688,7 @@ const styles = StyleSheet.create({
   },
   checkingText: { fontSize: 14, color: "#888" },
 
-  // ── Existing offer screen ──
+  // Existing offer screen
   existingOfferContainer: {
     alignItems: "center",
     justifyContent: "center",
@@ -703,10 +717,7 @@ const styles = StyleSheet.create({
     textAlign: "center",
     lineHeight: 22,
   },
-  existingOfferItemName: {
-    fontWeight: "700",
-    color: NAVY,
-  },
+  existingOfferItemName: { fontWeight: "700", color: NAVY },
   existingOfferCloseBtn: {
     marginTop: 8,
     backgroundColor: NAVY,
@@ -720,7 +731,7 @@ const styles = StyleSheet.create({
     fontSize: 15,
   },
 
-  // ── Success screen ──
+  // Success screen
   successContainer: {
     alignItems: "center",
     justifyContent: "center",
@@ -742,6 +753,11 @@ const styles = StyleSheet.create({
     shadowRadius: 10,
     elevation: 6,
   },
+  successTitleRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
   successTitle: {
     fontSize: 22,
     fontWeight: "800",
@@ -754,8 +770,5 @@ const styles = StyleSheet.create({
     textAlign: "center",
     lineHeight: 22,
   },
-  successItemName: {
-    fontWeight: "700",
-    color: NAVY,
-  },
+  successItemName: { fontWeight: "700", color: NAVY },
 });

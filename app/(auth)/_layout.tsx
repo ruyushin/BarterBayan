@@ -12,6 +12,7 @@ import {
   View,
 } from "react-native";
 import { auth, db } from "../../firebaseConfig";
+import { checkSessionPersistence } from "./login";
 import { welcomeState } from "./welcomeState";
 
 const PRIMARY = "#2F2F6F";
@@ -247,6 +248,14 @@ export default function AuthLayout() {
   const [welcomeType, setWelcomeType] = useState<"login" | "signup">("login");
   const pendingRouteRef = useRef<string | null>(null);
 
+  // Gate the auth listener behind the session check so that on Android,
+  // Firebase has already restored auth.currentUser before we subscribe.
+  const [sessionChecked, setSessionChecked] = useState(false);
+
+  useEffect(() => {
+    checkSessionPersistence().finally(() => setSessionChecked(true));
+  }, []);
+
   const showWelcomeThen = (
     name: string,
     type: "login" | "signup",
@@ -268,12 +277,15 @@ export default function AuthLayout() {
   };
 
   useEffect(() => {
-    // ── cancelled lives outside the Firebase callback so the cleanup
-    // function returned by useEffect can actually set it to true ──────
+    if (!sessionChecked) return;
+
     let cancelled = false;
 
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
       if (!user) {
+        // User signed out — clear any leftover welcome state so it doesn't
+        // surface on the next sign-in.
+        welcomeState.clear();
         navigationInProgressRef.current = false;
         return;
       }
@@ -332,13 +344,10 @@ export default function AuthLayout() {
 
         if (navigationInProgressRef.current) return;
 
-        const pending = welcomeState.consume();
         const specialAuthRoutes = ["ChangePasswordScreen"];
         const isSpecialRoute = specialAuthRoutes.includes(currentRoute);
 
-        // ── STEP 3: Terms not accepted → always block here ──────────
-        // No currentRoute exception — if termsAccepted is false the
-        // user must accept before going anywhere else.
+        // ── STEP 3: Terms not accepted ──────────────────────────────
         if (!data?.termsAccepted) {
           if (currentRoute !== "terms") {
             navigationInProgressRef.current = true;
@@ -363,13 +372,21 @@ export default function AuthLayout() {
         }
 
         // ── STEP 5: Fully onboarded → home ───────────────────────────
+        // Consume the pending welcome state here, inside Step 5, so it is
+        // never consumed for partially-onboarded users who will be routed
+        // to terms/profile-setup instead.
+        // Validate the uid matches the current user to prevent a deleted
+        // or switched account's name from leaking into the modal.
         if (!isSpecialRoute) {
           navigationInProgressRef.current = true;
-          if (pending) {
+
+          const pending = welcomeState.consume();
+          if (pending && pending.uid === user.uid) {
             showWelcomeThen(pending.name, pending.type, "/");
           } else {
             router.replace("/");
           }
+
           setTimeout(() => {
             navigationInProgressRef.current = false;
           }, 800);
@@ -381,10 +398,10 @@ export default function AuthLayout() {
     });
 
     return () => {
-      cancelled = true; // cancels any in-flight async work
+      cancelled = true;
       unsubscribe();
     };
-  }, []); // empty deps — only re-runs on true auth state change, not on every navigation
+  }, [sessionChecked]);
 
   return (
     <>

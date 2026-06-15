@@ -72,6 +72,19 @@ const formatTime = (timestamp: any): string => {
   return date.toLocaleDateString("en-PH", { month: "short", day: "numeric" });
 };
 
+// Detects email-like strings so we never show a Gmail/email address as a name
+const isEmailLike = (value?: string | null): boolean =>
+  !!value && /\S+@\S+\.\S+/.test(value);
+
+// Picks the best available display name, skipping any value that looks like an email
+const resolveDisplayName = (d: any): string => {
+  const candidates = [d?.username, d?.displayName, d?.firstName, d?.name];
+  for (const c of candidates) {
+    if (c && !isEmailLike(c)) return c;
+  }
+  return "User";
+};
+
 // ─── Types ────────────────────────────────────────────────────────────────────
 interface PublicUserData {
   username: string;
@@ -322,7 +335,7 @@ export default function UserProfileScreen() {
     if (snap.exists()) {
       const d = snap.data();
       setUserData({
-        username: d.username || d.displayName || "User",
+        username: resolveDisplayName(d),
         firstName: d.firstName,
         lastName: d.lastName,
         bio: d.bio || "",
@@ -366,7 +379,19 @@ export default function UserProfileScreen() {
         limit(10),
       );
       const snap = await getDocs(q);
-      setReviews(snap.docs.map((d) => ({ id: d.id, ...d.data() }) as Review));
+      setReviews(
+        snap.docs.map((d) => {
+          const data = d.data() as any;
+          return {
+            id: d.id,
+            ...data,
+            reviewerName: resolveDisplayName({
+              username: data.reviewerName,
+              displayName: data.reviewerDisplayName,
+            }),
+          } as Review;
+        }),
+      );
     } catch (err) {
       console.error("Error loading reviews:", err);
     }
@@ -377,8 +402,10 @@ export default function UserProfileScreen() {
     if (!currentUser || !userData) return;
     setFollowLoading(true);
     try {
-      const currentUsername =
-        currentUser.displayName || currentUser.email?.split("@")[0] || "User";
+      const currentUsername = resolveDisplayName({
+        username: currentUser.displayName,
+        displayName: currentUser.displayName,
+      });
       const currentAvatar = currentUser.photoURL ?? undefined;
       await toggleFollow(
         currentUser.uid,
@@ -463,17 +490,15 @@ export default function UserProfileScreen() {
         <Text style={styles.headerTitle} numberOfLines={1}>
           {displayName}
         </Text>
-        {!isOwnProfile ? (
-          <TouchableOpacity style={styles.msgBtn} onPress={handleMessage}>
-            <Ionicons name="chatbubble-ellipses" size={20} color="#fff" />
-          </TouchableOpacity>
-        ) : (
+        {isOwnProfile ? (
           <TouchableOpacity
             style={styles.msgBtn}
             onPress={() => router.push("/edit-profile" as any)}
           >
             <Ionicons name="pencil" size={18} color="#fff" />
           </TouchableOpacity>
+        ) : (
+          <View style={{ width: 40 }} />
         )}
       </View>
 

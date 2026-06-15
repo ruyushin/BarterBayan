@@ -31,6 +31,7 @@ const HEADER_BG = "#2f2f6f";
 const LIGHT_BG = "#F4F5F9";
 const ACCENT_RED = "#C0392B";
 const GOLD = "#C9A227";
+const DEFAULT_NAME = "Trader";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 export type TradeStatus =
@@ -130,6 +131,22 @@ function avatarInitial(name: unknown): string {
   return (s || "?")[0].toUpperCase();
 }
 
+// Detects email-like strings (e.g. a Gmail address) so we never show one as a name
+function isEmailLike(value: unknown): boolean {
+  return typeof value === "string" && /\S+@\S+\.\S+/.test(value);
+}
+
+// Picks the best non-empty, non-email value from a list of candidates
+function firstValidName(...candidates: unknown[]): string | null {
+  for (const c of candidates) {
+    if (typeof c === "string") {
+      const trimmed = c.trim();
+      if (trimmed && !isEmailLike(trimmed)) return trimmed;
+    }
+  }
+  return null;
+}
+
 // ─── Trade Card ───────────────────────────────────────────────────────────────
 function TradeCard({
   trade,
@@ -142,15 +159,13 @@ function TradeCard({
 
   const cfg = STATUS_CONFIG[trade.status] ?? FALLBACK_STATUS_CONFIG;
 
-  // Use the resolved name from the users collection if available
-  // resolvedNames is always populated from the users collection.
-  // "" means lookup ran but found nothing — show "?" rather than the
-  // stale Google name that may be embedded in the trade document.
+  // Prefer the resolved name from the users collection (authoritative,
+  // never email-like). Fall back to the name embedded in the trade doc
+  // (also guaranteed non-email-like by the loader below). Final fallback
+  // is a friendly default — never "Unknown" or blank.
   const resolved = resolvedNames[trade.counterpartUid];
   const displayName =
-    resolved !== undefined
-      ? resolved || "?"
-      : trade.counterpartUsername || "?";
+    firstValidName(resolved, trade.counterpartUsername) ?? DEFAULT_NAME;
 
   const handlePressIn = () =>
     Animated.spring(scale, { toValue: 0.97, useNativeDriver: true }).start();
@@ -387,18 +402,21 @@ export default function TradeHistoryScreen() {
           const isOfferer = d.offererId === currentUser.uid;
           const counterpartUid = isOfferer ? d.ownerId : d.offererId;
 
-          // Widen the field name search before falling back to "Unknown"
+          // Widen the field name search, skipping any value that looks
+          // like an email address (e.g. a Gmail address leaked from auth)
           const counterpartUsername = isOfferer
-            ? (d.ownerName ??
-               d.ownerUsername ??
-               d.ownerDisplayName ??
-               d.counterpartUsername ??
-               null)
-            : (d.offererName ??
-               d.offererUsername ??
-               d.offererDisplayName ??
-               d.counterpartUsername ??
-               null);
+            ? firstValidName(
+                d.ownerName,
+                d.ownerUsername,
+                d.ownerDisplayName,
+                d.counterpartUsername,
+              )
+            : firstValidName(
+                d.offererName,
+                d.offererUsername,
+                d.offererDisplayName,
+                d.counterpartUsername,
+              );
 
           const counterpartAvatarUrl = isOfferer
             ? (d.ownerAvatar ?? d.counterpartAvatarUrl)
@@ -424,7 +442,8 @@ export default function TradeHistoryScreen() {
           return {
             id: docSnap.id,
             counterpartUid,
-            // Store null so the users-collection lookup below can fill it in
+            // Store "" so the users-collection lookup below can fill it in;
+            // already guaranteed non-email-like by firstValidName above.
             counterpartUsername: counterpartUsername ?? "",
             counterpartAvatarUrl,
             offeredItemTitle,
@@ -485,13 +504,15 @@ export default function TradeHistoryScreen() {
   }, [currentUser]);
 
   // ── Always resolve counterpart usernames from the users collection ─────────
-  // The trade document may store a stale Google display name — the users
-  // collection's `username` field is the authoritative app-level username.
+  // The trade document may store a stale Google display name (or email) —
+  // the users collection's `username`/`displayName`/`name` fields are the
+  // authoritative app-level names. Never store an email-like value.
   useEffect(() => {
     if (trades.length === 0) return;
 
     // Look up every unique counterpart UID not yet in the resolved map
-    // (resolved map stores "" for users with no username field, so !== undefined)
+    // (resolved map stores "" when no valid name was found, so !== undefined
+    // means "already looked up, don't refetch")
     const needsLookup = [
       ...new Set(trades.map((t) => t.counterpartUid).filter(Boolean)),
     ].filter((uid) => resolvedNames[uid] === undefined);
@@ -504,15 +525,17 @@ export default function TradeHistoryScreen() {
           const snap = await getDoc(doc(db, "users", uid));
           if (snap.exists()) {
             const d = snap.data();
-            // Try every field the profile-setup screen might have written
-            const name =
-              d.username ??
-              d.userName ??
-              d.displayName ??
-              d.name ??
-              null;
-            // Always store a result so we don't re-fetch; store empty string
-            // if nothing found (TradeCard will show "?" via avatarInitial)
+            // Try every field the profile-setup screen might have written,
+            // skipping anything that looks like an email address
+            const name = firstValidName(
+              d.username,
+              d.userName,
+              d.displayName,
+              d.name,
+              d.firstName,
+            );
+            // Always store a result so we don't re-fetch; "" means
+            // "no valid name found" — TradeCard will fall back to DEFAULT_NAME
             return [uid, name ?? ""] as [string, string];
           }
         } catch {

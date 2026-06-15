@@ -229,6 +229,9 @@ export const addItem = async (itemData: {
   likes?: number;
   likedBy?: string[];
   createdAt?: any;
+  estimatedWeight?: string;       // ← added
+  quantity?: number;              // ← added
+  additionalDescription?: string; // ← added
 }) => {
   try {
     const docRef = await addDoc(collection(db, "items"), {

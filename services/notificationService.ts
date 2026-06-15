@@ -39,12 +39,10 @@ export interface CreateNotificationPayload {
   title: string;
   body: string;
   avatar?: string;
-  /** For all trade-related notifications */
   tradeId?: string;
-  /** For message notifications — the UID of the sender */
   otherUserId?: string;
-  /** For message notifications — the conversation document ID */
   conversationId?: string;
+  senderId?: string;
 }
 
 // ─── Push helper ──────────────────────────────────────────────────────────────
@@ -86,12 +84,27 @@ async function sendExpoPush(
 /**
  * Write a notification document for `userId` and send a push notification
  * to their device if they have a valid Expo push token saved.
- * Silently swallows errors so it never breaks the calling operation.
+ *
+ * FIX BUG 4: If the recipient has archived this conversation, we skip both
+ * writing the Firestore notification and sending the push notification.
  */
 export async function createNotification(
   payload: CreateNotificationPayload,
 ): Promise<void> {
   try {
+    // Skip notification entirely if the recipient has archived this conversation
+    if (payload.conversationId) {
+      const convRef = doc(db, "messages", payload.conversationId);
+      const convSnap = await getDoc(convRef);
+      if (convSnap.exists()) {
+        const archivedBy: string[] = convSnap.data()?.archivedBy ?? [];
+        if (archivedBy.includes(payload.userId)) {
+          // Recipient archived this conversation — no notification, no push.
+          return;
+        }
+      }
+    }
+
     // 1. Write to Firestore
     await addDoc(collection(db, NOTIF_COLLECTION), {
       userId: payload.userId,
@@ -103,9 +116,8 @@ export async function createNotification(
       createdAt: serverTimestamp(),
       ...(payload.tradeId ? { tradeId: payload.tradeId } : {}),
       ...(payload.otherUserId ? { otherUserId: payload.otherUserId } : {}),
-      ...(payload.conversationId
-        ? { conversationId: payload.conversationId }
-        : {}),
+      ...(payload.conversationId ? { conversationId: payload.conversationId } : {}),
+      ...(payload.senderId ? { senderId: payload.senderId } : {}),
     });
 
     // 2. Fetch the recipient's push token and send a push notification
@@ -117,9 +129,7 @@ export async function createNotification(
         type: payload.type,
         ...(payload.tradeId ? { tradeId: payload.tradeId } : {}),
         ...(payload.otherUserId ? { otherUserId: payload.otherUserId } : {}),
-        ...(payload.conversationId
-          ? { conversationId: payload.conversationId }
-          : {}),
+        ...(payload.conversationId ? { conversationId: payload.conversationId } : {}),
       });
     }
   } catch (err) {
@@ -129,9 +139,6 @@ export async function createNotification(
 
 // ─── Fetch ────────────────────────────────────────────────────────────────────
 
-/**
- * Returns all notifications for a user, newest first.
- */
 export async function getNotifications(userId: string): Promise<any[]> {
   try {
     const q = query(
@@ -219,6 +226,33 @@ export async function markAllNotificationsRead(userId: string): Promise<void> {
   const batch = writeBatch(db);
   snapshot.docs.forEach((d) => batch.update(d.ref, { read: true }));
   await batch.commit();
+}
+
+/**
+ * FIX BUG 3: Mark all unread notifications for a specific conversation as read.
+ * Called when the user opens chat.tsx so the notification tab reflects the
+ * read state immediately when they return to the inbox.
+ */
+export async function markConversationNotificationsAsRead(
+  userId: string,
+  conversationId: string,
+): Promise<void> {
+  try {
+    const q = query(
+      collection(db, NOTIF_COLLECTION),
+      where("userId", "==", userId),
+      where("conversationId", "==", conversationId),
+      where("read", "==", false),
+    );
+    const snapshot = await getDocs(q);
+    if (snapshot.empty) return;
+
+    const batch = writeBatch(db);
+    snapshot.docs.forEach((d) => batch.update(d.ref, { read: true }));
+    await batch.commit();
+  } catch (err) {
+    console.warn("markConversationNotificationsAsRead failed:", err);
+  }
 }
 
 // ─── Delete ───────────────────────────────────────────────────────────────────

@@ -4,21 +4,21 @@
  *
  * Flow for NEW users:
  *   signup → verify → terms → profile-setup
- *   → profile-setup calls welcomeState.set(name, 'signup')
+ *   → profile-setup calls welcomeState.set(name, 'signup', uid)
  *   → _layout.tsx shows modal → navigates home
  *
  * Flow for RETURNING users (login):
- *   login → welcomeState.set(name, 'login')
+ *   login → welcomeState.set(name, 'login', uid)
  *   → _layout.tsx shows modal → navigates home (or terms/profile if incomplete)
  */
 
-type WelcomePayload = { name: string; type: 'login' | 'signup' };
+type WelcomePayload = { name: string; type: 'login' | 'signup'; uid: string };
 
 let _pending: WelcomePayload | null = null;
 
 export const welcomeState = {
-  set(name: string, type: 'login' | 'signup') {
-    _pending = { name, type };
+  set(name: string, type: 'login' | 'signup', uid: string) {
+    _pending = { name, type, uid };
   },
   consume(): WelcomePayload | null {
     const val = _pending;
@@ -27,5 +27,8 @@ export const welcomeState = {
   },
   peek(): WelcomePayload | null {
     return _pending;
+  },
+  clear() {
+    _pending = null;
   },
 };

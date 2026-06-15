@@ -1,6 +1,6 @@
 import { Ionicons } from "@expo/vector-icons";
 import { ResizeMode, Video } from "expo-av";
-import * as FileSystem from "expo-file-system";
+import * as FileSystem from "expo-file-system/legacy";
 import * as MediaLibrary from "expo-media-library";
 import { useRouter } from "expo-router";
 import React, { useEffect, useMemo, useState } from "react";
@@ -60,37 +60,68 @@ const isValidMediaUrl = (url: string | undefined): boolean => {
   return true;
 };
 
-async function saveImageCrossPlatform(url: string) {
+// ── Cross-platform save (FIXED) ───────────────────────────────────────────────
+async function saveImageCrossPlatform(url: string): Promise<void> {
   if (Platform.OS === "web") {
     try {
       const res = await fetch(url);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const blob = await res.blob();
       const objectUrl = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = objectUrl;
       a.download = `barterbayan-${Date.now()}.jpg`;
+      document.body.appendChild(a);
       a.click();
+      document.body.removeChild(a);
       URL.revokeObjectURL(objectUrl);
     } catch {
-      Alert.alert("Error", "Failed to download image.");
+      Alert.alert("Download failed", "Could not download the image. Please try again.");
     }
-  } else {
-    try {
-      const { status } = await MediaLibrary.requestPermissionsAsync();
-      if (status !== "granted") {
-        Alert.alert("Permission denied", "Camera roll permission is required.");
-        return;
-      }
-      const filename = `BarterBayan_${Date.now()}.jpg`;
-      const fileDir =
-        (FileSystem as any).documentDirectory ??
-        (FileSystem as any).cacheDirectory ??
-        "";
-      const result = await FileSystem.downloadAsync(url, fileDir + filename);
-      await MediaLibrary.saveToLibraryAsync(result.uri);
-      Alert.alert("Saved!", "Image saved to your gallery.");
-    } catch {
-      Alert.alert("Error", "Failed to save image.");
+    return;
+  }
+
+  let localUri: string | null = null;
+
+  try {
+    const { status } = await MediaLibrary.requestPermissionsAsync();
+    if (status !== "granted") {
+      Alert.alert(
+        "Permission required",
+        "Please allow access to your photo library in Settings to save images.",
+      );
+      return;
+    }
+
+    // documentDirectory can be null on some Android builds — always fall back to cacheDirectory
+    const baseDir = FileSystem.documentDirectory ?? FileSystem.cacheDirectory;
+    if (!baseDir) {
+      Alert.alert("Error", "Could not find a writable directory on this device.");
+      return;
+    }
+
+    const filename = `BarterBayan_${Date.now()}.jpg`;
+    const tempPath = baseDir + filename;
+
+    const downloadResult = await FileSystem.downloadAsync(url, tempPath);
+
+    if (downloadResult.status !== 200) {
+      throw new Error(`Download returned status ${downloadResult.status}`);
+    }
+
+    localUri = downloadResult.uri;
+    await MediaLibrary.saveToLibraryAsync(localUri);
+    Alert.alert("Saved!", "Image saved to your gallery.");
+  } catch (err: any) {
+    console.error("saveImageCrossPlatform error:", err);
+    Alert.alert(
+      "Download failed",
+      "Could not save the image. Make sure you have enough storage space and try again.",
+    );
+  } finally {
+    // Clean up temp file from cache
+    if (localUri && FileSystem.cacheDirectory && localUri.startsWith(FileSystem.cacheDirectory)) {
+      FileSystem.deleteAsync(localUri, { idempotent: true }).catch(() => {});
     }
   }
 }

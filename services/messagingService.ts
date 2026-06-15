@@ -1,5 +1,6 @@
 import {
   addDoc,
+  arrayRemove,
   arrayUnion,
   collection,
   deleteDoc,
@@ -33,12 +34,14 @@ interface ConversationData {
   lastMessage?: string;
   lastMessageTime?: Timestamp;
   lastMessageSenderId?: string;
+  lastMessageDeleted?: boolean;
   isRead?: boolean;
   readBy?: string[];
   deletedBy?: string[];
   archivedBy?: string[];
   mutedBy?: Record<string, Timestamp | null>;
   deletedAt?: Timestamp;
+  manuallyUnreadBy?: Record<string, boolean>;
 }
 
 interface ReplyRef {
@@ -49,9 +52,9 @@ interface ReplyRef {
 
 interface MessageExtra {
   type?: MessageType;
-  mediaUrl?: string;   // Cloudinary secure_url for photo / video / voice
-  duration?: number;   // seconds – voice & video
-  thumbnailUrl?: string; // optional video poster
+  mediaUrl?: string;
+  duration?: number;
+  thumbnailUrl?: string;
 }
 
 interface MessageData {
@@ -81,11 +84,6 @@ const getConversationId = (userId1: string, userId2: string): string =>
 
 // ─── Cloudinary upload ────────────────────────────────────────────────────────
 
-/**
- * Uploads a local file URI to Cloudinary.
- * resourceType: "image" for photos, "video" for videos AND audio (Cloudinary treats audio as video).
- * Returns the secure_url of the uploaded asset.
- */
 export const uploadToCloudinary = async (
   localUri: string,
   resourceType: "image" | "video" = "image",
@@ -200,7 +198,6 @@ export const sendMessage = async (
 
     const messageDoc = await addDoc(messagesRef, messageData);
 
-    // Last message preview label
     const lastMessagePreview =
       msgType === "photo" ? "📷 Photo"
       : msgType === "video" ? "🎬 Video"
@@ -215,6 +212,7 @@ export const sendMessage = async (
         lastMessage: lastMessagePreview,
         lastMessageTime: Timestamp.now(),
         lastMessageSenderId: senderId,
+        lastMessageDeleted: false,
         deletedBy: [],
         deletedAt: null,
       },
@@ -242,6 +240,7 @@ export const sendMessage = async (
           : lastMessagePreview,
         avatar: senderAvatar,
         otherUserId: senderId,
+        senderId: senderId,
         conversationId,
       });
     }
@@ -330,6 +329,11 @@ export const deleteMessageForMe = async (
 
 // ─── Delete for everyone ──────────────────────────────────────────────────────
 
+/**
+ * FIX BUG 1: Correctly determines the new last message after a deletion.
+ * The previous logic had a broken loop that didn't properly find the newest
+ * non-deleted message. Now walks all recent docs and picks the first visible one.
+ */
 export const deleteMessageForEveryone = async (
   conversationId: string,
   messageId: string,
@@ -338,6 +342,44 @@ export const deleteMessageForEveryone = async (
   try {
     const msgRef = doc(db, "messages", conversationId, "threads", messageId);
     await updateDoc(msgRef, { deletedForEveryone: true, text: null });
+
+    const conversationRef = doc(db, "messages", conversationId);
+    const convSnap = await getDoc(conversationRef);
+    if (!convSnap.exists()) return;
+
+    // Fetch recent messages to find the new last visible one
+    const threadsRef = collection(db, "messages", conversationId, "threads");
+    const latestQ = query(threadsRef, orderBy("timestamp", "desc"), limit(10));
+    const latestSnap = await getDocs(latestQ);
+
+    if (latestSnap.empty) return;
+
+    // Walk newest-first; skip the just-deleted message and any other
+    // deletedForEveryone messages to find the true last visible message.
+    let newLastMessage: string = "Message was deleted";
+    let newLastDeleted: boolean = true;
+
+    for (const d of latestSnap.docs) {
+      const data = d.data();
+      // Skip the message we just deleted or any other fully-deleted message
+      if (d.id === messageId || data.deletedForEveryone === true) {
+        continue;
+      }
+      // Found the new last visible message
+      const msgType = data.msgType ?? "text";
+      newLastMessage =
+        msgType === "photo" ? "📷 Photo"
+        : msgType === "video" ? "🎬 Video"
+        : msgType === "voice" ? "🎙️ Voice message"
+        : data.text ?? "";
+      newLastDeleted = false;
+      break;
+    }
+
+    await updateDoc(conversationRef, {
+      lastMessage: newLastMessage,
+      lastMessageDeleted: newLastDeleted,
+    });
   } catch (error) {
     console.error("Error deleting message for everyone:", error);
     throw error;
@@ -495,27 +537,50 @@ export const markMessagesAsUnread = async (
   }
 };
 
+/**
+ * FIX BUG 2: Mark conversation as read.
+ * Clears the manuallyUnreadBy flag so the row stops rendering as unread.
+ */
 export const markConversationAsRead = async (
   conversationId: string,
   userId: string,
 ): Promise<void> => {
   try {
     const conversationRef = doc(db, "messages", conversationId);
-    await setDoc(conversationRef, { isRead: true, readBy: arrayUnion(userId) }, { merge: true });
+    await setDoc(
+      conversationRef,
+      {
+        isRead: true,
+        readBy: arrayUnion(userId),
+        [`manuallyUnreadBy.${userId}`]: false,
+      },
+      { merge: true },
+    );
   } catch (error) {
     console.error("Error marking conversation as read:", error);
     throw error;
   }
 };
 
+/**
+ * FIX BUG 2: Mark conversation as unread.
+ * Sets a manuallyUnreadBy flag WITHOUT touching individual message read flags,
+ * so no number badge appears — only the visual unread styling.
+ */
 export const markConversationAsUnread = async (
   conversationId: string,
   userId: string,
 ): Promise<void> => {
   try {
-    await markMessagesAsUnread(conversationId, userId);
     const conversationRef = doc(db, "messages", conversationId);
-    await setDoc(conversationRef, { isRead: false, readBy: [] }, { merge: true });
+    await setDoc(
+      conversationRef,
+      {
+        isRead: false,
+        [`manuallyUnreadBy.${userId}`]: true,
+      },
+      { merge: true },
+    );
   } catch (error) {
     console.error("Error marking conversation as unread:", error);
     throw error;
@@ -537,13 +602,21 @@ export const archiveConversation = async (
   }
 };
 
+/**
+ * FIX BUG 4: Use arrayRemove instead of [] so other users' archive state
+ * is not wiped when one user unarchives their copy of a conversation.
+ */
 export const unarchiveConversation = async (
   conversationId: string,
-  _userId: string,
+  userId: string,
 ): Promise<void> => {
   try {
     const conversationRef = doc(db, "messages", conversationId);
-    await setDoc(conversationRef, { archivedBy: [] }, { merge: true });
+    await setDoc(
+      conversationRef,
+      { archivedBy: arrayRemove(userId) },
+      { merge: true },
+    );
   } catch (error) {
     console.error("Error unarchiving conversation:", error);
     throw error;
