@@ -5,24 +5,24 @@ import { useVideoPlayer, VideoView } from "expo-video";
 import { doc, getDoc } from "firebase/firestore";
 import { useEffect, useRef, useState } from "react";
 import {
-    ActivityIndicator,
-    Alert,
-    Animated,
-    Image,
-    Keyboard,
-    KeyboardAvoidingView,
-    Modal,
-    Platform,
-    SafeAreaView,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TextInput,
-    TextStyle,
-    TouchableOpacity,
-    useWindowDimensions,
-    View,
-    ViewStyle,
+  ActivityIndicator,
+  Alert,
+  Animated,
+  Image,
+  Keyboard,
+  KeyboardAvoidingView,
+  Modal,
+  Platform,
+  SafeAreaView,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  TextStyle,
+  TouchableOpacity,
+  useWindowDimensions,
+  View,
+  ViewStyle,
 } from "react-native";
 import { auth, db } from "../firebaseConfig";
 import { addItem } from "../services/itemService";
@@ -67,11 +67,12 @@ async function checkProfileComplete(uid: string): Promise<boolean> {
   const snap = await getDoc(doc(db, "users", uid));
   if (!snap.exists()) return false;
   const data = snap.data();
-  // Consider complete when name + avatar + phone are set
   return !!(
-    data.name?.trim() &&
-    (data.photoURL || data.avatarUrl || data.avatar) &&
-    data.phoneNumber
+    data.firstName?.trim() &&
+    data.lastName?.trim() &&
+    data.phone &&
+    data.address?.houseNumber?.trim() &&
+    data.address?.streetName?.trim()
   );
 }
 
@@ -442,7 +443,7 @@ export default function AddItemScreen() {
             <View style={{ flex: 1 }}>
               <Text style={styles.profileBannerTitle}>Complete Your Profile First</Text>
               <Text style={styles.profileBannerSub}>
-                You need a name, photo, and verified phone number before listing items.
+                You need a name and verified phone number before listing items.
               </Text>
             </View>
           </View>
@@ -450,9 +451,9 @@ export default function AddItemScreen() {
           {/* checklist */}
           <View style={styles.profileChecklist}>
             {[
-              { icon: "person-outline", label: "Display name" },
-              { icon: "camera-outline", label: "Profile photo" },
-              { icon: "call-outline", label: "Verified phone number" },
+              { icon: "person-outline", label: "First & last name" },
+              { icon: "call-outline", label: "Phone number" },
+              { icon: "home-outline", label: "Home address" },
             ].map((item) => (
               <View key={item.label} style={styles.profileCheckItem}>
                 <Ionicons name={item.icon as any} size={13} color="#888" />
@@ -463,7 +464,7 @@ export default function AddItemScreen() {
 
           <TouchableOpacity
             style={styles.profileBannerBtn}
-            onPress={() => router.push("/(profile)/setup" as any)}
+            onPress={() => router.push("edit-profile" as any)}
             activeOpacity={0.82}
           >
             <Ionicons name="arrow-forward-circle" size={16} color="#fff" />
